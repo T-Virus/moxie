@@ -104,8 +104,8 @@ AI 写小说已经很火，但真正能**合规、可控、能上线**的工具�
   <sub>▲ 点击缩略图或下方链接播放横版演示（知乎 / B 站）</sub>
 </p>
 
-- 📺 **横版演示**（知乎 / B 站）：[演示视频-横版-知乎B站.mp4](docs/演示视频-横版-知乎B站.mp4)
-- 📱 **竖版演示**（抖音 / 小红书）：[演示视频-竖版-抖音小红书.mp4](docs/演示视频-竖版-抖音小红书.mp4)
+- 📺 **横版演示**（知乎 / B 站）：[在知乎观看](https://www.zhihu.com/pin/2103874897516684574?page=video_pin&scene=share) · [仓库内 MP4](docs/演示视频-横版-知乎B站.mp4)
+- 📱 **竖版演示**（抖音 / 小红书）：[在小红书观看](https://www.xiaohongshu.com/explore/6af422ad000000002b0031ac?xsec_token=ABKx0HieHic1GwC9AEyfyuxw795U86M5245Qfru9uWLpU=&xsec_source=pc_user) · [仓库内 MP4](docs/演示视频-竖版-抖音小红书.mp4)
 
 ---
 
