@@ -5,6 +5,8 @@
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Deploy](https://img.shields.io/badge/deploy-Docker%20Compose-success.svg)](INSTALL.md)
+[![GitHub](https://img.shields.io/badge/GitHub-T--Virus/moxie-blue?logo=github)](https://github.com/T-Virus/moxie)
+[![Afdian](https://img.shields.io/badge/爱发电-aimoxie-orange)](https://afdian.com/a/aimoxie)
 [![Sponsor](https://img.shields.io/badge/❤-赞助%20Sponsor-orange.svg)](#赞助我)
 
 ---
@@ -115,10 +117,16 @@ bash scripts/package.sh
 
 | 渠道 | 链接 / 说明 |
 |------|-------------|
-| ❤️ GitHub Sponsors | 待补充（创建仓库后开启：https://github.com/sponsors/<你的用户名>） |
-| 🥤 爱发电 (Afdian) | 待补充：https://afdian.com/a/<你的ID> |
-| 💰 微信 / 支付宝赞赏 | 见仓库 `docs/sponsor.png`（赞赏码，欢迎 PR 补充） |
+| ⭐ GitHub 仓库 | https://github.com/T-Virus/moxie （Star / Watch / 提 Issue 都是对开源的支持） |
+| 🥤 爱发电 (Afdian) | https://afdian.com/a/aimoxie |
+| 💰 微信赞赏 | 扫码下方收款码（支付宝赞赏码欢迎 PR 补充） |
 | ☕ 一次性捐赠 | 任意金额都欢迎，留言"墨写"即可 |
+
+<p align="center">
+  <img src="docs/wechat-pay.png" alt="微信收款码 · 赞赏墨写" width="240" />
+  <br/>
+  <sub>微信收款码 · 赞赏「墨写 Moxie」</sub>
+</p>
 
 ### 赞助者能得到的
 
