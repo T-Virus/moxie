@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>墨写 · 离线版免费送｜本地 AI 小说工作台</title>
+<meta name="description" content="墨写离线版：Windows 客户端 + 安卓安装包免费送。拆书、大纲、角色卡、设定图谱、单章体检，数据只留本机。" />
+<style>
+:root{
+  --bg:#0B1626; --bg2:#132E44; --bg3:#1B3E56;
+  --mint:#3AD6BA; --amber:#FFBA58; --blue:#568CFA;
+  --paper:#F8F7F3; --white:#fff; --ink:#101E2E;
+  --muted:#647689; --line:#E4EAEE; --soft:#AFC0CC;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;line-height:1.7}
+a{color:inherit;text-decoration:none}
+img{display:block;max-width:100%}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+
+/* ---------- hero ---------- */
+.hero{background:
+   radial-gradient(900px 520px at 82% 8%,rgba(58,214,186,.16),transparent 70%),
+   radial-gradient(700px 500px at 8% 92%,rgba(86,140,250,.14),transparent 70%),
+   linear-gradient(160deg,var(--bg),var(--bg2) 70%,var(--bg3));
+  color:#fff;padding:26px 0 0;overflow:hidden}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:19px;letter-spacing:.5px}
+.mark{width:38px;height:38px;border-radius:11px;background:var(--mint);color:#08251F;
+  display:grid;place-items:center;font-size:20px;font-weight:800;box-shadow:0 6px 22px rgba(58,214,186,.3)}
+.nav .links{display:flex;gap:26px;font-size:14px;color:var(--soft);flex-wrap:wrap}
+.nav .links a:hover{color:var(--mint)}
+.hero-body{display:grid;grid-template-columns:1fr 1.05fr;gap:52px;align-items:center;padding:64px 0 72px}
+.tag{display:inline-flex;align-items:center;gap:8px;background:rgba(58,214,186,.13);
+  color:var(--mint);border:1px solid rgba(58,214,186,.3);border-radius:99px;
+  padding:7px 16px;font-size:13px;font-weight:700;letter-spacing:.5px}
+h1{font-size:clamp(34px,4.4vw,56px);line-height:1.2;margin:24px 0 18px;letter-spacing:-1px}
+h1 em{font-style:normal;color:var(--mint)}
+.lead{font-size:17px;color:#C9D8E2;max-width:520px;margin:0 0 30px}
+.btns{display:flex;gap:14px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  padding:14px 26px;border-radius:12px;font-weight:700;font-size:15px;
+  transition:transform .18s ease,box-shadow .18s ease}
+.btn:hover{transform:translateY(-2px)}
+.btn-p{background:var(--amber);color:#241703;box-shadow:0 10px 26px rgba(255,186,88,.24)}
+.btn-g{background:rgba(255,255,255,.09);color:#fff;border:1px solid rgba(255,255,255,.22)}
+.facts{display:flex;gap:22px;margin-top:28px;flex-wrap:wrap;font-size:13.5px;color:#9FB6C6}
+.facts span{display:flex;align-items:center;gap:7px}
+.facts b{color:var(--mint);font-weight:700}
+.shot-main{border-radius:16px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.46);
+  border:1px solid rgba(255,255,255,.14);background:#fff;transform:rotate(-1.2deg)}
+.shot-main img{width:100%}
+.shot-cap{text-align:center;color:#89A2B4;font-size:12.5px;margin-top:18px}
+
+/* ---------- notice ---------- */
+.notice{margin:-34px auto 0;position:relative;z-index:2;background:#fff;
+  border:1px solid var(--line);border-left:5px solid var(--amber);
+  border-radius:16px;padding:24px 28px;box-shadow:0 16px 44px rgba(16,30,46,.09)}
+.notice h3{margin:0 0 8px;font-size:17px;display:flex;align-items:center;gap:9px}
+.notice p{margin:0;color:#46586A;font-size:14.5px}
+.notice strong{color:var(--ink)}
+
+/* ---------- sections ---------- */
+section{padding:82px 0}
+.eyebrow{color:var(--mint);font-size:13px;font-weight:800;letter-spacing:2px;text-transform:uppercase}
+h2{font-size:clamp(27px,3.2vw,38px);line-height:1.3;margin:12px 0 14px;letter-spacing:-.5px}
+.sec-lead{color:var(--muted);font-size:16px;max-width:680px;margin:0 0 40px}
+.dark{background:linear-gradient(160deg,var(--bg),var(--bg2));color:#fff}
+.dark .sec-lead{color:#A9BECC}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:52px}
+.stat{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;padding:22px 20px}
+.stat .n{font-size:30px;font-weight:800;color:var(--mint);line-height:1.1}
+.stat .l{font-size:13px;color:#A9BECC;margin-top:8px}
+
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  border-radius:16px;padding:26px 24px;transition:transform .2s,border-color .2s}
+.card:hover{transform:translateY(-4px);border-color:rgba(58,214,186,.45)}
+.card .ic{width:42px;height:42px;border-radius:12px;background:rgba(58,214,186,.14);
+  color:var(--mint);display:grid;place-items:center;font-size:20px;margin-bottom:16px}
+.card h3{margin:0 0 9px;font-size:18px}
+.card p{margin:0;color:#A9BECC;font-size:14.2px}
+
+/* ---------- gallery ---------- */
+.tabs{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:24px}
+.tab{border:1px solid var(--line);background:#fff;color:#4A5D6E;border-radius:99px;
+  padding:9px 19px;font-size:14px;font-weight:600;cursor:pointer;transition:.18s}
+.tab:hover{border-color:var(--mint)}
+.tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.gallery{background:#fff;border:1px solid var(--line);border-radius:18px;overflow:hidden;
+  box-shadow:0 18px 50px rgba(16,30,46,.08)}
+.gallery .frame{background:#EDF1F3;padding:22px;min-height:340px;display:grid;place-items:center}
+.gallery .frame img{border-radius:10px;box-shadow:0 10px 34px rgba(16,30,46,.16);max-height:560px;object-fit:contain}
+.gallery .cap{padding:16px 24px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+.gallery .cap b{color:var(--ink)}
+.phone .frame img{max-height:620px}
+
+/* ---------- video ---------- */
+.video-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.vbox{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.vbox video{width:100%;display:block;background:#0B1626}
+.vbox .t{padding:16px 20px;font-size:14.5px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.vbox .t small{font-weight:400;color:var(--muted)}
+
+/* ---------- compare / steps ---------- */
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:16px;overflow:hidden;
+  box-shadow:0 14px 40px rgba(16,30,46,.07);font-size:15px}
+th,td{padding:16px 20px;text-align:left;border-bottom:1px solid var(--line)}
+th{background:#EEF3F5;font-size:14px;color:#42566A}
+tr:last-child td{border-bottom:0}
+td:first-child{font-weight:700;color:#33485C;width:26%}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:s}
+.step{background:#fff;border:1px solid var(--line);border-radius:16px;padding:26px 24px;position:relative}
+.step:before{counter-increment:s;content:counter(s);position:absolute;right:22px;top:18px;
+  font-size:40px;font-weight:800;color:#E9EFF2}
+.step h3{margin:0 0 10px;font-size:17px}
+.step p{margin:0;color:var(--muted);font-size:14.2px}
+code{background:#EEF3F5;padding:2px 7px;border-radius:5px;font-size:13px;color:#2A4B63}
+
+/* ---------- faq ---------- */
+.faq{display:grid;gap:12px}
+details{background:#fff;border:1px solid var(--line);border-radius:13px;padding:18px 22px}
+details[open]{border-color:rgba(58,214,186,.55)}
+summary{cursor:pointer;font-weight:700;font-size:15.5px;list-style:none;display:flex;justify-content:space-between;gap:16px}
+summary::-webkit-details-marker{display:none}
+summary:after{content:"+";color:var(--mint);font-size:21px;line-height:1}
+details[open] summary:after{content:"−"}
+details p{margin:14px 0 0;color:#4A5D6E;font-size:14.5px}
+
+/* ---------- get ---------- */
+.get{background:linear-gradient(150deg,#0E2A3B,#123E48);color:#fff;text-align:center}
+.get h2{color:#fff}
+.get .lead2{color:#B8CDD8;max-width:620px;margin:0 auto 30px}
+.getbox{background:rgba(255,255,255,.07);border:1px dashed rgba(58,214,186,.6);
+  border-radius:16px;padding:30px;margin:0 auto;max-width:720px;text-align:left}
+.getbox .ph{background:rgba(255,186,88,.14);border:1px solid rgba(255,186,88,.35);
+  color:var(--amber);border-radius:10px;padding:12px 16px;font-size:14px;margin-bottom:16px}
+.getbox ul{margin:0;padding-left:20px;color:#C2D5DF;font-size:14.5px}
+.getbox li{margin:6px 0}
+.disclaimer{max-width:820px;margin:38px auto 0;color:#8FA9B8;font-size:12.8px;line-height:1.9}
+.disclaimer b{color:#C2D5DF}
+footer{background:#08131F;color:#7D94A4;padding:28px 0;font-size:13px;text-align:center}
+
+@media(max-width:900px){
+  .hero-body{grid-template-columns:1fr;gap:38px;padding:44px 0 58px}
+  .shot-main{transform:none}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .cards,.steps{grid-template-columns:1fr}
+  .video-grid{grid-template-columns:1fr}
+  section{padding:60px 0}
+  .nav .links{display:none}
+  th,td{padding:13px 14px;font-size:14px}
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="nav">
+      <div class="brand"><span class="mark">墨</span><span>墨写 · AI 小说工作台</span></div>
+      <nav class="links">
+        <a href="#features">能做什么</a>
+        <a href="#gallery">界面实拍</a>
+        <a href="#video">演示视频</a>
+        <a href="#install">安装</a>
+        <a href="#faq">常见问题</a>
+        <a href="#get" style="color:var(--amber);font-weight:700">免费领取</a>
+      </nav>
+    </div>
+
+    <div class="hero-body">
+      <div>
+        <span class="tag">离线版 · 免费送 · 无订阅</span>
+        <h1>写小说最费时间的，<br><em>不是写，是拆</em></h1>
+        <p class="lead">把拆书、理设定、改稿自检做成一条本地流水线。<br>Windows 客户端 + 安卓安装包，两份都免费送。</p>
+        <div class="btns">
+          <a class="btn btn-p" href="#get">领取 Windows 客户端</a>
+          <a class="btn btn-g" href="#get">领取安卓安装包</a>
+        </div>
+        <div class="facts">
+          <span><b>✓</b> 不用注册</span>
+          <span><b>✓</b> 书稿不上传</span>
+          <span><b>✓</b> 没有订阅</span>
+          <span><b>✓</b> 产物可导出</span>
+        </div>
+      </div>
+      <div>
+        <div class="shot-main"><img src="assets/pc_storymap.png" alt="墨写设定图谱真实界面" /></div>
+        <div class="shot-cap">↑ 离线版真实界面：设定图谱（本机示例数据）</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="notice">
+    <h3>⚠️ 先把话说清楚，免得你装完觉得被坑</h3>
+    <p><strong>「离线」指的是程序和数据都在本机</strong>：本地起服务、界面在本机、书稿存在 <code>data/&lt;书名&gt;/</code> 里，不上传服务器、不需要账号。<strong>AI 拆解 / 生成 / 审查仍需联网调用你自己的模型 Key</strong>（DeepSeek 等，按量自付）；不填 Key，浏览、编辑、查看已有数据、导出文件都照常可用。请只用于自己写的或已获授权的稿件 —— 它是整理与编辑辅助工具，<strong>不承诺过稿、签约或通过任何平台的 AI 检测</strong>。</p>
+  </div>
+</div>
+
+<section class="dark" id="features">
+  <div class="wrap">
+    <div class="eyebrow">WHAT IT DOES</div>
+    <h2>不是「一键生成小说」，是把中间层交给你</h2>
+    <p class="sec-lead">生成结果看不见、改不了，是长篇写作最难受的地方。墨写把每一步都拆成可检查、可编辑、可导出的结构化数据。</p>
+
+    <div class="stats">
+      <div class="stat"><div class="n">395 章</div><div class="l">示例作品拆出的章节骨架</div></div>
+      <div class="stat"><div class="n">177 张</div><div class="l">字段级可编辑角色卡</div></div>
+      <div class="stat"><div class="n">1882 条</div><div class="l">自动连出的人物关系</div></div>
+      <div class="stat"><div class="n">14 个</div><div class="l">可导出的 JSON / MD / HTML 文件</div></div>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="ic">◫</div><h3>拆得开</h3><p>导入 txt / md，拆成章节骨架、作品大纲、角色卡、势力表、道具功法，每一层都能改。</p></div>
+      <div class="card"><div class="ic">✦</div><h3>看得见</h3><p>设定图谱把人物关系、剧情脉络、世界观、关键道具连成图，长篇最容易崩的关系一屏可查。</p></div>
+      <div class="card"><div class="ic">◎</div><h3>改得准</h3><p>单章体检列出 AI 味、主题偏离、设定一致性、伏笔回收、错别字等项，问题定位到章到段。</p></div>
+      <div class="card"><div class="ic">⇩</div><h3>拿得走</h3><p>产物导出 JSON / Markdown / HTML，文件全是你自己的，不锁在平台里、不怕停服。</p></div>
+      <div class="card"><div class="ic">▣</div><h3>留得住</h3><p>客户端与安卓端都在本机跑，不上传书稿、不用注册账号、不用买订阅，弱网也能翻稿。</p></div>
+      <div class="card"><div class="ic">⚙</div><h3>成本自己控</h3><p>模型档案与工序绑定自己配，Key 只存本机；用量、耗时、成本按模型归集，看得明白。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="gallery">
+  <div class="wrap">
+    <div class="eyebrow" style="color:#12897A">REAL SCREENS</div>
+    <h2>界面实拍，不是效果图</h2>
+    <p class="sec-lead">下面每一张都是离线版本体运行时的真实截图（本机示例作品），点标签切换查看。</p>
+
+    <div class="tabs" id="tabs"></div>
+    <div class="gallery" id="galleryBox">
+      <div class="frame"><img id="gimg" src="assets/pc_overview.png" alt="墨写界面截图" /></div>
+      <div class="cap" id="gcap"></div>
+    </div>
+  </div>
+</section>
+
+<section class="dark" id="video">
+  <div class="wrap">
+    <div class="eyebrow">31-SECOND DEMO</div>
+    <h2>31 秒看完整条流程</h2>
+    <p class="sec-lead">两版演示视频都由真实界面截图逐帧渲染，字已烧进画面，无音轨，方便你自行配音或套平台 BGM。</p>
+    <div class="video-grid">
+      <div class="vbox">
+        <video src="演示视频-竖版-抖音小红书.mp4" controls playsinline preload="metadata"></video>
+        <div class="t">竖版 1080×1920 <small>抖音 / 小红书 / 视频号</small></div>
+      </div>
+      <div class="vbox">
+        <video src="演示视频-横版-知乎B站.mp4" controls playsinline preload="metadata"></video>
+        <div class="t">横版 1920×1080 <small>知乎 / B 站 / 视频号</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="ends">
+  <div class="wrap">
+    <div class="eyebrow" style="color:#12897A">TWO BUILDS</div>
+    <h2>一个工作台，两个端</h2>
+    <p class="sec-lead">同一套作品数据组织方式，电脑上整理，手机上接着翻。</p>
+    <table>
+      <tr><th>项目</th><th>Windows 离线客户端</th><th>安卓端安装包</th></tr>
+      <tr><td>文件</td><td>单文件 exe，约 70 MB</td><td>墨写-手机端-v2.8.0.apk，51 MB</td></tr>
+      <tr><td>运行方式</td><td>双击启动，本机服务 + 原生窗口</td><td>内置运行环境，装完本机自跑服务</td></tr>
+      <tr><td>要不要连电脑 / 装环境</td><td>不用装 Python，开箱即用</td><td>不用连电脑、不用额外装环境</td></tr>
+      <tr><td>主要功能</td><td>拆解、大纲、角色、势力、图谱、体检、改编、导出、成本统计</td><td>大纲、章节概括、角色卡、势力表、正文、全书体检、设置</td></tr>
+      <tr><td>数据位置</td><td><code>data/&lt;书名&gt;/</code> 本地 JSON</td><td>手机本地存储</td></tr>
+      <tr><td>暂不支持</td><td colspan="2">Mac / iOS / Linux、云同步、多人协作、账号体系</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="install" style="background:#EFF3F5">
+  <div class="wrap">
+    <div class="eyebrow" style="color:#12897A">GET STARTED</div>
+    <h2>三步用起来</h2>
+    <p class="sec-lead">没有账号、没有激活码，装完就能翻已有数据。</p>
+    <div class="steps">
+      <div class="step"><h3>Windows：双击 exe</h3><p>建议放在一个固定文件夹里，程序会在同目录生成 <code>data/</code>、<code>output/</code> 等。首次启动若被安全软件拦截，选择「允许」即可（本地服务只监听 127.0.0.1）。</p></div>
+      <div class="step"><h3>安卓：安装 APK</h3><p>系统提示「未知来源应用」时按常规放行。首次启动会初始化本地运行环境，稍等片刻进入界面，全程不需要连电脑。</p></div>
+      <div class="step"><h3>要用 AI 就填自己的 Key</h3><p>设置 → 模型档案，填端点、模型名和自己的 API Key，再到「工序绑定」指派拆解 / 生成 / 审查各用哪个模型。Key 只存本机，不上传。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="eyebrow" style="color:#12897A">FAQ</div>
+    <h2>你大概率会问的几件事</h2>
+    <p class="sec-lead">先翻这里，能省掉来回几轮沟通。</p>
+    <div class="faq">
+      <details open><summary>真的免费吗？有没有内购或订阅？</summary><p>安装包免费，没有订阅、没有内购、没有账号。唯一会产生费用的是你自己调用的模型 API —— 那笔钱按用量直接付给模型厂商，与软件无关。</p></details>
+      <details><summary>「离线」是不是完全不用联网？</summary><p>不是。程序和数据都在本机，不联网也能浏览、编辑、查看已有拆解结果、导出文件；只有 AI 拆解 / 生成 / 审查这几道工序需要联网调用模型。所以准确说法是「本地运行、数据不出本机」，而不是「完全断网可用」。</p></details>
+      <details><summary>我的书稿会不会被上传？</summary><p>不会。数据写在本地 <code>data/&lt;书名&gt;/</code> 下的 JSON 文件里，服务默认只监听 127.0.0.1，API Key 也只存在本机浏览器 / 手机本地，不写服务端、不进任何文件。</p></details>
+      <details><summary>模型 Key 怎么弄？</summary><p>在设置里新建一条模型档案，填服务商端点（如 DeepSeek）、模型名和自己的 Key；需要的话再按工序分别绑定不同模型。不填 Key 也能用本地功能。</p></details>
+      <details><summary>能保证过稿、签约，或绕过平台的 AI 检测吗？</summary><p>不能，也不做这类承诺。它是整理与自检工具，只帮你提前看到结构上的问题；产出请务必人工复核与改写。各平台对 AI 内容有自己的规则，投稿前请以平台当期要求为准。</p></details>
+      <details><summary>可以用别人的作品来拆吗？</summary><p>请只用于自己写的、公版的或已获授权的稿件。「换名 + 逐章改写」在法律上可能被认定为改编 / 实质性相似，风险由使用者自行承担。本工具定位是拆书学习与自有稿件的编辑辅助。</p></details>
+      <details><summary>Mac / 苹果手机能用吗？</summary><p>暂时不行，目前只有 Windows 客户端和安卓安装包（鸿蒙 4.x 可运行）。云同步、多人协作、账号体系也还没有。</p></details>
+      <details><summary>能商用？能拿到源码吗？</summary><p>免费发放的是可使用的安装包，默认按「个人非商业使用」；不含源码、不含商业授权，也不承诺版本更新与售后 SLA。如需商用授权请单独联系。</p></details>
+      <details><summary>手机端要连着电脑才能用吗？</summary><p>不用。APK 里已经带上了运行环境，安装后由手机自己在本机起服务，界面通过本机 WebView 加载，断网也能翻已有的稿子。</p></details>
+    </div>
+  </div>
+</section>
+
+<section class="get" id="get">
+  <div class="wrap">
+    <div class="eyebrow">FREE DOWNLOAD</div>
+    <h2>两份安装包，免费送</h2>
+    <p class="lead2">Windows 单文件客户端 + 安卓安装包 + 这份安装说明页，拿走就能用。没有套路，也不收集你的信息。</p>
+    <div class="getbox">
+      <div class="ph">✎ 发布前请替换这里：把下面三条改成你在各平台实际使用的「平台内领取路径」，不要在图片、口播或描述里放站外链接与联系方式。</div>
+      <ul>
+        <li><b>小红书</b>：[主页简介 / 群聊 / 置顶评论 —— 按平台当期规则填写]</li>
+        <li><b>抖音 / 视频号</b>：[粉丝群 / 置顶评论 —— 按平台当期规则填写]</li>
+        <li><b>闲鱼</b>：[站内发货 —— 按平台当期规则填写]</li>
+        <li><b>知乎</b>：[文末说明 / 私信 —— 按平台当期规则填写]</li>
+      </ul>
+    </div>
+    <p class="disclaimer">
+      <b>授权与免责：</b>免费提供的是软件安装包，供个人非商业使用，不含源码与商业授权，不承诺版本更新、技术支持与售后 SLA。
+      AI 相关工序需联网并自备模型 API Key，费用按模型厂商实际用量结算。
+      请仅将本工具用于自有、公版或已获授权的作品，用于拆书学习、设定整理与稿件编辑辅助；
+      不得用于侵犯他人著作权、规避平台内容治理规则或批量生产低质内容的用途。
+      本工具不保证过稿、签约、收益或通过任何第三方检测，产出内容请自行人工复核，并遵守投稿平台的当期规则与 AIGC 标注要求。
+      文中数字均为本机示例作品的演示数据，不构成产品能力或效果承诺。
+    </p>
+  </div>
+</section>
+
+<footer>墨写 · AI 小说工作台 ｜ 离线版推广页 ｜ 界面截图来自离线版本体真实运行画面</footer>
+
+<script>
+const SHOTS = [
+  {t:"作品总览", img:"assets/pc_overview.png", cap:"<b>作品总览</b> — 封面、简介、内容模块与章节目录，右侧还能直接进入单章审查。", phone:false},
+  {t:"角色卡", img:"assets/pc_characters.png", cap:"<b>角色卡</b> — 共 177 张，身份、阵营、立场、人设倾向、关键关系全部字段级可编辑。", phone:false},
+  {t:"势力表", img:"assets/pc_factions.png", cap:"<b>势力表</b> — 共 103 个，势力大类、立场、关联势力、关系强度与简介。", phone:false},
+  {t:"设定图谱", img:"assets/pc_storymap.png", cap:"<b>设定图谱</b> — 人物关系 1882 条 / 剧情脉络 94 / 世界观设定 86 / 关键道具 35，同心圆布局可重排。", phone:false},
+  {t:"章节与体检", img:"assets/pc_chapters.png", cap:"<b>章节与正文</b> — 左侧目录点选，中间直接读写正文，右侧是本章概括与审查结果。", phone:false},
+  {t:"产物导出", img:"assets/pc_outputs.png", cap:"<b>产出文件</b> — 章节数据、全书设定、设定图谱、审查报告，JSON / MD / HTML 都能预览和拿走。", phone:false},
+  {t:"设置 / Key", img:"assets/mb_settings.png", cap:"<b>手机端设置</b> — 明确写着「API Key 只保存在这台手机，不上载服务端」；模型档案与工序绑定自己配。", phone:true},
+  {t:"安卓端章节", img:"assets/mb_chapters.png", cap:"<b>安卓端章节概括</b> — 395 章逐章列出成稿状态、字数、出场角色与节奏标签。", phone:true},
+  {t:"安卓端大纲", img:"assets/mb_outline.png", cap:"<b>安卓端大纲</b> — 手机上照样能翻结构、改设定。", phone:true},
+];
+const tabs = document.getElementById('tabs');
+const gimg = document.getElementById('gimg');
+const gcap = document.getElementById('gcap');
+const gbox = document.getElementById('galleryBox');
+function show(i){
+  [...tabs.children].forEach((b,j)=>b.classList.toggle('on', j===i));
+  gimg.src = SHOTS[i].img;
+  gcap.innerHTML = SHOTS[i].cap;
+  gbox.classList.toggle('phone', SHOTS[i].phone);
+}
+SHOTS.forEach((s,i)=>{
+  const b=document.createElement('button');
+  b.className='tab'; b.textContent=s.t;
+  b.onclick=()=>show(i); tabs.appendChild(b);
+});
+show(0);
+</script>
+</body>
+</html>

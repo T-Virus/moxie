@@ -76,6 +76,39 @@ AI 写小说已经很火，但真正能**合规、可控、能上线**的工具�
 
 ---
 
+## 界面预览
+
+### 桌面端（Windows / Web）
+
+| 作品总览 | 大纲 | 角色卡 |
+| :---: | :---: | :---: |
+| ![作品总览](docs/assets/pc_overview.png) | ![大纲](docs/assets/pc_outline.png) | ![角色卡](docs/assets/pc_characters.png) |
+| 设定图谱 | 单章体检 | 导出文件 |
+| ![设定图谱](docs/assets/pc_storymap.png) | ![单章体检](docs/assets/pc_review.png) | ![导出文件](docs/assets/pc_outputs.png) |
+
+### 移动端（Android）
+
+| 总览 | 章节 | 角色 | 大纲 |
+| :---: | :---: | :---: | :---: |
+| ![总览](docs/assets/mb_overview.png) | ![章节](docs/assets/mb_chapters.png) | ![角色](docs/assets/mb_characters.png) | ![大纲](docs/assets/mb_outline.png) |
+
+> 以上截图均来自离线版真实运行界面（示例数据）。
+
+## 演示视频
+
+<p align="center">
+  <a href="docs/演示视频-横版-知乎B站.mp4">
+    <img src="docs/assets/640_360.jpg" alt="横版演示视频（知乎 / B 站）" width="480" />
+  </a>
+  <br/>
+  <sub>▲ 点击缩略图或下方链接播放横版演示（知乎 / B 站）</sub>
+</p>
+
+- 📺 **横版演示**（知乎 / B 站）：[演示视频-横版-知乎B站.mp4](docs/演示视频-横版-知乎B站.mp4)
+- 📱 **竖版演示**（抖音 / 小红书）：[演示视频-竖版-抖音小红书.mp4](docs/演示视频-竖版-抖音小红书.mp4)
+
+---
+
 ## 快速开始
 
 - **新手 / 服务器部署（含安全与 HTTPS）**：见 [INSTALL.md](INSTALL.md)
