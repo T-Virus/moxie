@@ -1,0 +1,76 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+def props = new Properties()
+def localProps = rootProject.file('local.properties')
+if (localProps.exists()) {
+    localProps.withInputStream { props.load(it) }
+}
+
+android {
+    namespace 'com.mobit.writer'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.mobit.writer'
+        minSdk 24
+        targetSdk 34
+        versionCode 12
+        versionName '2.8.0'
+        // 现代手机（含鸿蒙 4.x）都是 arm64；x86_64 用于模拟器
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    signingConfigs {
+        release {
+            storeFile rootProject.file('release.keystore')
+            storePassword 'mobit2026'
+            keyAlias 'mobit'
+            keyPassword 'mobit2026'
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            // 代码压缩 + 混淆 + 资源裁剪：抬高反编译可读性门槛
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
+        }
+        debug {
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = '3.12'
+        if (props.getProperty('buildPython')) {
+            buildPython props.getProperty('buildPython')
+        }
+        pip {
+            // 封面绘制用；拆解 / 正文 / 审查只用标准库
+            install 'pillow==11.0.0'
+            // 导出包加解密（AES-256-GCM）：Chaquopy 提供 cp312 android wheel
+            install 'pycryptodome==3.21.0'
+        }
+    }
+}
+

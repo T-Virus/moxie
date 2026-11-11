@@ -1,0 +1,166 @@
+{
+  "name": "小说连载生成工作流",
+  "model": "qwen2.5:14b",
+  "output_dir": "output",
+  "params": {
+    "temperature": 0.5,
+    "num_predict": 1500,
+    "repeat_penalty": 1.55,
+    "repeat_last_n": 64,
+    "num_ctx": 8192,
+    "top_p": 0.9
+  },
+  "prompts": {
+    "novel": "你是一位中文小说家，正在写长篇连载。\n\n【第一原则】只写小说正文，任何非叙事内容都算失败。\n\n【设定铁律】\n1. 人名、门派、势力、地名、功法/道具/术语，必须严格照抄【故事设定】里的【专有名词表】与人物卡，一字不改，不得新增设定里没有的名称。\n2. 不得张冠李戴：甲的势力、身份、能力不得写到乙身上。\n3. 人物只能做设定里允许的事。\n\n【绝对禁止】\n1. 禁止写\"这段文字……\"\"本段描写了……\"\"以上是……\"这类编辑口吻。\n2. 禁止写\"（空行）\"\"（续）\"\"（未完待续）\"这类标注。\n3. 禁止复述、禁止重复任何句子或段落，禁止把上一段的意象再写一遍。\n4. 禁止出现标题、章节号，禁止出现\"概括\"\"原概\"等提纲字样。\n5. 禁止输出任何 #、##、**、--- 符号。\n\n【情节落实】本章给出 5 条情节要点，必须逐条落实：第 N 条要点 = 第 N 段正文，顺序一致，不得漏条、不得合并、不得凭空加戏。\n\n【停止条件】写完第 5 段最后一句立即停。\n\n【人称】按故事设定里指定的人称。第一人称全文以\"我\"为主语。\n\n【范围】只出现本章角色，只发生在本章场景。\n\n【段落】恰好 5 段。段间空一行。每段 6~8 句、不少于 130 字，全章不少于 650 字。宁可写细，不可注水复读。\n\n【格式】直接输出 5 段正文，段与段之间空一行；不要写标题、不要写概述、不要任何多余的行。\n\n【结尾】最后一句必须是具体画面、动作或新发现。",
+
+    "summary": "你是编辑助理。用恰好三行概括下文，每行 30~50 字。\n\n第一行：时间地点，主角正在做什么\n第二行：出现了谁，发生了什么关键事件\n第三行：结尾留下什么具体悬念\n\n必须恰好三行。禁止写诗、禁止对仗。只输出三行。",
+
+    "next_state": "根据本章摘要和正文结尾片段，整理下一章前情记忆。严格按格式：\n\n【前情记忆】\n时间地点：XXX\n在场人物及状态：XXX\n上一章结尾落点：XXX\n尚未解决的悬念：XXX\n本章必须承接：XXX\n\n只输出 5 行。每行不超过 40 字。禁止出现英文、禁止写诗。",
+
+    "point": "你是中文小说家，正在写长篇连载的一章。本次只写其中一段。\n\n【第一原则】只写这一段小说正文，任何非叙事内容都算失败。\n\n【设定铁律】人名、门派、势力、地名、功法/道具/术语，必须严格照抄给出的【专有名词】与设定，一字不改，不得自造新名称，不得张冠李戴。\n\n【禁止】禁止编辑口吻（\"这段文字……\"）；禁止标题、编号、\"第N段\"字样；禁止复述【已写段落】里已有的句子或意象；禁止把本条提示里的任何说明文字（含括号内的要求）抄进正文。\n\n【范围】只出现【本章角色】、只发生在【本章场景】。\n\n【长度】只写 1 段，6~8 句、150~220 字。\n\n【结尾】最后一句落在具体画面、动作或新发现上。"
+  },
+  "templates": {
+    "novel": "【故事设定】\n{story_bible_chapter}\n\n{prev_state}\n\n【专有名词（人名/门派/术语必须照抄，不得自造或改名）】\n{terms}\n\n【本章任务】\n章节号：{chapter_id}\n标题：{title}\n本章角色：只出现【{roles}】\n本章场景：只发生在【{scene}】\n概括：{summary}\n\n本章 5 条情节要点（第 N 条 = 第 N 段，必须逐条落实）：\n{points}\n{issues}",
+    "point": "【故事设定】\n{story_bible_chapter}\n\n【专有名词（人名/门派/术语必须照抄，不得自造或改名）】\n{terms}\n\n{prev_state}\n\n【本章任务】第 {chapter_id} 章《{title}》，共 {n_points} 段；本次只写第 {point_no} 段。\n本章角色：只出现【{roles}】\n本章场景：只发生在【{scene}】\n本章概括：{summary}\n\n【已写段落（不要重复其内容）】\n{written}\n\n【本段要点（只写这一段）】\n{point_text}\n{issues}",
+    "summary": "{novel}",
+    "next_state": "【本章摘要】\n{summary}\n\n【正文结尾片段】\n{novel_tail}"
+  },
+  "pipeline": [
+    {
+      "id": "filter_cards",
+      "type": "filter_cards",
+      "input": "story_bible",
+      "output": "story_bible_chapter"
+    },
+    {
+      "id": "extract_terms",
+      "type": "field",
+      "input": "story_bible",
+      "field": "terms",
+      "output": "terms"
+    },
+    {
+      "id": "generate_novel",
+      "type": "ollama",
+      "system": "novel",
+      "template": "novel",
+      "input": [
+        "story_bible_chapter",
+        "terms",
+        "prev_state",
+        "chapter_id",
+        "title",
+        "roles",
+        "scene",
+        "summary",
+        "points",
+        "issues"
+      ],
+      "output": "raw_novel"
+    },
+    {
+      "id": "clean_novel",
+      "type": "clean",
+      "input": "raw_novel",
+      "output": "novel",
+      "rules": [
+        "markdown",
+        "editor_voice",
+        "dedupe",
+        "keep_5"
+      ]
+    },
+    {
+      "id": "check_quality",
+      "type": "check",
+      "input": "novel",
+      "rules": {
+        "min_chars": 400,
+        "no_symbols": true,
+        "para_count": 4,
+        "max_repeat_sim": 0.45
+      },
+      "on_fail_retry": 3,
+      "retry_from": "generate_novel",
+      "on_fail": "mark"
+    },
+    {
+      "id": "add_title",
+      "type": "prefix",
+      "input": "novel",
+      "output": "chapter_text",
+      "text": "{title}"
+    },
+    {
+      "id": "generate_summary",
+      "type": "ollama",
+      "system": "summary",
+      "template": "summary",
+      "input": [
+        "novel"
+      ],
+      "output": "summary"
+    },
+    {
+      "id": "tail_novel",
+      "type": "tail",
+      "input": "novel",
+      "output": "novel_tail",
+      "chars": 200
+    },
+    {
+      "id": "generate_next_state",
+      "type": "ollama",
+      "system": "next_state",
+      "template": "next_state",
+      "input": [
+        "summary",
+        "novel_tail"
+      ],
+      "output": "raw_next_state"
+    },
+    {
+      "id": "clean_next_state",
+      "type": "clean",
+      "input": "raw_next_state",
+      "output": "next_state",
+      "rules": [
+        "markdown",
+        "editor_voice"
+      ]
+    },
+    {
+      "id": "check_next_state",
+      "type": "check",
+      "input": "next_state",
+      "rules": {
+        "min_chars": 60,
+        "max_chars": 300,
+        "no_symbols": true,
+        "no_ascii_letters": true,
+        "min_lines": 4
+      },
+      "on_fail_retry": 2,
+      "retry_from": "generate_next_state",
+      "on_fail": "mark"
+    },
+    {
+      "id": "save_all",
+      "type": "save",
+      "files": [
+        {
+          "content": "chapter_text",
+          "name": "novel_chapter_{i:03d}.txt"
+        },
+        {
+          "content": "summary",
+          "name": "summary_{i:03d}.txt"
+        },
+        {
+          "content": "next_state",
+          "name": "next_state_{i:03d}.txt"
+        }
+      ]
+    }
+  ]
+}

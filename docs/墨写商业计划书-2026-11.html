@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>墨写商业计划书 · 2026-11</title>
+<style>
+  :root{
+    --bg:#f4f6f8;
+    --surface:#ffffff;
+    --surface-2:#f8fafc;
+    --ink:#17202a;
+    --ink-2:#475467;
+    --ink-3:#667085;
+    --line:#e4e7ec;
+    --teal:#0d9488;
+    --teal-2:#0f766e;
+    --teal-bg:#ecfdf5;
+    --purple:#7c3aed;
+    --purple-bg:#f5f3ff;
+    --amber:#b45309;
+    --amber-bg:#fffbeb;
+    --red:#b42318;
+    --red-bg:#fef3f2;
+    --blue:#175cd3;
+    --blue-bg:#eff8ff;
+    --shadow:0 8px 24px rgba(16,24,40,.07);
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 500px at 10% -10%, #e6fffb 0%, rgba(230,255,251,0) 60%),
+      radial-gradient(900px 400px at 100% 0%, #f3e8ff 0%, rgba(243,232,255,0) 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    line-height:1.75;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--teal-2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+  .hero{
+    background:linear-gradient(135deg,#ffffff 0%,#fbfffe 55%,#faf5ff 100%);
+    border:1px solid var(--line);
+    border-radius:24px;
+    padding:38px 40px 30px;
+    box-shadow:var(--shadow);
+    position:relative;
+    overflow:hidden;
+  }
+  .hero:before{
+    content:"";
+    position:absolute;right:-80px;top:-90px;width:280px;height:280px;border-radius:50%;
+    background:radial-gradient(circle,#ccfbf1 0%,rgba(204,251,241,0) 70%);
+  }
+  .hero:after{
+    content:"";
+    position:absolute;right:60px;bottom:-110px;width:220px;height:220px;border-radius:50%;
+    background:radial-gradient(circle,#ede9fe 0%,rgba(237,233,254,0) 70%);
+  }
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--teal-2);
+    background:var(--teal-bg);border:1px solid #ccfbf1;border-radius:999px;padding:6px 12px;
+    font-weight:700;
+  }
+  h1{font-size:clamp(30px,4.2vw,50px);line-height:1.18;margin:18px 0 10px;letter-spacing:-.02em}
+  .subtitle{font-size:18px;color:var(--ink-2);max-width:820px;margin:0 0 18px}
+  .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;position:relative;z-index:1}
+  .meta span{font-size:13px;color:var(--ink-2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:22px 0 0;position:relative;z-index:1}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .kpi .num{font-size:24px;font-weight:800;color:var(--teal-2);letter-spacing:-.02em;line-height:1.2}
+  .kpi .label{font-size:12px;color:var(--ink-3);margin-top:6px}
+  .layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:26px;margin-top:26px;align-items:start}
+  .toc{
+    position:sticky;top:18px;background:#fff;border:1px solid var(--line);border-radius:16px;
+    padding:16px 14px;box-shadow:0 4px 14px rgba(16,24,40,.04);
+  }
+  .toc-title{font-size:12px;letter-spacing:.08em;color:var(--ink-3);font-weight:700;margin:0 0 10px 6px}
+  .toc a{display:block;font-size:13px;color:var(--ink-2);padding:7px 9px;border-radius:8px;line-height:1.45}
+  .toc a:hover{background:var(--teal-bg);color:var(--teal-2);text-decoration:none}
+  .toc a.active{background:var(--teal-bg);color:var(--teal-2);font-weight:700}
+  main{min-width:0}
+  section{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:28px 30px;margin-bottom:20px;box-shadow:0 4px 14px rgba(16,24,40,.04);
+  }
+  h2{font-size:24px;line-height:1.35;margin:0 0 16px;display:flex;align-items:center;gap:10px;letter-spacing:-.01em}
+  h2 .n{
+    flex:0 0 auto;display:inline-grid;place-items:center;width:32px;height:32px;border-radius:10px;
+    background:linear-gradient(135deg,var(--teal),#14b8a6);color:#fff;font-size:14px;font-weight:800;
+  }
+  h3{font-size:17px;margin:24px 0 8px;color:var(--ink)}
+  h4{font-size:14px;margin:16px 0 6px;color:var(--ink-2)}
+  p{margin:8px 0 12px;color:var(--ink-2)}
+  strong{color:var(--ink)}
+  .lead{font-size:16px;color:var(--ink);background:var(--surface-2);border-left:4px solid var(--teal);padding:14px 16px;border-radius:0 12px 12px 0}
+  .callout{border:1px solid #ccfbf1;background:var(--teal-bg);border-radius:12px;padding:14px 16px;margin:14px 0;color:#134e4a}
+  .callout.warn{border-color:#fedf89;background:var(--amber-bg);color:#78350f}
+  .callout.danger{border-color:#fecdca;background:var(--red-bg);color:#7a271a}
+  .callout.info{border-color:#d1e9ff;background:var(--blue-bg);color:#194185}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+  .chip{font-size:11px;font-weight:800;letter-spacing:.02em;border-radius:999px;padding:4px 9px;border:1px solid transparent}
+  .chip.fact{background:var(--teal-bg);color:var(--teal-2);border-color:#ccfbf1}
+  .chip.est{background:var(--purple-bg);color:#5b21b6;border-color:#ddd6fe}
+  .chip.assume{background:var(--amber-bg);color:#92400e;border-color:#fde68a}
+  .chip.risk{background:var(--red-bg);color:#912018;border-color:#fecdca}
+  table{width:100%;border-collapse:separate;border-spacing:0;margin:14px 0;font-size:13.5px;overflow:hidden;border:1px solid var(--line);border-radius:12px}
+  th{background:#f0fdfa;color:#134e4a;text-align:left;font-weight:700;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:10px 12px;border-bottom:1px solid var(--line);color:var(--ink-2);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  tbody tr:nth-child(even) td{background:#fcfcfd}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:12px}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .card{background:var(--surface-2);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h4{margin:0 0 6px;color:var(--ink);font-size:14px}
+  .card p{margin:0;font-size:13px;line-height:1.65}
+  .card .tag{font-size:11px;font-weight:800;color:var(--ink-3);letter-spacing:.04em;margin-bottom:6px;display:block}
+  .pricing-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:16px 0}
+  .plan{border:1px solid var(--line);border-radius:16px;background:#fff;padding:18px;position:relative}
+  .plan.featured{border:2px solid var(--teal);box-shadow:0 10px 30px rgba(13,148,136,.13)}
+  .plan .badge{position:absolute;top:-11px;left:14px;background:var(--teal);color:#fff;font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px}
+  .plan h4{margin:0 0 4px;font-size:15px}
+  .plan .price{font-size:26px;font-weight:800;color:var(--teal-2);line-height:1.2}
+  .plan .price small{font-size:12px;color:var(--ink-3);font-weight:500}
+  .plan .alt{font-size:12px;color:var(--ink-3);margin:4px 0 10px}
+  .plan ul{padding-left:16px;margin:10px 0 0;color:var(--ink-2);font-size:12.5px;line-height:1.7}
+  .plan li{margin:3px 0}
+  .bar-chart{display:grid;gap:12px;margin:16px 0}
+  .bar-row{display:grid;grid-template-columns:120px 1fr 110px;gap:10px;align-items:center;font-size:13px;color:var(--ink-2)}
+  .bar-track{height:12px;background:#eef2f6;border-radius:999px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--teal),#2dd4bf)}
+  .bar-fill.purple{background:linear-gradient(90deg,var(--purple),#a78bfa)}
+  .bar-fill.amber{background:linear-gradient(90deg,#d97706,#fbbf24)}
+  .risk-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
+  .risk{border:1px solid var(--line);border-radius:14px;background:#fff;padding:15px}
+  .risk .head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+  .risk h4{margin:0;font-size:14px;color:var(--ink)}
+  .sev{font-size:10px;font-weight:800;border-radius:999px;padding:3px 8px;white-space:nowrap}
+  .sev.high{background:var(--red-bg);color:var(--red);border:1px solid #fecdca}
+  .sev.mid{background:var(--amber-bg);color:var(--amber);border:1px solid #fde68a}
+  .sev.low{background:var(--blue-bg);color:var(--blue);border:1px solid #d1e9ff}
+  .risk p{font-size:12.5px;margin:8px 0 0;color:var(--ink-3)}
+  .timeline{position:relative;margin:16px 0 4px;padding-left:22px}
+  .timeline:before{content:"";position:absolute;left:7px;top:4px;bottom:4px;width:2px;background:linear-gradient(var(--teal),var(--purple))}
+  .t-item{position:relative;margin:0 0 18px}
+  .t-item:before{content:"";position:absolute;left:-20px;top:5px;width:10px;height:10px;border-radius:50%;background:#fff;border:3px solid var(--teal)}
+  .t-item h4{margin:0 0 4px;font-size:14px}
+  .t-item p{margin:0;font-size:12.5px}
+  .funnel{display:flex;flex-direction:column;gap:8px;margin:14px 0}
+  .funnel div{background:linear-gradient(90deg,#ecfdf5,#f5f3ff);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--ink-2)}
+  .funnel div b{color:var(--teal-2)}
+  .source-list{font-size:12px;color:var(--ink-3);line-height:1.7;padding-left:18px}
+  .source-list li{margin:5px 0;word-break:break-all}
+  .footnote{font-size:12px;color:var(--ink-3);margin-top:12px}
+  .divider{height:1px;background:var(--line);margin:20px 0}
+  .tag-row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}
+  .tag{font-size:11px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 9px;color:var(--ink-3)}
+  @media (max-width:980px){
+    .layout{grid-template-columns:1fr}
+    .toc{position:static;display:grid;grid-template-columns:1fr 1fr;gap:2px}
+    .toc-title{grid-column:1/-1}
+    .kpi-grid{grid-template-columns:1fr 1fr}
+    .pricing-grid{grid-template-columns:1fr 1fr}
+    .grid-3{grid-template-columns:1fr}
+  }
+  @media (max-width:640px){
+    .wrap{padding:16px 12px 60px}
+    .hero{padding:24px 20px}
+    section{padding:20px 16px}
+    .kpi-grid,.pricing-grid,.risk-grid,.grid-2,.grid-3{grid-template-columns:1fr}
+    .bar-row{grid-template-columns:90px 1fr 90px;font-size:12px}
+    h2{font-size:21px}
+    .toc{grid-template-columns:1fr}
+  }
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .toc{display:none}
+    .layout{display:block}
+    section{box-shadow:none;border:1px solid #ddd;break-inside:avoid;page-break-inside:avoid}
+    .hero{box-shadow:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">商业计划书 · v1.0 · 数据截止 2026-11-04</div>
+    <h1>墨写商业计划书</h1>
+    <p class="subtitle">面向中文网文工业化改编的本地 AI 工作台：把一本参考作品拆成可编辑的章节骨架与人物/势力设定，再用结构化改编与签约体检，产出可交付的新书。</p>
+    <div class="meta">
+      <span>项目：d:\MiniMax\novel_workflow</span>
+      <span>产物：dist\墨写.exe</span>
+      <span>事实 / 推算 / 假设 分层标注</span>
+      <span>公开价格查询日期：2026-11-04</span>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="num">15.8 万字</div><div class="label">实测单本拆解样本：48 章、50 角色、26 势力</div></div>
+      <div class="kpi"><div class="num">28 分钟</div><div class="label">16 次模型调用；输入 28.5 万 / 输出 30.0 万 tokens</div></div>
+      <div class="kpi"><div class="num">¥0.9–3.0</div><div class="label">单本拆解模型成本；官方 flash 价到项目保守价</div></div>
+      <div class="kpi"><div class="num">¥1.4–11</div><div class="label">全链路单本模型成本；拆解+改编+体检，未含重试缓冲</div></div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="toc">
+      <div class="toc-title">目录</div>
+      <a href="#s0">0. 结论先行</a>
+      <a href="#s1">1. 产品与市场事实</a>
+      <a href="#s2">2. 定位与目标用户</a>
+      <a href="#s3">3. 卖点与差异化</a>
+      <a href="#s4">4. 缺陷与风险</a>
+      <a href="#s5">5. 订阅收费机制</a>
+      <a href="#s6">6. 增长与渠道</a>
+      <a href="#s7">7. 里程碑与财务</a>
+      <a href="#s8">8. 先验证再投入</a>
+      <a href="#s9">9. 来源与假设</a>
+    </aside>
+
+    <main>
+
+      <section id="s0">
+        <h2><span class="n">0</span>结论先行</h2>
+        <div class="lead">
+          <strong>一句话定位：</strong>墨写不是“一键生成爆款”的 AI 写作器，而是把参考作品拆成可审计、可编辑的章节骨架与人物/势力设定，再用结构化改编与签约体检，帮助作者和工作室把“拆书—改编—体检—成稿”做成可重复的本地流水线。
+        </div>
+
+        <h3>三个判断</h3>
+        <div class="grid-3">
+          <div class="card">
+            <span class="tag">判断一</span>
+            <h4>需求真实，但卖点不是“自动写书”</h4>
+            <p>本项目已把拆解、设定、改编、体检、正文、审查、封面、导出串成一条链。单本 15.8 万字的拆解+改编+体检模型成本约 1.4–5.8 元，真正的价值是“少返工、可复用、可交付”。</p>
+          </div>
+          <div class="card">
+            <span class="tag">判断二</span>
+            <h4>最大风险是版权与平台合规</h4>
+            <p>“参考作品→换名→逐章映射”的默认路径，在法律上高度接近改编/实质性相似；平台又在严打 AI 低质内容。产品必须从“去抄袭”叙事转向“合规再创作/编辑辅助”。</p>
+          </div>
+          <div class="card">
+            <span class="tag">判断三</span>
+            <h4>收费必须额度化</h4>
+            <p>建议“订阅底座 + 用量包 + 席位/模块”。个人自带 Key ¥29/月，托管 Key ¥49/月；工作室 ¥199/月起；企业 ¥19,800/年起。无限量套餐会吸引最重的用户，赶走利润。</p>
+          </div>
+        </div>
+
+        <div class="callout info">
+          <strong>12 个月中性情景（假设）：</strong>M12 付费用户约 1,200，年平均付费 500，混合 ARPU ¥49/月，订阅收入约 ¥29.4 万；加企业与服务合计 ¥36.4 万，固定成本 ¥30 万，净利约 +¥0.9 万，基本打平。保守情景净亏约 ¥24.6 万，乐观情景净利约 ¥65.2 万。
+        </div>
+
+        <div class="callout warn">
+          <strong>先验证再投入：</strong>先卖 20 份 ¥99 的“拆解+签约体检”服务，目标 ≥8 人付费；再找 3 家工作室做 ¥1,999/季度试点，目标 2 家续费。两项都达不到，应转向工作室定制服务/短剧改编，而不是继续堆功能。
+        </div>
+      </section>
+
+      <section id="s1">
+        <h2><span class="n">1</span>产品事实与市场事实</h2>
+        <p><span class="chip fact">事实·代码</span> 项目不是概念稿：拆解、设定、改编、体检、正文、审查、封面、导出、打包、用量计量都已落地。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>能力</th><th>代码/数据证据</th><th>关键事实</th></tr></thead>
+            <tbody>
+              <tr><td>参考书拆解</td><td><code>src/decompose.py</code></td><td>按 12 万字符分段，单段约 10–16 章；8192 token 不足会提到 32768 重试；支持 <code>--local</code> 无模型模式</td></tr>
+              <tr><td>全书设定</td><td><code>src/story_bible.py</code></td><td>21 个全书要素字段、24 个角色卡字段、10 类势力、18 种关系、9 种立场</td></tr>
+              <tr><td>结构化改编</td><td><code>src/adapt.py</code></td><td>每批约 20 章源文→约 15 章新书；名字映射、章号映射、扩写/压缩/续写；4 路并发</td></tr>
+              <tr><td>签约体检</td><td><code>src/review.py</code></td><td>前 2 万字/前 10 章窗口；5 项程序检查 + 1 次模型复核；输出高危/中危</td></tr>
+              <tr><td>本地 Web/桌面</td><td><code>src/webapp.py</code>、<code>src/desktop_app.py</code></td><td>70+ HTTP 接口；默认只监听 127.0.0.1；pywebview 桌面外壳；局域网模式无鉴权</td></tr>
+              <tr><td>打包交付</td><td><code>src/build_app.py</code></td><td>PyInstaller 单文件 exe（约 70MB）+ Android APK；<code>dist/墨写.exe</code></td></tr>
+              <tr><td>用量计量</td><td><code>src/usage.py</code></td><td>本地记录 token/耗时/成本；<code>data/_system/usage.jsonl</code>；接口 <code>/api/usage</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>实测样本</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>样本</th><th class="num">源文字符</th><th class="num">拆解章数</th><th class="num">角色</th><th class="num">势力</th><th class="num">道具</th><th>备注</th></tr></thead>
+            <tbody>
+              <tr><td>超级傀儡兽·源</td><td class="num">158,469</td><td class="num">48</td><td class="num">50</td><td class="num">26</td><td class="num">0</td><td>15.8 万字长篇，gb18030</td></tr>
+              <tr><td>爱情驾到·源</td><td class="num">22,622</td><td class="num">94</td><td class="num">2</td><td class="num">0</td><td class="num">0</td><td>短篇拆成 94 章，说明“章数”不等于“字数”</td></tr>
+              <tr><td>断缘成尊·源</td><td class="num">12,094</td><td class="num">50</td><td class="num">20</td><td class="num">13</td><td class="num">19</td><td>含道具池</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>一次完整拆解的真实用量</h3>
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag">超 级 傀 儡 兽 · 拆 解</span>
+            <h4>16 次调用 / 28 分钟</h4>
+            <p>输入 284,757 tokens，输出 299,909 tokens；总耗时 1,682.25 秒。按项目配置 2 元/8 元每百万 tokens：¥2.97；按 DeepSeek 官方 flash 1 元/2 元：¥0.885。</p>
+          </div>
+          <div class="card">
+            <span class="tag">折 合 口 径</span>
+            <h4>拆解折合每万字 ¥0.056–0.187</h4>
+            <p>每章 ¥0.018–0.062；每本书的模型成本远低于一次人工拆书服务。真正的成本在人工编辑、客服、获客与合规。</p>
+          </div>
+        </div>
+
+        <h3>市场事实（公开数据）</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>指标</th><th class="num">数值</th><th>口径 / 来源</th></tr></thead>
+            <tbody>
+              <tr><td>2025 年中国网络文学市场营收</td><td class="num">574.72 亿元，+15.99%</td><td>国家新闻出版署《2025 年度中国网络文学发展报告》</td></tr>
+              <tr><td>2025 年海外市场规模</td><td class="num">69.83 亿元，+45.03%</td><td>同上</td></tr>
+              <tr><td>2025 年底读者规模</td><td class="num">5.25 亿人</td><td>《2025 中国网络文学蓝皮书》</td></tr>
+              <tr><td>注册作者</td><td class="num">超 3,500 万人</td><td>同上</td></tr>
+              <tr><td>2025 年微短剧市场</td><td class="num">677.9 亿元（艾媒口径）</td><td>另有“突破 1,000 亿元”的广电口径，定义不同</td></tr>
+              <tr><td>2026 年微短剧+AI 剧漫剧预测</td><td class="num">1,210 亿元</td><td>DataEye 研究院；其中 AI 剧漫剧超 400 亿元</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p><span class="chip assume">假设</span> 若 5% 注册作者为活跃/半职业（约 175 万人），其中 1%–3% 愿为效率工具付费（1.75–5.25 万人），按年 ¥399 计，可服务市场约 0.7–2.1 亿元/年；加工作室与短剧改编方，合计 SAM 约 1–5 亿元/年。不是靠“海量免费用户”能撑起来的市场，必须抓高意愿付费层。</p>
+
+        <h3>竞品与价格带</h3>
+        <p><span class="chip fact">事实·公开</span> 查询日期 2026-11-04；公开价会变动，签约前请复核。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>产品</th><th>类型</th><th>公开价格</th><th>与本项目的关键差异</th></tr></thead>
+            <tbody>
+              <tr><td>蛙蛙写作</td><td>消费级 AI 写作、小说转短剧</td><td>第三方口径 ¥29/月、¥298/年；App Store 内购 ¥39/3 日、¥59/7 日、¥89/月、¥169/月、¥213/月</td><td>黑盒生成；无可编辑中间层；无签约体检；无本地/BYOK</td></tr>
+              <tr><td>彩云小梦</td><td>AI 续写/角色对话</td><td>¥25/月、¥48/季、¥188/年</td><td>偏续写与陪伴；不做参考书拆解与批量改编</td></tr>
+              <tr><td>星月写作</td><td>AI 拆书/大纲/正文</td><td>10 万字 ¥19、300 万字 ¥599；包月 ¥198 起、包年最高 ¥3,998</td><td>功能相近但云端黑盒；多部宣传作品被下架；无本地/私有化</td></tr>
+              <tr><td>Sudowrite</td><td>英文小说写作</td><td>$10 / $22 / $44 每月（年付最高 5 折）</td><td>Story Bible + 正文强；英文为主；无中国平台签约体检；无本地 exe/BYOK</td></tr>
+              <tr><td>NovelAI</td><td>英文生成/角色扮演</td><td>$10 / $15 / $25 每月（第三方汇总）</td><td>生成与记忆强；不做“参考书→新书”的结构化改编</td></tr>
+              <tr><td>Jasper</td><td>营销内容</td><td>Pro $59/席/月（年付）、$69 月付</td><td>营销文案；与网文场景弱相关</td></tr>
+              <tr><td>阿里云妙笔</td><td>企业写作平台</td><td>¥0/¥59/¥99/¥22,333/¥62,333 每月</td><td>企业级通用写作；无网文专属拆解/签约体检；价格锚点极高</td></tr>
+              <tr><td>火山剧创</td><td>短剧创作平台</td><td>¥99.9/年，30 个子账号</td><td>短剧生产全流程；不做小说拆解/改编；短剧侧强价格锚</td></tr>
+              <tr><td>易撰</td><td>原创度/爆文分析</td><td>专业版 ¥996/年</td><td>检测与数据；不生成改编稿</td></tr>
+              <tr><td>优采云</td><td>AI 洗稿/改写</td><td>深度改写 20 积分/千字；1 元=100 积分 → ¥0.2/千字</td><td>低价商品化“洗稿”；质量与法律风险高</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <strong>结论：</strong>消费级价格带 ¥25–213/月，专业级 ¥198–3,998/年，企业级可达 ¥22,333/月。只卖“生成”会被 ¥29 的蛙蛙和免费作家助手夹击；卖“结构化中间层+签约体检+本地/BYOK”，可站在 ¥29–199/月 的空档，并用企业私有化拉高客单。
+        </div>
+      </section>
+
+      <section id="s2">
+        <h2><span class="n">2</span>定位与目标用户</h2>
+        <div class="lead">
+          给中文网文作者与小型工作室的“拆书—改编—体检”本地工作台：把参考作品变成可编辑的章节骨架、人物/势力池和可交付的新书；数据不出本机，模型 Key 自己掌控，成本按用量透明计算。
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>用户</th><th>典型场景</th><th>核心痛点</th><th>支付意愿（假设）</th><th>匹配度</th></tr></thead>
+            <tbody>
+              <tr><td>个人网文作者</td><td>开新书、学爆款结构、投稿前自检</td><td>不会拆书；大纲散；被拒不知道为什么</td><td>¥19–49/月，或 ¥99–199/本</td><td>高</td></tr>
+              <tr><td>已签约作者</td><td>日更、保持设定一致、避免平台判 AI</td><td>长文一致性差；改稿耗时；怕违规</td><td>¥49–99/月</td><td>高</td></tr>
+              <tr><td>工作室/代写团队</td><td>每月多本、批量拆解/改编、交付甲方</td><td>人效低；风格不统一；数据保密</td><td>¥199–999/月，或 ¥1,999–4,999/季</td><td>最高</td></tr>
+              <tr><td>短剧/MCN 改编方</td><td>小说→短剧分集/剧本</td><td>缺分集结构；周期长；版权风险</td><td>¥500–2,000/月，或 ¥299–499/部</td><td>中（需补短剧格式）</td></tr>
+              <tr><td>课程/训练营</td><td>教拆书、写作、AI 工具</td><td>缺标准化工具；学员设备不一</td><td>¥99–299/席位，或分成</td><td>中高（exe 易交付）</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag">首 选 I C P</span>
+            <h4>3–10 人工作室 / 代写团队</h4>
+            <p>每月产出 3 本以上，愿意为“批量 + 保密 + 可交付”付 ¥199–499/月。个人作者是漏斗，工作室是利润池。</p>
+          </div>
+          <div class="card">
+            <span class="tag">明 确 不 服 务</span>
+            <h4>只想“一键批量起号、绕过平台检测”的用户</h4>
+            <p>这类需求带来平台封禁与法律风险，且与可持续收费冲突。宁可少卖，不要带来平台风险。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="s3">
+        <h2><span class="n">3</span>卖点与差异化</h2>
+        <p>竞品卖“生成”，墨写卖“可审计的中间层 + 可迁移的改编 + 签约前的风控”。模型不是护城河，结构化数据与工作流才是。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>卖点</th><th>代码/事实支撑</th><th>用户为什么付费</th><th>与竞品差别</th></tr></thead>
+            <tbody>
+              <tr><td><strong>结构化可编辑中间层</strong></td><td>拆解产出章节摘要、关键事件、角色、势力、伏笔；<code>chapters.json</code> 可逐章编辑；角色池/势力池独立</td><td>生成结果可检查、可改、可复用；工作室可把编辑经验沉淀成模板</td><td>蛙蛙/星月/Sudowrite 以生成结果为中心，中间层不可见或不可编辑</td></tr>
+              <tr><td><strong>可迁移改编，而非整篇重写</strong></td><td><code>adapt.py</code> 支持源章→目标章映射、名字映射、扩写/压缩/续写、续集模式；可指定目标章数</td><td>保留被验证过的节奏与爽点，降低“从零写”的不确定性；一本参考书可产出多个版本</td><td>通用写作工具没有“源书→新书”的映射与一致性处理</td></tr>
+              <tr><td><strong>签约体检前置风控</strong></td><td><code>review.py</code> 前 2 万字/前 10 章；5 项程序检查 + 模型复核；输出高危/中危</td><td>投稿前知道“哪里会被拒”，比盲目投 3 个月更省时间；工作室可做交付前质检</td><td>竞品普遍没有“平台签约视角”的检查；易撰只做原创度</td></tr>
+              <tr><td><strong>自带 Key / 本地数据不出门</strong></td><td>Key 只存本机 <code>localStorage</code>；<code>--local</code> 无模型模式；数据在 <code>data/&lt;书名&gt;/</code></td><td>工作室/机构对未公开书稿敏感；BYOK 让重度用户自己控制成本</td><td>云端竞品必须上传全文；企业版才谈私有化</td></tr>
+              <tr><td><strong>成本可控、可计量</strong></td><td><code>usage.py</code> 记录 token/耗时/成本；单本拆解实测 ¥0.9–3.0</td><td>用户能按本/按章预算；工作室可核算项目毛利</td><td>订阅制竞品多为“额度黑盒”，超量限速或降智</td></tr>
+              <tr><td><strong>可离线 exe 交付</strong></td><td><code>dist/墨写.exe</code> 约 70MB；<code>--local</code> 可无模型运行；Android APK</td><td>课程/机构可批量分发；弱网/保密环境可用；无需部署服务器</td><td>SaaS 竞品依赖网络与账号；本地工具稀缺</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>护城河与可防御性</h3>
+        <div class="grid-3">
+          <div class="card"><span class="tag">数 据 资 产</span><h4>越用越厚</h4><p>角色池、势力池、伏笔、章节映射、改编版本，可形成工作室模板库。</p></div>
+          <div class="card"><span class="tag">工 作 流 粘 性</span><h4>切换成本高</h4><p>拆解→编辑→改编→体检→正文→导出，切换成本高于单点生成工具。</p></div>
+          <div class="card"><span class="tag">本 地 / 私 有 化</span><h4>保密差异</h4><p>对保密敏感的工作室与机构，是云端竞品短期难补的差异。</p></div>
+        </div>
+        <p class="footnote">不构成护城河：模型本身、提示词、UI 皮肤。这些会被快速复制。</p>
+      </section>
+
+      <section id="s4">
+        <h2><span class="n">4</span>缺陷与风险</h2>
+        <p>这一节必须诚实：有些风险不会“优化掉”，只能“设计掉”。</p>
+
+        <div class="risk-grid">
+          <div class="risk">
+            <div class="head"><h4>1. 版权与“实质性相似”</h4><span class="sev high">生死线</span></div>
+            <p>默认按源章数 1:1 映射，换名+逐章改写仍可能被认定改编。宁波短剧案判赔 25 万元、厦门案判赔 15 万元。缓解：改名“结构化再创作”；权利声明；默认结构迁移而非逐章映射；相似度检测与改编幅度阈值；法务审核；侵权投诉通道。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>2. 平台规则与 AI 检测</h4><span class="sev high">高</span></div>
+            <p>起点 AI 占比 &gt;10% 触发处理；有平台 20% 以下不计、40% 直接拒稿；番茄 2026-07 拒签 16 万本、清理 5.4 万本。缓解：不做“绕过检测”承诺；定位“AI 辅助编辑”；强制人工改写；接入朱雀等检测做风险提示；限制批量起号；优先短剧/海外/自出版。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>3. 改编质量与长文一致性</h4><span class="sev mid">中高</span></div>
+            <p>95 章级长文跨批处理；有名字映射兜底、标题去重，但没有语义一致性检查。缓解：20 本黄金评测集；人名/关系/时间线/伏笔自动检查；章节级重生成；人工编辑台；版本对比。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>4. 推理模型耗时/成本</h4><span class="sev mid">中</span></div>
+            <p>15.8 万字拆解 28 分钟；8192→32768 重试；推理 token 计入输出。缓解：默认非思考模式；按章并发；断点续跑；成本预估；缓存；BYOK。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>5. 单机 exe 难以订阅</h4><span class="sev high">高</span></div>
+            <p>无账号/License/云端额度/支付；本地 <code>usage.jsonl</code> 可被删改。缓解：账号+设备码登录；Ed25519 签名 License；云端额度账本；7–14 天离线宽限；功能开关；服务端校验。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>6. 盗版与 Key 泄露</h4><span class="sev high">高</span></div>
+            <p>PyInstaller 单文件可解包；Key 在 <code>localStorage</code>；局域网模式无鉴权。缓解：Nuitka/Cython；代码签名；完整性校验；平台 Key 绝不进客户端；网关短时 token；DPAPI/钥匙串；设备绑定；输出水印。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>7. 缺乏评测与反馈闭环</h4><span class="sev mid">中</span></div>
+            <p>无黄金集、无盲评、无崩溃上报、无 NPS。缓解：20 本书盲评；可用率/一致性/签约通过率指标；可选匿名遥测；A/B；月度质量报告。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>8. UI 学习成本</h4><span class="sev mid">中</span></div>
+            <p>16 个路由、密集表单、专业字段。缓解：3 步新手向导；模板；示例书；短视频教程；默认值；“简版/专业版”切换。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>9. 无协作/版本管理</h4><span class="sev mid">中</span></div>
+            <p>本地 JSON；仅章节内历史；无多人角色/评论/审计。缓解：云端同步；版本树/对比/回滚；角色权限；评论；审计日志；自动备份。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>10. 售后与退款成本</h4><span class="sev mid">中</span></div>
+            <p>AI 输出不稳定；用户预期高；按本/按章争议。缓解：免费试用+样例报告；明确“不保证签约/过稿”；7 天低用量退款；按成功产出计费；自助文档。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>11. 数据丢失/安全</h4><span class="sev mid">中高</span></div>
+            <p>本地文件；<code>MOBIT_HOST=0.0.0.0</code> 无鉴权；无自动备份。缓解：自动备份/回收站；导出；局域网 token；CSRF/限流；云备份可选。</p>
+          </div>
+          <div class="risk">
+            <div class="head"><h4>12. 模型供应商依赖</h4><span class="sev low">中低</span></div>
+            <p>DeepSeek 价格/模型名变动（chat/reasoner 2026-07-24 弃用，映射到 v4-flash 非思考/思考）。缓解：多供应商适配；BYOK；价格监控；失败回退；成本上限。</p>
+          </div>
+        </div>
+
+        <div class="callout danger">
+          <strong>重点风险：版权是生死线。</strong> 当前“参考小说→换名→逐章改编”是经典改编路径，法律上不会因为“换了名字”就安全。必须把“合规”做成产品能力：权利声明、相似度报告、改编幅度检查、AIGC 标注、投诉/下架通道。否则卖得越多，风险越大。
+        </div>
+        <div class="callout warn">
+          <strong>平台风险同样致命：</strong> 起点 AI 占比 &gt;10% 触发处理；番茄 2026-07 拒签 16 万本、清理 5.4 万本；星月多部宣传爆款被下架。不要卖“平台检测绕过”，要卖“风险提示 + 人工改写工作流”。
+        </div>
+      </section>
+
+      <section id="s5">
+        <h2><span class="n">5</span>订阅收费机制</h2>
+        <div class="lead">
+          首发建议：个人自带 Key ¥29/月（¥249/年），平台托管 Key ¥49/月（¥399/年）；工作室 ¥199/月（¥1,599/年）起；企业私有化 ¥19,800/年起；短剧项目制 ¥499/部。
+        </div>
+
+        <h3>5.1 分层方案</h3>
+        <p class="footnote">额度定义：1 个标准本 = ≤20 万字、≤50 章；超出按 1.5–2 个标准本计。改编额度按“成功落盘的新书章节数”计；正文生成按“成功输出的正文字符数”计。失败/重试不向用户计费（平台承担，设重试上限）。</p>
+
+        <div class="pricing-grid">
+          <div class="plan">
+            <h4>免费试用</h4>
+            <div class="price">¥0</div>
+            <div class="alt">自带 Key · 7 天</div>
+            <ul>
+              <li>1 本 ≤3 万字拆解</li>
+              <li>10 章改编</li>
+              <li>1 次签约体检</li>
+              <li>1 并发 / 1 席位</li>
+              <li>导出水印/限制</li>
+            </ul>
+          </div>
+          <div class="plan featured">
+            <div class="badge">主推</div>
+            <h4>个人版</h4>
+            <div class="price">¥29<small> /月</small></div>
+            <div class="alt">自带 Key；托管 ¥49/月，¥399/年</div>
+            <ul>
+              <li>4 本/月拆解</li>
+              <li>200 章/月改编</li>
+              <li>托管含 30 万字/月正文</li>
+              <li>2 并发 / 1 席位</li>
+              <li>4 次签约体检/月</li>
+            </ul>
+          </div>
+          <div class="plan">
+            <h4>工作室版</h4>
+            <div class="price">¥199<small> /月</small></div>
+            <div class="alt">自带 Key；托管 ¥299/月，¥2,399/年</div>
+            <ul>
+              <li>20 本/月拆解</li>
+              <li>1,000 章/月改编</li>
+              <li>托管含 200 万字/月正文</li>
+              <li>4 并发 / 3 席位（+¥39/席）</li>
+              <li>体检不限（公平使用）</li>
+            </ul>
+          </div>
+          <div class="plan">
+            <h4>企业私有化</h4>
+            <div class="price">¥19,800<small> /年起</small></div>
+            <div class="alt">私有网关 / BYOK</div>
+            <ul>
+              <li>100 本/年拆解</li>
+              <li>5,000 章/年改编</li>
+              <li>8 并发 / 10 席位</li>
+              <li>私有化部署 / 审计 / SLA</li>
+              <li>培训与定制提示词</li>
+            </ul>
+          </div>
+        </div>
+
+        <p><span class="chip assume">假设</span> 短剧/MCN 项目制：¥499/部（≤100 集），签约体检 ¥99/次；需价格测试，可能上调至 ¥999–1,999。加购：额外席位 ¥39/席/月；额外标准本 ¥19/本；额外改编 ¥9/50 章；额外正文 ¥19/10 万字；批量模块 ¥99/月；短剧导出 ¥99/月；体检加次 ¥9.9/次；企业培训 ¥8,000/次起。</p>
+
+        <h3>5.2 价格理由（对标公开价）</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>档位</th><th>建议价</th><th>对标</th><th>理由</th></tr></thead>
+            <tbody>
+              <tr><td>个人 BYOK</td><td>¥29/月</td><td>蛙蛙 ¥29/月、彩云 ¥25/月</td><td>同带降低决策门槛；BYOK 平台不承担模型成本，毛利 90%+</td></tr>
+              <tr><td>个人托管</td><td>¥49/月</td><td>消费级 ¥25–213/月</td><td>含 30 万字正文与 4 次体检；按成本 ¥5–30/月，毛利 40%–90%</td></tr>
+              <tr><td>工作室 BYOK</td><td>¥199/月</td><td>星月入门 ¥198/月</td><td>同带但含 3 席位、批量、共享书库，价值更高</td></tr>
+              <tr><td>工作室托管</td><td>¥299/月</td><td>星月 ¥198–333/月</td><td>含 200 万字，按成本 ¥40–100/月，毛利 67%–87%</td></tr>
+              <tr><td>企业私有化</td><td>¥19,800/年</td><td>阿里云妙笔企业 ¥22,333/月</td><td>折合 ¥1,650/月，含私有化、10 席位、SLA，低门槛私有化</td></tr>
+              <tr><td>短剧项目制</td><td>¥499/部</td><td>火山剧创 ¥99.9/年（生产平台）</td><td>短剧改编人力以千元计；¥499 是 BD 入口，非长期价</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>5.3 计价维度：优缺点与推荐组合</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>维度</th><th>优点</th><th>缺点</th><th>建议</th></tr></thead>
+            <tbody>
+              <tr><td>书数</td><td>用户易理解、价值对齐</td><td>书大小差异极大（2 万 vs 30 万字）</td><td>用“标准本”归一化；个人套餐主维度</td></tr>
+              <tr><td>章节数</td><td>对长篇公平；与改编工作量直接相关</td><td>章节长短差异；拆章可能注水</td><td><strong>改编主维度</strong>；按成功落盘章节计</td></tr>
+              <tr><td>改编输出字数</td><td>与生成量相关</td><td>当前改编产出是结构化章节数据，不是正文；按字数会低估价值/诱导灌水</td><td>不作为主维度；正文生成阶段按字数</td></tr>
+              <tr><td>模型 token</td><td>成本最透明</td><td>用户不懂；模型/推理模式差异大；容易被比价</td><td><strong>仅内部结算</strong>，不对外</td></tr>
+              <tr><td>席位</td><td>B2B 友好；可预测</td><td>个人不友好；小团队共用账号</td><td>工作室/企业主维度</td></tr>
+              <tr><td>功能模块</td><td>好加购；能拆分价值</td><td>组合复杂；用户反感“二次收费”</td><td>体检/批量/短剧做加购，不做基础功能阉割</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout">
+          <strong>推荐组合：</strong>订阅底座（席位 + 核心功能 + 基础标准本/章节额度）+ 用量包（标准本/章节包）+ 正文生成字数包 + 模块加购（体检/批量/短剧）。Token 只用于内部成本核算与风控，不出现在用户账单。
+        </div>
+
+        <h3>5.4 成本与毛利</h3>
+        <p><span class="chip fact">事实·实测</span> 基准：15.8 万字、48 章、16 次拆解调用、284,757 输入 + 299,909 输出 tokens、1,682 秒。单价：DeepSeek 官方 2026-11-04 flash 1 元/百万输入、2 元/百万输出；项目配置保守价 2 元/8 元。</p>
+
+        <div class="bar-chart">
+          <div class="bar-row"><span>短篇 2 万字</span><div class="bar-track"><div class="bar-fill" style="width:10%"></div></div><span>¥0.3–1.1</span></div>
+          <div class="bar-row"><span>标准本 15.8 万字</span><div class="bar-track"><div class="bar-fill" style="width:52%"></div></div><span>¥1.4–5.8</span></div>
+          <div class="bar-row"><span>长篇 30 万字</span><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div><span>¥2.8–11.2</span></div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>场景</th><th>字数/章数</th><th class="num">拆解</th><th class="num">改编</th><th class="num">签约体检</th><th class="num">全链路（拆解+改编+体检）</th></tr></thead>
+            <tbody>
+              <tr><td>短篇</td><td>2 万字/12 章</td><td class="num">¥0.15–0.50</td><td class="num">¥0.10–0.40</td><td class="num">¥0.05–0.20</td><td class="num"><strong>¥0.30–1.10</strong></td></tr>
+              <tr><td>标准本</td><td>15.8 万字/48 章</td><td class="num">¥0.88–2.97</td><td class="num">¥0.50–2.50</td><td class="num">¥0.05–0.30</td><td class="num"><strong>¥1.43–5.77</strong></td></tr>
+              <tr><td>长篇</td><td>30 万字/100 章</td><td class="num">¥1.70–5.60</td><td class="num">¥1.00–5.00</td><td class="num">¥0.10–0.60</td><td class="num"><strong>¥2.80–11.20</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="footnote">口径说明：拆解为标准本实测；长篇按字数/章数线性外推；改编样本仅 4 次调用，全量按 9–15 次推算；实际预算建议再上浮 30% 覆盖重试/失败；不含客服、支付、云资源、人工审稿。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>套餐</th><th class="num">价格</th><th>典型用量</th><th class="num">模型成本</th><th class="num">支付/支持/退款</th><th class="num">毛利率</th></tr></thead>
+            <tbody>
+              <tr><td>个人 BYOK</td><td class="num">¥29/月</td><td>1.5 本</td><td class="num">¥0</td><td class="num">¥2.5</td><td class="num">91%</td></tr>
+              <tr><td>个人托管</td><td class="num">¥49/月</td><td>1.5 本</td><td class="num">¥6–12</td><td class="num">¥2.5</td><td class="num">70%–83%</td></tr>
+              <tr><td>工作室 BYOK</td><td class="num">¥199/月</td><td>6 本</td><td class="num">¥0</td><td class="num">¥10</td><td class="num">95%</td></tr>
+              <tr><td>工作室托管</td><td class="num">¥299/月</td><td>6 本</td><td class="num">¥24–48</td><td class="num">¥10</td><td class="num">81%–89%</td></tr>
+              <tr><td>企业私有化</td><td class="num">¥19,800/年</td><td>100 本</td><td class="num">¥400–1,100</td><td class="num">¥2,000（分摊）</td><td class="num">84%–88%</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <strong>毛利红线：</strong>若个人托管用户每月跑满 4 本且全用推理模型，模型成本可达 ¥16–44，毛利率降到 10%–45%。因此必须额度化 + 默认非思考模式 + 超量加购。
+        </div>
+
+        <h3>5.5 盈亏平衡</h3>
+        <p><span class="chip assume">假设</span> 固定成本（不含创始人工资）：lean ¥2.5 万/月（云资源 0.2 万 + 客服/运营 0.8 万 + 市场 1 万 + 杂费 0.5 万）；标准 ¥4 万/月；扩张 ¥6 万/月。毛利率按 80%。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>固定成本/月</th><th class="num">ARPU ¥39</th><th class="num">ARPU ¥49</th><th class="num">ARPU ¥199</th></tr></thead>
+            <tbody>
+              <tr><td>¥2.5 万</td><td class="num">801 人</td><td class="num"><strong>638 人</strong></td><td class="num">157 人</td></tr>
+              <tr><td>¥4 万</td><td class="num">1,282 人</td><td class="num"><strong>1,020 人</strong></td><td class="num">251 人</td></tr>
+              <tr><td>¥6 万</td><td class="num">1,923 人</td><td class="num"><strong>1,531 人</strong></td><td class="num">377 人</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><span class="chip est">推算</span> 若 80% 个人 + 20% 工作室，混合 ARPU≈¥79，lean 固定成本下盈亏平衡约 396 人；早期个人占比更高，实际看 600–1,500 人。</p>
+
+        <h3>5.6 技术落地：从本地 exe 到可收费产品</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>能力</th><th>现状（代码事实）</th><th>要补什么</th><th>优先级</th></tr></thead>
+            <tbody>
+              <tr><td>账号与登录</td><td>无</td><td>云端账号；手机号/微信扫码/设备码登录；JWT/短期 token</td><td>P0</td></tr>
+              <tr><td>License/激活码</td><td>无</td><td>Ed25519 签名 License；机器指纹绑定；套餐/功能/到期；离线 7–14 天宽限</td><td>P0</td></tr>
+              <tr><td>云端额度</td><td>仅本地 <code>usage.jsonl</code></td><td>服务端额度账本；批量上报；幂等；对账</td><td>P0</td></tr>
+              <tr><td>模型网关</td><td>客户端直连供应商，Key 在 <code>localStorage</code></td><td>平台 Key 不下发；按用户短时 token；限流/审计/成本上限；BYOK 本地加密</td><td>P0</td></tr>
+              <tr><td>计量点</td><td>本地估算</td><td>拆解输入字数/标准本；改编成功章节；正文输出字数；体检次数；导出次数</td><td>P0</td></tr>
+              <tr><td>试用限流</td><td>无</td><td>设备+手机号+支付指纹；产出水印；额度硬停</td><td>P1</td></tr>
+              <tr><td>支付/订单/发票</td><td>无</td><td>微信/支付宝/Stripe；订单状态机；回调验签；日对账；电子发票</td><td>P1</td></tr>
+              <tr><td>退款</td><td>无</td><td>7 天低用量退款；企业 30 天验收；黑名单/风控</td><td>P1</td></tr>
+              <tr><td>防破解</td><td>PyInstaller 单文件</td><td>Nuitka/Cython；代码签名；完整性校验；服务端功能门禁；输出水印</td><td>P1</td></tr>
+              <tr><td>协作/版本</td><td>本地 JSON；章节内历史</td><td>云同步；版本树/diff/回滚；角色权限；评论；审计</td><td>P2</td></tr>
+              <tr><td>安全</td><td>局域网模式无鉴权</td><td>局域网 token；CSRF/限流；DPAPI/钥匙串；Key 加密；日志脱敏</td><td>P0</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>License 与设备绑定（离线 exe 可校验）</h4>
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag">流 程</span>
+            <h4>设备码 → 网页登录 → License</h4>
+            <p>exe 启动显示设备码（机器指纹哈希，不含原始硬件信息）；用户在网页/手机登录后输入设备码，服务端返回 License；私钥在服务端，公钥内置 exe。</p>
+          </div>
+          <div class="card">
+            <span class="tag">宽 限 / 吊 销</span>
+            <h4>7–14 天离线，7 天在线校验</h4>
+            <p>最后一次在线校验后 14 天内可用；超过后仅保留阅读/导出，禁用 AI。时钟回拨强制联网；每席位 2 台设备；退款/盗版/共享账号可吊销并降级。</p>
+          </div>
+        </div>
+
+        <h4>计量与对账</h4>
+        <p>计量事件包含 <code>user_id</code>、<code>book_id</code>、<code>stage</code>（decompose/adapt/expand/review）、<code>chapters</code>、<code>input_chars</code>、<code>output_chars</code>、<code>model</code>、<code>tokens</code>、<code>idempotency_key</code>、<code>signature</code>。幂等键由用户+书+阶段+章节范围+内容哈希生成；只计成功产出；服务端账本为准；与供应商账单、本地用量三方日对账。</p>
+
+        <h4>模型网关与 Key 安全</h4>
+        <div class="grid-3">
+          <div class="card"><span class="tag">平台 Key</span><h4>绝不下发</h4><p>客户端拿短期 token 调网关；网关按用户/套餐限流、计费、审计；支持模型白名单与最大 token。</p></div>
+          <div class="card"><span class="tag">BYOK</span><h4>本地加密</h4><p>Windows DPAPI/系统钥匙串；不写日志；不随书稿上传；可直连或走透传网关。</p></div>
+          <div class="card"><span class="tag">防泄漏</span><h4>脱敏 + 告警</h4><p>日志脱敏；禁止 Key 写入 URL/错误上报；XSS 防护；Key 轮换；单用户 token 突增告警。</p></div>
+        </div>
+
+        <h4>支付与退款</h4>
+        <p>国内微信/支付宝，海外 Stripe；订单状态机 created → pending → paid → refunding → refunded → closed；回调验签、幂等、日对账；电子发票；个人 7 天内且用量 &lt;20% 可退，年付按未使用月数扣除已用额度；企业 30 天验收；已消耗额度不退。</p>
+
+        <h4>防白嫖与盗版</h4>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>手段</th><th>具体做法</th><th>注意</th></tr></thead>
+            <tbody>
+              <tr><td>exe 加固</td><td>Nuitka 编译 + Cython 核心；代码签名；反调试；完整性自检；去符号</td><td>PyInstaller 单文件仍可解包，不能作为唯一防线</td></tr>
+              <tr><td>功能开关</td><td>功能/额度由服务端签名下发；客户端只缓存</td><td>不要硬编码“专业版”判断</td></tr>
+              <tr><td>云端校验</td><td>License 7 天刷新；额度实时校验；异常设备吊销</td><td>离线只给宽限，不给永久</td></tr>
+              <tr><td>设备绑定</td><td>机器指纹哈希；每席位 2 台；网页解绑</td><td>只存哈希，注意隐私告知</td></tr>
+              <tr><td>输出水印</td><td>导出文件带用户 ID/时间（可见或隐写）</td><td>便于追溯泄露，不侵犯用户隐私</td></tr>
+              <tr><td>盗版检测</td><td>构建签名/版本号校验；黑名单 License；社区举报</td><td>误伤需申诉通道</td></tr>
+              <tr><td>降级策略</td><td>盗版/吊销后保留阅读/导出，禁用 AI 与批量</td><td>不扣押用户数据，降低投诉</td></tr>
+              <tr><td>定价策略</td><td>免费版可用；个人 ¥29 起；学生/课程折扣</td><td>降低“找破解”的动机</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout">
+          <strong>关键结论：</strong>单机 exe 的“防破解”只能提高成本，不能绝对防住。真正有效的是服务端权益 + 云端额度 + 持续更新 + 低价格；把“破解版”变成“没有云服务就不好用”。
+        </div>
+      </section>
+
+      <section id="s6">
+        <h2><span class="n">6</span>增长与渠道</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>渠道</th><th>具体动作</th><th>目标</th><th>KPI</th><th class="num">首年预算（假设）</th></tr></thead>
+            <tbody>
+              <tr><td>作者社区/QQ 群</td><td>20 个群，发“免费拆解+体检”名额；每周 5 份</td><td>500 条线索</td><td>加微率≥30%，付费率≥10%</td><td class="num">¥0.5 万</td></tr>
+              <tr><td>抖音/B 站教程</td><td>3 个系列：爆款开篇拆解、签约体检、工作室批量改编；不宣传“一键成书”</td><td>10 万播放</td><td>1,000 线索，CAC≤¥100</td><td class="num">¥2 万</td></tr>
+              <tr><td>免费“拆解+体检”</td><td>上传 2 万字→1 页报告；需登录；限 1 次/周</td><td>1,000 注册</td><td>注册→付费≥8%</td><td class="num">¥1 万</td></tr>
+              <tr><td>工作室 BD</td><td>20 家目标工作室；3 家免费试点；转 ¥1,999/季</td><td>3 家付费</td><td>续费率≥60%</td><td class="num">¥1 万</td></tr>
+              <tr><td>KOL 合作</td><td>5–10 位 1–10 万粉作者；专属码 25% 分成</td><td>300 付费</td><td>CAC≤¥120</td><td class="num">¥3 万</td></tr>
+              <tr><td>课程/训练营</td><td>2 场 2 小时工作坊；卖“工具+课程”包</td><td>100 席位</td><td>转化率≥20%</td><td class="num">¥2 万</td></tr>
+              <tr><td>开源/插件生态</td><td>导出番茄/起点/Scrivener；Obsidian 插件；API</td><td>1,000 安装</td><td>月活≥30%</td><td class="num">¥0.5 万</td></tr>
+              <tr><td>短剧/MCN</td><td>与 3 家 MCN 合作，按项目 ¥499/部</td><td>10 部</td><td>复购≥30%</td><td class="num">¥1 万</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>转化漏斗</h3>
+        <div class="funnel">
+          <div><b>免费报告（2 万字）</b> → 注册（看完整报告）</div>
+          <div><b>7 天试用（10 章改编）</b> → 个人版 ¥29/49</div>
+          <div><b>工作室版 ¥199/299</b> → 企业私有化</div>
+        </div>
+        <p>关键指标：注册→试用 40%、试用→付费 15%、月流失 &lt;8%、退款 &lt;5%、NPS &gt;30。</p>
+
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag">不 买 的 流 量</span>
+            <h4>“AI 写书月入过万”</h4>
+            <p>这类用户留存差、平台风险高、退款多。不做“换名洗稿”对比，不做“平台检测绕过”承诺。</p>
+          </div>
+          <div class="card">
+            <span class="tag">用 什 么 做 钩 子</span>
+            <h4>“体检报告”比“生成一章”更有专业感</h4>
+            <p>免费拆解+体检报告 → 注册 → 试用 → 付费；工作室转介绍给 20%–30% 返佣或赠送额度。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="s7">
+        <h2><span class="n">7</span>里程碑与 12 个月财务</h2>
+
+        <div class="timeline">
+          <div class="t-item">
+            <h4>0–3 个月：验证付费意愿与合规底线</h4>
+            <p>改名/ToS/权利声明；相似度报告 MVP；账号+License+额度+网关 MVP；20 本评测集；20 份 ¥99 试点。KPI：≥8 人付费；输出可用率≥70%；3 个案例。预算 ¥5–8 万。</p>
+          </div>
+          <div class="t-item">
+            <h4>3–6 个月：上线个人版/工作室版</h4>
+            <p>支付/订单/发票/退款；额度与试用限流；批量改编；短剧分集导出 MVP；KOL/社区。KPI：300 付费；MRR ¥1.5 万；流失&lt;10%；3 家工作室。预算 ¥8–12 万。</p>
+          </div>
+          <div class="t-item">
+            <h4>6–12 个月：企业私有化与规模化</h4>
+            <p>私有化部署；协作/版本；SLA；API/插件；课程合作。KPI：1,200 付费；MRR ¥5 万；2 家企业；毛利率≥80%。预算 ¥15–25 万。</p>
+          </div>
+        </div>
+
+        <h3>12 个月财务粗算（三档）</h3>
+        <p class="footnote">假设：不含创始人工资；固定成本 lean ¥2.5 万/月、乐观扩张 ¥3.5 万/月；变动成本按收入 15%（模型、支付、支持、退款）；企业客单 ¥19,800/年；服务/课程收入单列。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>项目</th><th class="num">保守</th><th class="num">中性</th><th class="num">乐观</th><th>口径</th></tr></thead>
+            <tbody>
+              <tr><td>M12 付费用户</td><td class="num">300</td><td class="num">1,200</td><td class="num">3,500</td><td>订阅（不含企业）</td></tr>
+              <tr><td>全年平均付费用户</td><td class="num">120</td><td class="num">500</td><td class="num">1,500</td><td>线性爬坡</td></tr>
+              <tr><td>混合 ARPU</td><td class="num">¥39/月</td><td class="num">¥49/月</td><td class="num">¥59/月</td><td>个人/工作室混合</td></tr>
+              <tr><td>订阅收入</td><td class="num">¥5.6 万</td><td class="num">¥29.4 万</td><td class="num">¥106.2 万</td><td>平均付费×ARPU×12</td></tr>
+              <tr><td>企业收入</td><td class="num">¥0</td><td class="num">¥4.0 万</td><td class="num">¥11.9 万</td><td>2/6 家×¥19,800</td></tr>
+              <tr><td>服务/课程</td><td class="num">¥0.8 万</td><td class="num">¥3.0 万</td><td class="num">¥8.0 万</td><td>试点/培训</td></tr>
+              <tr><td><strong>总收入</strong></td><td class="num"><strong>¥6.4 万</strong></td><td class="num"><strong>¥36.4 万</strong></td><td class="num"><strong>¥126.1 万</strong></td><td></td></tr>
+              <tr><td>固定成本</td><td class="num">¥30 万</td><td class="num">¥30 万</td><td class="num">¥42 万</td><td>¥2.5/3.5 万×12</td></tr>
+              <tr><td>变动成本</td><td class="num">¥1.0 万</td><td class="num">¥5.5 万</td><td class="num">¥18.9 万</td><td>收入 15%</td></tr>
+              <tr><td><strong>净利</strong></td><td class="num"><strong>-¥24.6 万</strong></td><td class="num"><strong>+¥0.9 万</strong></td><td class="num"><strong>+¥65.2 万</strong></td><td>税前、不含创始人工</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid-3">
+          <div class="card"><span class="tag">保 守</span><h4>-¥24.6 万</h4><p>需要 ¥25–30 万启动资金撑过 12 个月；适合先卖服务、后卖软件。</p></div>
+          <div class="card"><span class="tag">中 性</span><h4>+¥0.9 万</h4><p>M10–M12 打平；前提是试用→付费≥15%、月流失≤10%、CAC≤¥100。</p></div>
+          <div class="card"><span class="tag">乐 观</span><h4>+¥65.2 万</h4><p>需要 3,500 付费 + 6 家企业；依赖渠道爆发，不建议按此配置固定成本。</p></div>
+        </div>
+
+        <h3>资金用途</h3>
+        <p>产品/技术 50%（账号/License/网关/计量/客户端加固/短剧导出）；市场/渠道 30%（社区、KOL、课程、工作室 BD）；法务/合规 10%（知识产权、ToS、合同、检测合作）；运营/客服 10%（文档、培训、退款准备金）。</p>
+        <div class="callout">
+          建议先自筹 ¥20–30 万验证；达到 300 付费/3 家工作室后再考虑融资 ¥100–200 万（3–4 人团队 12 个月）。
+        </div>
+      </section>
+
+      <section id="s8">
+        <h2><span class="n">8</span>先验证再投入的关键实验</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>实验</th><th>假设</th><th>方法</th><th>成功标准</th><th>失败/止损</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td><strong>付费意愿测试</strong></td><td>个人作者愿为“拆解+体检”付 ¥99</td><td>20 位目标作者，交付 1 本报告+30 分钟解读</td><td>≥8 人付费（40%）；≥5 人愿购月付</td><td>&lt;4 人付费 → 停止做 SaaS，转服务</td></tr>
+              <tr><td>2</td><td><strong>工作室试点</strong></td><td>工作室愿为批量+保密付 ¥1,999/季</td><td>3 家工作室，2 周试点，1 本真实项目</td><td>2 家续费；交付周期缩短≥30%</td><td>0 家续费 → 转定制服务/短剧</td></tr>
+              <tr><td>3</td><td><strong>质量基准</strong></td><td>改编稿“可用/稍改可用”≥70%</td><td>20 本书，3 名编辑盲评；一致性错误计数</td><td>可用率≥70%；错误≤2/10 章</td><td>&lt;50% → 先修质量，不扩客</td></tr>
+              <tr><td>4</td><td><strong>合规体检</strong></td><td>检测结果能帮用户降风险，而非“包过”</td><td>10 份输出跑朱雀/平台检测；人工复核</td><td>与人工判断一致率≥70%；高风险章节可定位</td><td>一致率&lt;50% → 不做检测承诺</td></tr>
+              <tr><td>5</td><td><strong>价格测试</strong></td><td>¥29/¥49/¥199 中有一档最优</td><td>150 条线索随机三档；测转化与 ARPU</td><td>找到转化×ARPU 最大档；退款&lt;5%</td><td>都低于 5% → 价格或价值不成立</td></tr>
+              <tr><td>6</td><td><strong>渠道测试</strong></td><td>内容/社区 CAC≤¥100</td><td>3 条抖音+5 个群+1 场直播</td><td>1,000 线索；CAC≤¥100</td><td>CAC&gt;¥300 → 停投放，转 BD</td></tr>
+              <tr><td>7</td><td><strong>服务先行</strong></td><td>先卖 ¥199/本“拆解+体检”能覆盖成本</td><td>10 单人工交付，记录工时</td><td>≥5 单；毛利≥50%</td><td>&lt;2 单 → 需求伪命题</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <strong>Go/No-Go 门槛（0–3 个月）：</strong>实验 1 ≥8 人付费、实验 3 可用率≥70%、实验 2 ≥1 家工作室续费。三项中两项不达标，不做完整订阅系统，转向“工作室定制 + 短剧项目制”。
+        </div>
+      </section>
+
+      <section id="s9">
+        <h2><span class="n">9</span>来源、假设与最后的判断</h2>
+
+        <h3>关键假设清单</h3>
+        <div class="grid-2">
+          <div class="card">
+            <span class="tag">市 场 / 政 策</span>
+            <h4>不会急剧恶化</h4>
+            <p>模型价格维持 2026-11 水平；平台对 AI 辅助的监管不进一步收紧。若全面禁止 AI 参与正文，网文投稿场景收入可能下降 50%–80%。</p>
+          </div>
+          <div class="card">
+            <span class="tag">转 化 / 成 本</span>
+            <h4>个人付费 10%–15%</h4>
+            <p>月流失 8%–10%；工作室续费 60%；企业转化 2–6 家/年；固定成本不含创始人工资；单本模型成本按 ¥4–6 中位。</p>
+          </div>
+        </div>
+
+        <h3>公开来源（查询日期均为 2026-11-04）</h3>
+        <ol class="source-list">
+          <li>国家新闻出版署：《2025 年度中国网络文学发展报告》 — https://www.nppa.gov.cn/xxfb/ywdt/202610/t20261016_1012682.html</li>
+          <li>中国作家网：《2025 中国网络文学蓝皮书》 — https://www.chinawriter.com.cn/n1/2026/0810/c404023-40776811.html</li>
+          <li>新浪财经/艾媒咨询：2025 微短剧 677.9 亿元、2026 预计 793.3 亿元 — https://finance.sina.com.cn/wm/2026-10-31/doc-inixakuy5070607.shtml</li>
+          <li>36 氪/DataEye：2026 微短剧+AI 剧漫剧预计 1,210 亿元 — https://m.36kr.com/p/3924831083435650</li>
+          <li>36 氪/娱乐资本论：《AI 小说大逃杀》 — https://m.36kr.com/p/3823332568666240</li>
+          <li>界面新闻：番茄 7 月拒签 16 万本、清理 5.4 万本 — https://www.jiemian.com/article/14946305.html</li>
+          <li>新浪财经：平台 AI 检测阈值 — https://cj.sina.com.cn/articles/view/7879996023/1d5af327706801p3ha</li>
+          <li>光明网：短剧侵权小说判赔 15 万元 — http://legal.gmw.cn/2026-04/26/content_38738685.htm</li>
+          <li>法治日报：宁波短剧改编案判赔 25 万元 — http://epaper.legaldaily.com.cn/fzrb/content/20251105/Articel06004GN.htm</li>
+          <li>DeepSeek 官方价格 — https://api-docs.deepseek.com/zh-cn/quick_start/pricing</li>
+          <li>Sudowrite 定价 — https://sudowrite.com/pricing</li>
+          <li>NovelAI 定价（第三方汇总） — https://aivario.com/tools/novelai</li>
+          <li>Jasper 定价 — https://www.jasper.ai/pricing</li>
+          <li>蛙蛙写作 App Store — https://apps.apple.com/cn/app/id6758374411</li>
+          <li>彩云小梦 App Store — https://apps.apple.com/cn/app/id1564619616</li>
+          <li>阿里云妙笔计费 — https://help.aliyun.com/zh/model-studio/miaobi-billing</li>
+          <li>火山剧创套餐 — https://docs.volcengine.com/docs/drama-creation/package-description?lang=zh</li>
+          <li>易撰专业版 ¥996/年 — https://m.36dianping.com/price/4333500104</li>
+          <li>优采云深度改写计费 — https://www.ucaiyun.cn/article/410559</li>
+          <li>腾讯朱雀 AIGC 检测 — https://cloud.tencent.com/document/product/1552/137539</li>
+        </ol>
+        <p class="footnote">注：部分第三方页面价格可能非官方实时价；蛙蛙写作存在“¥29/月、¥298/年”与 App Store 内购档位不一致的情况，本报告以“价格带”处理。NovelAI $10/$15/$25 为第三方汇总，待官方复核。</p>
+
+        <h3>代码与数据引用</h3>
+        <div class="chips">
+          <span class="tag">src/decompose.py</span>
+          <span class="tag">src/adapt.py</span>
+          <span class="tag">src/story_bible.py</span>
+          <span class="tag">src/review.py</span>
+          <span class="tag">src/webapp.py</span>
+          <span class="tag">src/desktop_app.py</span>
+          <span class="tag">src/build_app.py</span>
+          <span class="tag">src/usage.py</span>
+          <span class="tag">web/src/components/SettingsModal.vue</span>
+          <span class="tag">data/_system/usage.jsonl</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="lead">
+          <strong>最后的判断：</strong>能做，但不要按“AI 一键写书”去做。真正值得卖的是“把编辑经验产品化”：标准本、章节骨架、角色/势力池、签约体检、批量交付、私有化。最大的敌人不是竞品，而是版权与平台规则；先把“合规再创作”做成产品能力，再谈增长。
+        </div>
+        <div class="callout">
+          收费上，订阅底座 + 用量包 + 席位/模块，是唯一能同时兼顾低门槛与高毛利的组合；无限量套餐会吸引最重的用户，赶走利润。先用 20 个作者、3 家工作室验证付费意愿；数据不达标就转服务/短剧，不要先写完整的账号与支付系统。
+        </div>
+        <p class="footnote">免责声明：本报告为商业分析，不构成法律意见。版权、平台规则、税务与支付合规事项，请在上线前咨询专业律师/会计师。</p>
+      </section>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

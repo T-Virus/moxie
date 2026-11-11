@@ -1,0 +1,116 @@
+# Build and Release Folders
+bin-debug/
+bin-release/
+[Oo]bj/
+[Bb]in/
+
+# Other files and folders
+.settings/
+.playwright-cli/
+
+# Executables
+*.swf
+*.air
+*.ipa
+*.apk
+
+# Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
+# should NOT be excluded as they contain compiler settings and other important
+# information for Eclipse / Flash Builder.
+
+# ------------------------------------------------------------------
+# Python
+# ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+# PyInstaller 每次打包都会重新生成 spec，真正的打包参数在 src/build_app.py
+*.spec
+.venv/
+venv/
+build/
+dist/
+data/
+input/
+.idea/
+.vscode/
+.trae/
+# ------------------------------------------------------------------
+# 运行产物 / 中间件（如需作为样例版本化，删掉下面这几行即可）
+# ------------------------------------------------------------------
+input/
+novel_output/
+output/
+data/decomposed.json
+data/decomposed.raw.txt
+data/dec_*.json
+*_bak.json
+chapters.demo.bak.json
+
+# ------------------------------------------------------------------
+# 密钥：绝不入库
+# ------------------------------------------------------------------
+.env
+deepseek_key.txt
+api_key.txt
+
+# 明文提示词配置绝不入库 / 分发（客户端只用 src/prompts.py 内置提示词）
+user_prompt_settings.txt
+
+# ------------------------------------------------------------------
+# 系统
+# ------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.pid
+
+# 工具/测试缓存与临时分享包（可随时重新生成）
+.pytest_cache/
+.trae-html-share-packages/
+
+# 运行日志（启动脚本重定向出来的控制台输出，不入库）
+*.log
+!.gitignore
+
+web/node_modules/*
+web/node_modules/.vite/*
+web/node_modules/.vite/deps/*
+admin/node_modules/
+
+# ------------------------------------------------------------------
+# 工程化：E2E / 运维演练产物（报告与脚本入库，运行产物不入库）
+# ------------------------------------------------------------------
+e2e/node_modules/
+e2e/test-results/
+e2e/artifacts/
+e2e/playwright-report/
+ops/backups/
+
+# 服务端测试临时产物（pytest 运行生成，不属于交付物）
+server/tmp_alembic.db
+server/tmp_artifacts/
+
+# ------------------------------------------------------------------
+# 自动更新：发布产物与本地调试密钥（绝不入库）
+# ------------------------------------------------------------------
+dist-release/
+release-notes.txt
+ops/release/keys/
+update-private.pem
+*.pem
+
+# ------------------------------------------------------------------
+# 手机端构建产物 / 工具链 / 签名密钥（不入库）
+# ------------------------------------------------------------------
+mobile/.toolchain/
+mobile/build/
+mobile/assets/fonts/*.otf
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/release.keystore
+mobile/android/app/build/
+mobile/android/app/src/main/python/
+mobile/android/app/src/main/assets/www/
+mobile/android/app/src/main/assets/seed/
+.gradle/

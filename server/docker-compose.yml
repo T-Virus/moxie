@@ -1,0 +1,170 @@
+name: moxie-server
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-moxie}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_DB: ${POSTGRES_DB:-moxie}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-moxie} -d ${POSTGRES_DB:-moxie}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-me-minio-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-change-me-minio-secret} &&
+      mc mb -p local/${S3_BUCKET:-moxie} || true
+      "
+    restart: "no"
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-moxie}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-moxie}
+      REDIS_URL: redis://redis:6379/0
+      AUTO_CREATE_TABLES: "false"
+      # 提示词/分段复用桌面端 src（只读）
+      SRC_PATH: /src
+      TASK_SOURCE_DIRS: /data/input
+      # 产物与上传源文件默认全部落库；无 MinIO 也能运行
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-db}
+      STORAGE_LOCAL_DIR: /var/lib/moxie/artifacts
+      STORAGE_PUBLIC_BASE_URL: ${STORAGE_PUBLIC_BASE_URL:-http://127.0.0.1:8000}
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://127.0.0.1:9000}
+      S3_BUCKET: ${S3_BUCKET:-moxie}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change-me-minio-secret}
+      S3_SECURE: "false"
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../src:/src:ro
+      - ../input:/data/input:ro
+      - ../dist:/app/dist:ro
+      - ../mobile/dist:/app/mobile/dist:ro
+      - artifactdata:/var/lib/moxie/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-moxie}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-moxie}
+      REDIS_URL: redis://redis:6379/0
+      AUTO_CREATE_TABLES: "false"
+      SRC_PATH: /src
+      TASK_SOURCE_DIRS: /data/input
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-db}
+      STORAGE_LOCAL_DIR: /var/lib/moxie/artifacts
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-moxie}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change-me-minio-secret}
+      S3_SECURE: "false"
+    command: ["rq", "worker", "moxie", "--url", "redis://redis:6379/0"]
+    volumes:
+      - ../src:/src:ro
+      - ../input:/data/input:ro
+      - artifactdata:/var/lib/moxie/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  scheduler:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-moxie}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-moxie}
+      REDIS_URL: redis://redis:6379/0
+      AUTO_CREATE_TABLES: "false"
+      SRC_PATH: /src
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-db}
+      STORAGE_LOCAL_DIR: /var/lib/moxie/artifacts
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-moxie}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change-me-minio-secret}
+      S3_SECURE: "false"
+    command: ["python", "-m", "app.scheduler"]
+    volumes:
+      - ../src:/src:ro
+      - artifactdata:/var/lib/moxie/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  # 注意：Web 网关(nginx) 已拆到同目录的 docker-compose.web.yml，仅线上/ECS 通过
+  #   docker compose -f docker-compose.yml -f docker-compose.web.yml up -d --build
+  # 叠加加载；本地 start_online.bat 只加载本文件，不会启动 nginx。
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  artifactdata:

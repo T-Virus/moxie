@@ -1,0 +1,43 @@
+# Prometheus 抓取配置（墨写服务端 /metrics）
+#
+# 指标来源：server/app/metrics.py + main.py 的 GET /metrics
+# 已核对实际暴露的指标名（2026-11）：
+#   counter: moxie_tasks_total{status}
+#            moxie_tasks_requeued_total
+#            moxie_model_calls_total{route}
+#            moxie_model_cost_cents_total
+#            moxie_model_tokens_total
+#            moxie_webhook_failures_total{provider,code}
+#            moxie_webhook_duplicates_total{provider}
+#            moxie_quota_rejections_total{metric}
+#            moxie_usage_alerts_total
+#            moxie_rate_limited_total{scope}
+#            moxie_uploads_total / moxie_upload_bytes_total
+#            moxie_upload_rejected_total{reason}
+#            moxie_uploads_deleted_total
+#   gauge:   moxie_queue_depth（抓取时从数据库实时计算）
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    service: moxie-server
+
+scrape_configs:
+  - job_name: moxie-api
+    metrics_path: /metrics
+    static_configs:
+      # docker compose 内部服务名；宿主机调试时改成 host.docker.internal:8000
+      - targets: ["api:8000"]
+        labels:
+          instance_role: api
+
+  - job_name: moxie-local
+    metrics_path: /metrics
+    static_configs:
+      # 本地 SQLite 模式（python ops/loadtest/run_local.py 默认端口 8798）
+      - targets: ["host.docker.internal:8798"]
+        labels:
+          instance_role: local-sqlite
+
+  # worker / scheduler 若各自暴露 /metrics（多进程部署时按实例聚合），按需追加 target。

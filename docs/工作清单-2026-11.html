@@ -1,0 +1,1810 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>墨写工作清单（2026-11）</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --ink: #17202a;
+    --muted: #5b6b7c;
+    --line: #dbe4ec;
+    --brand: #4a2f7a;
+    --brand-2: #7c3aed;
+    --accent: #b45309;
+    --yes: #0f766e;
+    --no: #b91c1c;
+    --partial: #b45309;
+    --unknown: #6b7280;
+    --p0: #b91c1c;
+    --p1: #b45309;
+    --p2: #475569;
+    --done: #0f766e;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: linear-gradient(180deg, #ece7f6 0, var(--bg) 340px, var(--bg) 100%);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    font-size: 16px;
+    line-height: 1.78;
+  }
+  .page { max-width: 1240px; margin: 0 auto; padding: 28px 20px 72px; }
+  .hero {
+    background: linear-gradient(135deg, #241344 0%, #4a2f7a 52%, #7c3aed 100%);
+    color: #fff;
+    border-radius: 22px;
+    padding: 42px 46px 36px;
+    box-shadow: 0 18px 50px rgba(36, 19, 68, .24);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: ""; position: absolute; right: -90px; top: -110px;
+    width: 340px; height: 340px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,.18), rgba(255,255,255,0) 68%);
+  }
+  .eyebrow { font-size: 12px; letter-spacing: .18em; opacity: .78; text-transform: uppercase; }
+  .hero h1 { margin: 10px 0 16px; font-size: clamp(26px, 4vw, 42px); line-height: 1.25; font-weight: 750; }
+  .hero .meta { color: rgba(255,255,255,.85); font-size: 14px; line-height: 1.85; max-width: 980px; }
+  .hero .stamp {
+    display: inline-block; margin-top: 20px; padding: 6px 12px; border-radius: 999px;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.24);
+    font-size: 12px; letter-spacing: .04em;
+  }
+  .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 26px; margin-top: 26px; align-items: start; }
+  .toc {
+    position: sticky; top: 18px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; padding: 18px 18px 14px; box-shadow: 0 8px 24px rgba(23,32,42,.05);
+    max-height: calc(100vh - 40px); overflow: auto;
+  }
+  .toc-title { font-weight: 750; font-size: 13px; letter-spacing: .12em; color: var(--brand); margin-bottom: 8px; }
+  .toc ol { margin: 0; padding-left: 18px; }
+  .toc li { margin: 6px 0; font-size: 13px; line-height: 1.5; }
+  .toc a { color: var(--muted); text-decoration: none; }
+  .toc a:hover { color: var(--brand-2); }
+  main {
+    background: var(--card); border: 1px solid var(--line); border-radius: 20px;
+    padding: 34px 40px 46px; box-shadow: 0 12px 36px rgba(23,32,42,.06);
+    min-width: 0;
+  }
+  h2 { margin: 46px 0 14px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 24px; line-height: 1.35; color: #2f1c56; }
+  h2:first-of-type { margin-top: 8px; padding-top: 0; border-top: 0; }
+  h3 { margin: 30px 0 10px; font-size: 19px; color: #4a2f7a; }
+  p { margin: 10px 0; }
+  a { color: #6d28d9; }
+  strong { color: #2f1c56; }
+  blockquote {
+    margin: 14px 0; padding: 12px 18px; border-left: 4px solid var(--brand-2);
+    background: #f6f2ff; color: #44385a; border-radius: 0 10px 10px 0;
+  }
+  code {
+    background: #f1edf8; color: #4a2f7a; padding: 2px 6px; border-radius: 5px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: .9em;
+    word-break: break-word;
+  }
+  .table-wrap { overflow-x: auto; margin: 16px 0 24px; border: 1px solid var(--line); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.65; min-width: 760px; }
+  thead th {
+    background: #4a2f7a; color: #fff; text-align: left; font-weight: 650;
+    padding: 10px 12px; border-right: 1px solid rgba(255,255,255,.16); vertical-align: top;
+  }
+  tbody td { padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: top; word-break: break-word; }
+  tbody tr:nth-child(even) { background: #faf9fd; }
+  tbody tr:hover { background: #f4f0ff; }
+  .badge {
+    display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+    font-weight: 700; line-height: 1.7; white-space: nowrap;
+  }
+  .badge.yes { color: #fff; background: var(--yes); }
+  .badge.no { color: #fff; background: var(--no); }
+  .badge.partial { color: #fff; background: var(--partial); }
+  .badge.unknown { color: #fff; background: var(--unknown); }
+  .badge.p0 { color: #fff; background: var(--p0); }
+  .badge.p1 { color: #fff; background: var(--p1); }
+  .badge.p2 { color: #fff; background: var(--p2); }
+  .badge.done { color: #fff; background: var(--done); }
+  hr { border: 0; border-top: 1px dashed var(--line); margin: 26px 0; }
+  footer { margin-top: 26px; color: var(--muted); font-size: 12px; text-align: center; }
+  @media (max-width: 980px) {
+    .layout { grid-template-columns: 1fr; }
+    .toc { position: static; max-height: none; }
+    main { padding: 26px 22px 36px; }
+    .hero { padding: 30px 24px 26px; }
+  }
+  @media print {
+    body { background: #fff; }
+    .hero { box-shadow: none; }
+    .toc { display: none; }
+    .layout { display: block; }
+    main { border: 0; box-shadow: none; padding: 0; }
+    .table-wrap { overflow: visible; }
+    table { min-width: 0; }
+    tr { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div class="eyebrow">Action Plan · 2026-11</div>
+    <h1>墨写工作清单（2026-11）</h1>
+    <div class="meta">目标：3 个月内形成「可收费的最小闭环」，不继续堆功能。<br>输入：<code>docs/墨写商业计划书-2026-11.md</code>、<code>docs/竞品对比-阅文作家助手-2026-11-06.md</code>、<code>docs/项目缺口清单-2026-11.md</code>、<code>docs/服务端架构与订阅计费设计-2026-11.md</code>，以及 2026-11-06 的公开竞品检索。<br>口径：官方页面优先；查不到写「未证实」；价格均为查询日口径；「人日」按 1 名全职工程师计，不含外部审批等待。<br>查询日期：2026-11-06（Asia/Shanghai）</div>
+    <div class="stamp">查询日期：2026-11-06 · Asia/Shanghai</div>
+  </header>
+  <div class="layout">
+    <nav class="toc"><div class="toc-title">目录</div><ol><li><a href="#0">0. 结论先行</a></li>
+<li><a href="#1-2026-11-06">1. 横向对比（2026-11-06）</a></li>
+<li><a href="#2">2. 结合已有材料的三个判断</a></li>
+<li><a href="#3">3. 已完成基线（不排期）</a></li>
+<li><a href="#4">4. 工作清单</a></li>
+<li><a href="#5-p0">5. P0 汇总（不做就没法收钱/验证）</a></li>
+<li><a href="#6-4">6. 4 周排期</a></li>
+<li><a href="#7">7. 人工决策项</a></li>
+<li><a href="#8">8. 验收与复盘</a></li>
+<li><a href="#9">9. 来源与未证实清单</a></li></ol></nav>
+    <main>
+<h2 id="0">0. 结论先行</h2>
+<p><strong>三条判断</strong></p>
+<ol>
+<li><strong>已经饱和的是「生成」和「单点结构」</strong>：续写、扩写、润色、纠错、起名、单章章纲、结构化设定库，国内外都有人做，且平台内置工具免费。再做一遍不构成差异。</li>
+<li><strong>我们唯一别人没有的，是「可审计的组合闭环」</strong>：授权/自有作品 → 结构化拆解 → 可编辑 JSON 中间层 → 批量改编 → 体检/敏感词/相似度 → 带 AIGC 声明的 docx/md/txt + JSON 交付，再叠加 BYOK、多模型、本地/私有化与成本账本。单点都能被复制，组合很难。</li>
+<li><strong>可收费最小闭环还缺的不是功能，而是「能收钱、敢收钱、值这个钱」的三类基础设施</strong>：真实支付凭据与生产密钥、法律文本与权利确认、真实模型与质量基线。这三类不补，功能再多也只能卖人工服务。</li>
+</ol>
+<p><strong>最小闭环定义（验收用）</strong></p>
+<p><strong>4 周摘要</strong></p>
+<ul>
+<li><strong>第 1 周</strong>：定价/法务口径拍板；支付凭据申请；生产密钥与 provider 收口；法律文本起草；数据清理。</li>
+<li><strong>第 2 周</strong>：支付沙箱跑通；BYOK 透传；整本交付包；真实模型接入；黄金评测集与基线。</li>
+<li><strong>第 3 周</strong>：付费墙/额度提示；弱网重试；一致性与相似度报告；退款/开票 SOP；3 家工作室试点。</li>
+<li><strong>第 4 周</strong>：onboarding 与案例；通知/对账；收费试点；复盘与修复。</li>
+</ul>
+<hr />
+<h2 id="1-2026-11-06">1. 横向对比（2026-11-06）</h2>
+<h3 id="11">1.1 样本与方法</h3>
+<ul>
+<li><strong>覆盖</strong>：中文 8 个（阅文作家助手/妙笔、番茄作家工具、蛙蛙写作、笔灵 AI、秘塔写作猫、腾讯 Effidit、彩云小梦、墨狐 AI）；海外 8 个（NovelAI、Sudowrite、Novelcrafter、AI Dungeon、Squibler、KoboldAI、SillyTavern、Dreamily）。</li>
+<li><strong>证据等级</strong>：官方页面/官方公告 &gt; 应用商店官方描述 &gt; 第三方评测/社区。第三方口径统一标「未证实」。</li>
+<li><strong>状态定义</strong>：<strong>有</strong>＝官方明确提供；<strong>部分</strong>＝只覆盖一段（如只做章纲提取、只做导入反推）；<strong>无</strong>＝官方明确没有或功能清单无；<strong>未证实</strong>＝只有第三方/社区口径。</li>
+<li><strong>口径提醒</strong>：阿里云「妙笔」是企业写作平台，「妙笔生花」（wordflower.cn）是第三方工具，均不是阅文妙笔；番茄的 AI 续写不能算到阅文头上。</li>
+</ul>
+<h3 id="12">1.2 中文产品：功能面</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>产品</th>
+<th>目标用户</th>
+<th>输入形态</th>
+<th>产出物</th>
+<th>拆解他人作品</th>
+<th>可编辑中间层</th>
+<th>导出/工程化</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>阅文作家助手/妙笔</strong></td>
+<td>阅文系签约/驻站作者、新人</td>
+<td>自己章节 + 指令；模板、一句灵感</td>
+<td>起名/简介、设定灵感、润色/纠错、章纲提取、后续十章章纲、角色关系、问全书、发布风险提示；<strong>无正文续写</strong>（官方未见）</td>
+<td><span class="badge no">无</span>：只做自己稿件的章纲提取</td>
+<td><span class="badge partial">部分</span>：对话式/模板式；无 JSON、无字段化设定导出</td>
+<td><span class="badge partial">部分</span>：章节/草稿可导出；无 JSON/API/流水线</td>
+</tr>
+<tr>
+<td><strong>番茄作家工具</strong></td>
+<td>番茄签约/驻站作者、新人</td>
+<td>一句灵感 + 分类、现有正文、选中段落</td>
+<td>开书灵感、生成大纲、续写、扩写/改写、AI 起名、章节风险提示</td>
+<td><span class="badge no">无</span>官方入口</td>
+<td><span class="badge partial">部分</span>：大纲可改；无结构化设定库/JSON</td>
+<td><span class="badge partial">部分</span>：站内发布为主；文件导出未证实</td>
+</tr>
+<tr>
+<td><strong>蛙蛙写作</strong></td>
+<td>网文作者 + 编剧/漫剧</td>
+<td>一句话、总纲/卷纲/章纲、拆书模板</td>
+<td>总纲→卷纲→章纲→正文、人物标签、拆书模板、剧本/视频</td>
+<td><span class="badge yes">有</span>：拆平台爆款规律；任意作品上传未证实</td>
+<td><span class="badge partial">部分</span>：纲/人物标签/伏笔台账联动；无 JSON</td>
+<td><span class="badge unknown">未证实</span>：第三方称 TXT/Word，官网未明示</td>
+</tr>
+<tr>
+<td><strong>笔灵 AI</strong></td>
+<td>网文新手、副业签约（番茄/晋江/七猫案例）</td>
+<td>一句话/题材模板、大纲、上传小说</td>
+<td>大纲、正文、拆书报告、黄金开头、去 AI 味、预审核</td>
+<td><span class="badge yes">有</span>：上传小说自动拆人物/情节/情绪</td>
+<td><span class="badge partial">部分</span>：大纲/细纲可改；无世界观库/JSON</td>
+<td><span class="badge partial">部分</span>：Word 一键导出</td>
+</tr>
+<tr>
+<td><strong>秘塔写作猫</strong></td>
+<td>学生、职场、编辑、公文</td>
+<td>全文/Word、自然语言指令</td>
+<td>纠错、改写润色、续写、翻译、配图；无章纲/设定/网文体检</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span>：文档级</td>
+<td><span class="badge partial">部分</span>：Word 上传导出、多人协作</td>
+</tr>
+<tr>
+<td><strong>腾讯 Effidit</strong></td>
+<td>中英文写作者、学术作者</td>
+<td>句/段/全文、关键词</td>
+<td>纠错、补全、改写扩写、例句/词语推荐、四风格续写；无章纲/设定</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge partial">部分</span>：在线/客户端句级辅助；无工程化交付</td>
+</tr>
+<tr>
+<td><strong>彩云小梦</strong></td>
+<td>C 端轻创作、角色聊天/同人</td>
+<td>开头或已有段落</td>
+<td>多分支续写、平行世界、角色对话/语音；无章纲/设定/体检</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span>：分支可回溯，非结构化库</td>
+<td><span class="badge unknown">未证实</span>：App 内为主，文件导出未证实</td>
+</tr>
+<tr>
+<td><strong>墨狐 AI</strong></td>
+<td>男频日更网文作者</td>
+<td>续写段落、大纲、题材</td>
+<td>续写（宣称日更 2 万+）、大纲、素材、剧情树、小说转剧本</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge partial">部分</span>：剧情树/大纲</td>
+<td><span class="badge unknown">未证实</span></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="13">1.3 中文产品：商业面</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>产品</th>
+<th>模型/BYOK</th>
+<th>价格与计费</th>
+<th>分发/品牌背书</th>
+<th>明显短板</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>阅文作家助手/妙笔</strong></td>
+<td>内置 DeepSeek V4.1 + Qwen3-Max 推理版；<strong>无 BYOK</strong></td>
+<td>App 免费；AI 消耗「墨水」；现金价目未公开（未证实）</td>
+<td>阅文/起点官方；多端；App Store 约 3.7 万评分、4.8 分</td>
+<td>绑定阅文生态；正文级生成弱；长文 RAG 在 12 万字后有作者反馈质量下降（社区，未证实）</td>
+</tr>
+<tr>
+<td><strong>番茄作家工具</strong></td>
+<td>未披露；无 BYOK</td>
+<td>免费；AI 按作家等级配额（lv0 四类各 5 次/天，官方等级文章口径，数字需复核）</td>
+<td>字节/番茄自有分发</td>
+<td>AI 续写/扩写<strong>仅限非保底作者</strong>；开书灵感仅电脑端后台；强绑定生态</td>
+</tr>
+<tr>
+<td><strong>蛙蛙写作</strong></td>
+<td>可选内置模型；无 BYOK</td>
+<td>黄金 ¥49/月、¥132/季；铂金 ¥89/月；无限月卡 ¥213；日卡 ¥14/39/59（App Store）</td>
+<td>自称 30 万创作者；供稿美团小说</td>
+<td>会员档 + 字数包叠加，成本不透明；拆书是平台爆款规律，不是可复用资产</td>
+</tr>
+<tr>
+<td><strong>笔灵 AI</strong></td>
+<td>未披露；无 BYOK</td>
+<td>终身 ¥199（原价 ¥497/499）、¥29.9/3 天卡、字数包；数字产品不退</td>
+<td>自称 200 万用户 + 课程/签约案例；无大厂</td>
+<td>黑猫投诉「终身会员名不副实、核心功能跳转付费」、退款难；官网口号「写的好不如仿的好」有合规风险</td>
+</tr>
+<tr>
+<td><strong>秘塔写作猫</strong></td>
+<td>自研 MetaLLM（已备案）；无 BYOK</td>
+<td>基础 ¥48/月、¥108/季；高级 ¥96/月、¥498/年；1 万字 ¥19 字数包</td>
+<td>秘塔科技；上千万用户</td>
+<td>非网文工程化；长篇设定一致性弱</td>
+</tr>
+<tr>
+<td><strong>腾讯 Effidit</strong></td>
+<td>腾讯 AI Lab 自研；无 BYOK</td>
+<td>免费（官方自述研究性原型）</td>
+<td>腾讯 AI Lab</td>
+<td>无长篇项目管理、无章纲/设定/交付</td>
+</tr>
+<tr>
+<td><strong>彩云小梦</strong></td>
+<td>自研/升级续写模型；无 BYOK</td>
+<td>免费增值；连续包月 ¥25、季 ¥48、年 ¥188；会员每月 10 万字 + 400 分钟语音</td>
+<td>彩云科技；应用商店分发</td>
+<td>移动端为主；月 10 万字上限；无工程化</td>
+</tr>
+<tr>
+<td><strong>墨狐 AI</strong></td>
+<td>接入 DeepSeek（普通/升级/定制三档）；无 BYOK</td>
+<td>官方未标金额（仅 30/90/365 天权益）；第三方称 ¥249/月、¥996/年（未证实）</td>
+<td>北京云泥科技（第三方）；无大厂</td>
+<td>无拆书/体检；价格不透明</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="14">1.4 海外产品：功能面</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>产品</th>
+<th>目标用户</th>
+<th>输入形态</th>
+<th>产出物</th>
+<th>拆解他人作品</th>
+<th>可编辑中间层</th>
+<th>导出/工程化</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>NovelAI</strong></td>
+<td>互动叙事、二次元创作者</td>
+<td>续写提示 + Memory + Lorebook</td>
+<td>正文续写、Text Adventure、图像</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge yes">有</span>：Lorebook、.story</td>
+<td><span class="badge partial">部分</span>：.story/.scenario、内嵌 PNG；无 API</td>
+</tr>
+<tr>
+<td><strong>Sudowrite</strong></td>
+<td>英文小说/编剧作者</td>
+<td>braindump、大纲、半成品全文</td>
+<td>Synopsis、角色、世界观、Outline、正文、Beta 反馈</td>
+<td><span class="badge partial">部分</span>：Import Novel 反推自己的 Story Bible；非拆他人作品</td>
+<td><span class="badge yes">有</span>：Story Bible</td>
+<td><span class="badge yes">有</span>：docx、Google Docs、整本合并</td>
+</tr>
+<tr>
+<td><strong>Novelcrafter</strong></td>
+<td>长篇/系列小说作者</td>
+<td>空白、docx/markdown、scene beats</td>
+<td>正文、场景摘要、Codex、Review</td>
+<td><span class="badge partial">部分</span>：AI 角色抽取、正文提及索引</td>
+<td><span class="badge yes">有</span>：Codex（自定义字段、Progressions）</td>
+<td><span class="badge partial">部分</span>：docx/markdown；无原生 PDF/EPUB</td>
+</tr>
+<tr>
+<td><strong>AI Dungeon</strong></td>
+<td>互动小说/跑团玩家</td>
+<td>场景 + 角色 + 逐回合动作</td>
+<td>互动叙事、图像</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge yes">有</span>：Story Cards(JSON)、Memory Bank、Plot Essentials</td>
+<td><span class="badge yes">有</span>：Adventure .zip、Story Cards JSON</td>
+</tr>
+<tr>
+<td><strong>Squibler</strong></td>
+<td>作者/编剧/团队</td>
+<td>idea + genre + Elements、聊天</td>
+<td>整本书/剧本、Outline、配图</td>
+<td><span class="badge unknown">未证实</span></td>
+<td><span class="badge partial">部分</span>：Elements</td>
+<td><span class="badge yes">有</span>：PDF/Kindle/Word/Text；无 JSON/API</td>
+</tr>
+<tr>
+<td><strong>KoboldAI</strong></td>
+<td>本地/自建 LLM 极客</td>
+<td>prompt + Memory + World Info</td>
+<td>续写/文字冒险</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge yes">有</span>：World Info/Save-Load</td>
+<td><span class="badge partial">部分</span>：保存/加载；非产品化</td>
+</tr>
+<tr>
+<td><strong>SillyTavern</strong></td>
+<td>角色扮演/LLM 玩家</td>
+<td>角色卡 + 对话 + World Info/RAG</td>
+<td>对话叙事；非书稿</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge yes">有</span>：角色卡/World Info</td>
+<td><span class="badge partial">部分</span>：角色/全量备份；非书稿交付</td>
+</tr>
+<tr>
+<td><strong>Dreamily</strong></td>
+<td>已停服（2026-04-21）</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="15">1.5 海外产品：商业面</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>产品</th>
+<th>模型/BYOK</th>
+<th>价格与计费</th>
+<th>分发/品牌背书</th>
+<th>明显短板</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>NovelAI</strong></td>
+<td>自有模型；<strong>无 BYOK</strong></td>
+<td>官网 pricing 抓取失败；第三方称 $10/15/25/月 + Anlas（<span class="badge unknown">未证实</span>）</td>
+<td>Anlatan</td>
+<td>无免费档；记忆约 8k–28k；无协作（第三方，未证实）</td>
+</tr>
+<tr>
+<td><strong>Sudowrite</strong></td>
+<td>内置 Muse + 20 余款模型；无公开 BYOK</td>
+<td>Hobby/Student $10/月（225,000 credits）、Professional $22/月（1,000,000）、Max $44/月（2,000,000）</td>
+<td>独立团队；英文写作社区</td>
+<td>credit 消耗快；Muse 偏英文；英文中心</td>
+</tr>
+<tr>
+<td><strong>Novelcrafter</strong></td>
+<td>OpenRouter/OpenAI 兼容/本地；<strong>BYOK 从 Hobbyist 档起</strong></td>
+<td>Scribe $4、Hobbyist $8、Artisan $14、Specialist $20/月</td>
+<td>自营 SaaS，称 25 万+用户</td>
+<td>无内置模型额度；Codex 不能直接导入；学习曲线</td>
+</tr>
+<tr>
+<td><strong>AI Dungeon</strong></td>
+<td>自有；无 BYOK</td>
+<td>Free、$14.99、$29.99、$49.99、$99.99/月；context 4k/8k/16k/32k</td>
+<td>Latitude</td>
+<td>非书稿工具；上下文有限；移动端不能导卡</td>
+</tr>
+<tr>
+<td><strong>Squibler</strong></td>
+<td>无公开 BYOK</td>
+<td>免费 6,000 AI words/月；Pro $29/月或 $16/月年付（$192/年）</td>
+<td>Google Cloud</td>
+<td>免费额度低；Pro 偏贵；无 JSON/API</td>
+</tr>
+<tr>
+<td><strong>KoboldAI</strong></td>
+<td>本地/Colab/OpenAI 等；自带模型</td>
+<td>免费开源</td>
+<td>开源社区</td>
+<td>旧版停止维护，官方指向 KoboldCpp；非产品化</td>
+</tr>
+<tr>
+<td><strong>SillyTavern</strong></td>
+<td>OpenAI 兼容/Kobold/本地；<strong>BYOK</strong></td>
+<td>免费（AGPL）</td>
+<td>开源社区</td>
+<td>学习曲线陡；非写作工程</td>
+</tr>
+<tr>
+<td><strong>Dreamily</strong></td>
+<td>—</td>
+<td>停服前价格不可核验（<span class="badge unknown">未证实</span>）</td>
+<td>—</td>
+<td>2026-04-21 停止服务、数据永久删除；选型应剔除</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="16">1.6 关键差异矩阵</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>产品</th>
+<th>参考作品结构化拆解</th>
+<th>JSON/结构化中间层</th>
+<th>工程化交付</th>
+<th>BYOK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>墨写（我方）</strong></td>
+<td><span class="badge yes">有</span>：reference/outline 双模式，<code>decomposed.json</code> + <code>chapters.json</code></td>
+<td><span class="badge yes">有</span>：JSON 可编辑、可 diff；21 全书要素/24 角色字段</td>
+<td><span class="badge yes">有</span>：docx/md/txt + JSON + 预签名下载 + 本地 70+ API</td>
+<td><span class="badge yes">有</span>：本地完整；云端服务端支持 <code>X-BYOK-Key</code>，客户端待接线</td>
+</tr>
+<tr>
+<td>阅文</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge partial">部分</span>：章节/草稿导出</td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>番茄</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge partial">部分</span>：站内发布</td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>蛙蛙</td>
+<td><span class="badge yes">有</span>（平台规律模板）</td>
+<td><span class="badge partial">部分</span></td>
+<td><span class="badge unknown">未证实</span></td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>笔灵</td>
+<td><span class="badge yes">有</span>（上传拆书报告）</td>
+<td><span class="badge partial">部分</span></td>
+<td><span class="badge partial">部分</span>：Word</td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>秘塔</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge partial">部分</span>：Word</td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>Effidit</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>彩云小梦</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge unknown">未证实</span></td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>墨狐</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge partial">部分</span>：剧情树</td>
+<td><span class="badge unknown">未证实</span></td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>NovelAI</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge yes">有</span>：Lorebook</td>
+<td><span class="badge partial">部分</span></td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>Sudowrite</td>
+<td><span class="badge partial">部分</span>：导入反推</td>
+<td><span class="badge yes">有</span>：Story Bible</td>
+<td><span class="badge yes">有</span>：docx/Docs</td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>Novelcrafter</td>
+<td><span class="badge partial">部分</span>：角色抽取</td>
+<td><span class="badge yes">有</span>：Codex</td>
+<td><span class="badge partial">部分</span></td>
+<td><span class="badge yes">有</span></td>
+</tr>
+<tr>
+<td>AI Dungeon</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge yes">有</span>：Story Cards JSON</td>
+<td><span class="badge yes">有</span>：zip/JSON</td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>Squibler</td>
+<td><span class="badge unknown">未证实</span></td>
+<td><span class="badge partial">部分</span>：Elements</td>
+<td><span class="badge yes">有</span></td>
+<td><span class="badge no">无</span></td>
+</tr>
+<tr>
+<td>KoboldAI</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge yes">有</span>：World Info</td>
+<td><span class="badge partial">部分</span></td>
+<td><span class="badge yes">有</span>（本地模型）</td>
+</tr>
+<tr>
+<td>SillyTavern</td>
+<td><span class="badge no">无</span></td>
+<td><span class="badge yes">有</span>：角色卡</td>
+<td><span class="badge partial">部分</span></td>
+<td><span class="badge yes">有</span></td>
+</tr>
+<tr>
+<td>Dreamily</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>停服</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="17">1.7 赛道结论</h3>
+<ol>
+<li><strong>平台内置工具免费，但绑定生态。</strong> 阅文/番茄的 AI 是留存与创作辅助，不是可独立售卖的工程工具；离开平台，发布/签约/数据链路即失效。</li>
+<li><strong>中文独立工具已经会卖「拆书 + 生成 + 去 AI 味」。</strong> 但拆书多是一次性报告，中间层停在「大纲/人物标签/剧情树」，不是可复用、可 diff、可交付的资产。</li>
+<li><strong>海外工具把「结构化上下文」做成了标配。</strong> Story Bible/Codex/Lorebook/Story Cards 证明用户愿意为「可编辑的设定层」付费；BYOK 是分水岭（Novelcrafter/KoboldAI/SillyTavern 开放，Sudowrite/NovelAI/AI Dungeon/Squibler 封闭）。</li>
+<li><strong>没有人同时做到完整闭环。</strong> 「拆解 → 可审计中间层 → 批量改编 → 体检/相似度 → 工程化交付 → BYOK/本地/私有化」目前没有对手同时具备；这是我们的空位，不是单点。</li>
+<li><strong>计费普遍是订阅 + credits/字数包，免费档在收窄。</strong> Dreamily 停服、Sudowrite 收紧 credits，说明长尾免费工具正在出清；靠免费额度获客、靠订阅+用量包变现是可持续路径。</li>
+</ol>
+<h3 id="18">1.8 未证实与冲突</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>事项</th>
+<th>状态</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NovelAI 具体月价与 Anlas 用量</td>
+<td><span class="badge unknown">未证实</span>（官网 pricing 抓取失败）</td>
+<td>不用作定价锚点；只作「有付费档、无免费档」的定性参考</td>
+</tr>
+<tr>
+<td>墨狐 AI 具体价格</td>
+<td><span class="badge unknown">未证实</span>（官方仅给 30/90/365 天权益，无金额）</td>
+<td>不进入价格带计算</td>
+</tr>
+<tr>
+<td>蛙蛙导出格式</td>
+<td><span class="badge unknown">未证实</span>（官网未明示，第三方称 TXT/Word）</td>
+<td>标「部分/未证实」</td>
+</tr>
+<tr>
+<td>彩云小梦文件导出</td>
+<td><span class="badge unknown">未证实</span></td>
+<td>只确认 App 内使用</td>
+</tr>
+<tr>
+<td>番茄 AI 配额具体次数</td>
+<td>官方等级文章口径，数字需复核</td>
+<td>只作「按等级配额」定性</td>
+</tr>
+<tr>
+<td>阅文 Word 导出、移动端通鉴体验</td>
+<td>第三方/社区口径</td>
+<td>不作功能有无的唯一依据</td>
+</tr>
+<tr>
+<td>Dreamily 历史价格/用户数据</td>
+<td>停服后不可核验</td>
+<td>选型剔除</td>
+</tr>
+<tr>
+<td>蛙蛙「30 万创作者」、笔灵「200 万用户」、Novelcrafter「25 万+」</td>
+<td>自述口径</td>
+<td>不作市场结论，只作背景</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="2">2. 结合已有材料的三个判断</h2>
+<h3 id="21">2.1 判断一：已经饱和、我们不该做的能力</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>能力</th>
+<th>谁已经做好</th>
+<th>为什么不该做</th>
+<th>如果必须做</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>通用续写/扩写/改写</td>
+<td>番茄、彩云、墨狐、NovelAI、Sudowrite</td>
+<td>模型能力同质化，用户按「手感/价格」投票，平台还免费</td>
+<td>只作为拆解/改编后的附属动作，不单独卖</td>
+</tr>
+<tr>
+<td>润色/纠错/去 AI 味</td>
+<td>阅文妙笔、秘塔、Effidit</td>
+<td>通用写作赛道已被大厂与专业工具占满</td>
+<td>体检报告里给「建议」，不承诺绕过检测</td>
+</tr>
+<tr>
+<td>起名/简介/黄金开头</td>
+<td>阅文、番茄、笔灵</td>
+<td>单点价值低、可被免费工具替代</td>
+<td>做成「拆解后自动命名 + 多版本对比」的附属能力</td>
+</tr>
+<tr>
+<td>单章章纲生成</td>
+<td>阅文、蛙蛙、笔灵</td>
+<td>单章生成不解决长篇一致性</td>
+<td>只做全书结构 + 逐章任务，不做单章起稿器</td>
+</tr>
+<tr>
+<td>结构化设定库/角色卡/世界观</td>
+<td>NovelAI Lorebook、Novelcrafter Codex、Sudowrite Story Bible、蛙蛙/笔灵人物标签</td>
+<td>已是海外标配，单点不构成差异</td>
+<td>做成「可编辑 JSON + 可 diff + 可导出」的工程层，不做纯 UI 设定库</td>
+</tr>
+<tr>
+<td>「拆书」报告</td>
+<td>笔灵、蛙蛙、墨狐</td>
+<td>一次性报告不是壁垒，且容易被复制</td>
+<td>做成「拆解 → 可复用资产 → 批量改编」的流水线</td>
+</tr>
+<tr>
+<td>平台内发布/签约/数据榜</td>
+<td>阅文、番茄</td>
+<td>平台主权，不可能赢</td>
+<td>不碰；只做投稿前体检与格式整理</td>
+</tr>
+<tr>
+<td>角色聊天/互动叙事</td>
+<td>彩云小梦、SillyTavern、AI Dungeon</td>
+<td>用户与场景不同，非书稿工程</td>
+<td>不投入</td>
+</tr>
+<tr>
+<td>低价会员/免费额度战</td>
+<td>平台内置工具</td>
+<td>拼不过平台补贴</td>
+<td>免费只给「可验证的产出」，不给无限量</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>一句话</strong>：不要做「又一个能生成正文的写作器」，也不要把「拆书」当唯一卖点；这两件事都已经有人做，且平台免费。</p>
+<h3 id="22">2.2 判断二：唯一别人没有、且用户愿意付钱的能力</h3>
+<p><strong>不是单点，是组合：</strong></p>
+<p><strong>叠加差异</strong>：BYOK（本地完整，云端补透传）、多模型/任意 OpenAI 兼容端点、本地/离线、私有化部署、按本/章/字的成本核算。</p>
+<p><strong>谁愿意付钱</strong>：3–10 人工作室、代写/MCN、短剧改编方、机构/课程平台。个人作者愿意为「少返工」付小钱，工作室愿意为「可复用、可交付、可审计」付大钱。</p>
+<p><strong>为什么难复制</strong>：</p>
+<ul>
+<li>平台厂商（阅文/番茄）不会做「拆他人作品」，也不会开放 BYOK/私有化——这与它们的生态与版权立场冲突。</li>
+<li>海外工具（Sudowrite/Novelcrafter）不做中文网文工程化，也没有本地/私有化与中文敏感词/签约体检。</li>
+<li>中文独立工具（蛙蛙/笔灵/墨狐）没有 JSON 中间层、没有 BYOK、没有批量改编与工程化交付，且多为黑盒 SaaS。</li>
+<li>组合的每一环都需要数据契约、流程编排、合规留痕、交付格式同时到位，单点复制无法形成闭环。</li>
+</ul>
+<p><strong>必须避免的叙事</strong>：不能公开宣传「去抄袭/洗稿/换名改写」。对外统一说「合规拆解与再创作流水线」；默认 AIGC 标注、默认权利确认、默认相似度报告。能力可以强，叙事必须干净。</p>
+<h3 id="23-3">2.3 判断三：3 个月形成「可收费最小闭环」还缺什么</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>类别</th>
+<th>缺什么</th>
+<th>现状</th>
+<th>阻断什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>能收钱</strong></td>
+<td>真实支付渠道与凭据（微信/支付宝/Stripe 至少 1 条）</td>
+<td>只有 mock/fake 与代码适配位；live 测试永远 skip</td>
+<td>无法完成真实收款</td>
+</tr>
+<tr>
+<td></td>
+<td>生产 provider 必填、禁 mock/fake</td>
+<td>环境白名单已加；<code>schemas.py</code> 默认仍为 <code>mock</code>，客户端不传 provider</td>
+<td>生产下单 403 或误用 mock</td>
+</tr>
+<tr>
+<td></td>
+<td>定价/免费额度口径</td>
+<td>seed 三档 9.9/29.9/69.9；BP 建议 29/49/199/299；前端与文档不一致</td>
+<td>无法对外报价、无法算毛利</td>
+</tr>
+<tr>
+<td></td>
+<td>退款/开票/客服 SOP</td>
+<td>有人工退款接口与开票状态机；无自动退款、无客服 SLA</td>
+<td>收款后无法处理售后</td>
+</tr>
+<tr>
+<td><strong>敢收钱</strong></td>
+<td>隐私政策/用户协议/退款政策/AIGC 标识</td>
+<td>服务端有 legal gate；前端无页面、无注册/支付勾选留痕</td>
+<td>应用商店/渠道审核与监管风险</td>
+</tr>
+<tr>
+<td></td>
+<td>云端权利确认版本化</td>
+<td><code>rights_confirmed</code> + <code>aigc_label</code> 已生效；无条款版本号</td>
+<td>无法证明用户同意的是哪一版</td>
+</tr>
+<tr>
+<td></td>
+<td>明文提示词与用户数据清理</td>
+<td><code>user_prompt_settings.txt</code> 曾被 Git 跟踪；<code>dist/</code> 含真实书稿</td>
+<td>泄露护城河与用户隐私</td>
+</tr>
+<tr>
+<td></td>
+<td>账号验证/找回/注销/数据导出</td>
+<td>只有 register/login/refresh/logout</td>
+<td>无法履行个人信息权利</td>
+</tr>
+<tr>
+<td><strong>值这个钱</strong></td>
+<td>真实模型 Key 与运行护栏</td>
+<td><code>LLM_API_KEY</code> 默认空；<code>MODEL_STUB=false</code> 但无生产禁用</td>
+<td>无法验证真实质量与成本</td>
+</tr>
+<tr>
+<td></td>
+<td>黄金评测集与质量基线</td>
+<td>无评测集、无回归基线</td>
+<td>无法证明「比竞品好」</td>
+</tr>
+<tr>
+<td></td>
+<td>长文一致性/相似度报告</td>
+<td>本地 n-gram 相似度已实现；云端未串进交付物</td>
+<td>无法回答「像不像原文」</td>
+</tr>
+<tr>
+<td></td>
+<td>失败重试/成本上限/断点续跑</td>
+<td>有租约与重试字段；弱网与成本上限未闭环</td>
+<td>试点时失败率高、成本失控</td>
+</tr>
+<tr>
+<td><strong>能验证</strong></td>
+<td>整本交付包</td>
+<td>单个产物可下载；无整本 docx/md/txt zip</td>
+<td>付费用户拿不到可投稿文件</td>
+</tr>
+<tr>
+<td></td>
+<td>BYOK 云端透传</td>
+<td>服务端读 <code>X-BYOK-Key</code>；客户端 0 命中</td>
+<td>BYOK 套餐承诺落空</td>
+</tr>
+<tr>
+<td></td>
+<td>付费墙/额度提示</td>
+<td>已有 402/403 文案与额度页；缺少到期/降级完整流程</td>
+<td>转化与续费漏损</td>
+</tr>
+<tr>
+<td></td>
+<td>弱网重试/onboarding</td>
+<td>无退避重试；无示例项目</td>
+<td>试点用户流失</td>
+</tr>
+<tr>
+<td><strong>能复购</strong></td>
+<td>案例/落地页/演示</td>
+<td>无公开案例</td>
+<td>无法获客与建立信任</td>
+</tr>
+<tr>
+<td></td>
+<td>通知投递/对账/监控</td>
+<td>有通知表与服务；投递调度与运营接口不完整</td>
+<td>续费/支付失败触达不到</td>
+</tr>
+<tr>
+<td></td>
+<td>发布检查/灰度/回滚</td>
+<td>有 Compose 与备份；无发布清单与回滚演练</td>
+<td>上线事故不可控</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="3">3. 已完成基线（不排期）</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>能力</th>
+<th>证据</th>
+<th>状态</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>七个 Tab 工作台</td>
+<td><code>client/src/views/Workspace.vue</code>：Info / Outline / Characters / Factions / Items / Summaries / Body</td>
+<td><span class="badge done">已完成</span></td>
+<td>云端 SaaS 工作台，真实接口驱动</td>
+</tr>
+<tr>
+<td>三档套餐</td>
+<td><code>server/app/seed.py</code>：体验 9.9 / 创作 29.9 / 专业 69.9；<code>client/src/views/Plans.vue</code></td>
+<td><span class="badge done">已完成</span></td>
+<td>结构完成；价格口径待决策（B-03）</td>
+</tr>
+<tr>
+<td>管理后台</td>
+<td><code>admin/src/views/</code>：用户/订阅/订单/发票/对账/任务/告警/审计；<code>/v1/admin/*</code> 13 组接口</td>
+<td><span class="badge done">已完成</span></td>
+<td>写操作审计、分页一致、越权 403</td>
+</tr>
+<tr>
+<td>Compose 实机验证</td>
+<td><code>server/README.md</code>：2026-11-04 Docker Desktop + WSL2，Postgres/Redis/MinIO/api/worker/scheduler + E2E</td>
+<td><span class="badge done">已完成</span></td>
+<td>备份恢复见 <code>server/docs/backup.md</code></td>
+</tr>
+<tr>
+<td>上传与任务链路</td>
+<td><code>server/app/api/uploads.py</code>、<code>tasks.py</code>、<code>server/app/worker/</code>、预签名下载</td>
+<td><span class="badge done">已完成</span></td>
+<td>含取消/续跑/SSE 进度</td>
+</tr>
+<tr>
+<td>自动更新</td>
+<td><code>docs/auto_update_api.md</code>：manifest/Ed25519 签名/回滚契约</td>
+<td><span class="badge done">已完成（契约）</span></td>
+<td>当前快照未检出 <code>src/updater.py</code>，发布前核对（C-05）</td>
+</tr>
+<tr>
+<td>迁移</td>
+<td><code>server/alembic/versions/</code> 6 个版本（initial → task_step_meta → payments → credits_notifications → agent_runs → stored_objects）</td>
+<td><span class="badge done">已完成</span></td>
+<td>迁移与模型一致</td>
+</tr>
+<tr>
+<td>mock/fake 生产闸门</td>
+<td><code>server/app/payments/__init__.py</code> + <code>server/docs/legal-gates.md</code></td>
+<td><span class="badge done">已完成</span></td>
+<td>生产默认禁止；provider 默认值仍待改（S-02）</td>
+</tr>
+<tr>
+<td>云端权利确认</td>
+<td><code>server/app/api/tasks.py</code>：<code>rights_confirmed</code> + <code>aigc_label</code>，缺失 422</td>
+<td><span class="badge done">已完成（基础版）</span></td>
+<td>条款版本化待补（C-02）</td>
+</tr>
+<tr>
+<td>单产物下载</td>
+<td><code>server/app/api/artifacts.py</code>：列表 + 预签名 + fallback</td>
+<td><span class="badge done">已完成</span></td>
+<td>整本交付包待补（P-03/S-05）</td>
+</tr>
+<tr>
+<td>相似度 n-gram</td>
+<td><code>server/docs/similarity.md</code>；<code>adapt/review</code> 产出 <code>similarity.json</code></td>
+<td><span class="badge done">已完成（本地算法）</span></td>
+<td>交付物集成与 UI 展示待补（P-06）</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>发布前核对（不计入 4 周排期）</strong>：自动更新客户端实现是否存在、更新签名私钥托管、灰度/回滚证据。若当前分支确无 <code>src/updater.py</code>，按 C-05 的发布检查清单处理，不重做整套更新系统。</p>
+<hr />
+<h2 id="4">4. 工作清单</h2>
+<h3 id="41">4.1 产品与前端</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>编号</th>
+<th>任务</th>
+<th>为什么做</th>
+<th>依赖</th>
+<th>人日</th>
+<th>验收标准</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P-01</td>
+<td>订阅与支付前端闭环：选择渠道、下单、展示支付参数/二维码、回调后刷新订阅与额度、失败可重试</td>
+<td>判断 3-A：前端不传 provider，生产默认 mock 会 403，真实收款走不通</td>
+<td>支付凭据（B-01）、provider 必填（S-02）</td>
+<td>3</td>
+<td>生产/沙箱完成 1 笔支付 → 订阅 active → 额度到账；前端不再依赖默认 provider</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>P-02</td>
+<td>BYOK 云端透传：设置页录入 Key、任务创建带 <code>X-BYOK-Key</code>、仅内存/短 TTL、不落库/不入日志；worker 使用并回显「本次用 BYOK」</td>
+<td>判断 2：BYOK 是套餐承诺与工作室差异点；服务端已支持，客户端 0 命中</td>
+<td>无（S-07 补验证）</td>
+<td>3</td>
+<td>BYOK 任务不扣托管字数/不产生平台模型账单；DB/日志/抓包无明文 Key；无 Key 时明确降级</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>P-03</td>
+<td>云端整本交付包：正文 + 章纲 + 角色/势力/道具 + 体检报告 + 权利/AIGC 声明，打包 zip；docx/md/txt 可选</td>
+<td>判断 2/3-D：付费用户必须拿到可投稿、可归档的交付物，而不是零散产物</td>
+<td>S-05 服务端导出</td>
+<td>4</td>
+<td>一本书一键下载 zip；docx 可打开、章节顺序正确、AIGC 标注默认开启</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>P-04</td>
+<td>付费墙与额度引导完善：未订阅/额度不足/试用降级三态 CTA；到期前 7 天与 1 天提示；额度包入口</td>
+<td>判断 3-D：已有 402/403 文案，但缺少完整转化与续费路径</td>
+<td>B-03 定价</td>
+<td>2</td>
+<td>三态均有明确下一步；到期提醒触达；额度包可下单</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>P-05</td>
+<td>弱网与任务恢复：上传/创建/轮询指数退避；幂等键复用；失败一键重试；断网恢复不重复扣额</td>
+<td>判断 3-D：弱网是试点工作室的高频失败点</td>
+<td>无</td>
+<td>3</td>
+<td>模拟断网/超时后自动恢复；重复提交不产生重复任务/扣额</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>P-06</td>
+<td>体检报告页与导出：高危/中危/建议分级、原文引用与行号、修改清单、相似度/改编幅度、可导出 PDF/md</td>
+<td>判断 2：体检是可感知价值，但当前缺少面向用户的报告层</td>
+<td>S-06、S-05</td>
+<td>4</td>
+<td>报告可读可导出；每条问题有原文定位与修改建议；相似度阈值可配置</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>P-07</td>
+<td>Onboarding 与示例项目：新用户 3 分钟跑通「示例拆解 → 7 个 Tab → 一次体检」</td>
+<td>判断 3-E：降低首单门槛，提升试点转化</td>
+<td>C-06 案例素材</td>
+<td>3</td>
+<td>新用户无需文档即可完成示例；关键步骤有引导与错误提示</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>P-08</td>
+<td>套餐对比与加购：三档对比、额度包、席位加购、BYOK/托管差价</td>
+<td>判断 3-A：把定价决策变成可下单的 SKU</td>
+<td>B-03</td>
+<td>3</td>
+<td>所有 SKU 可下单；价格/额度与 seed 一致；发票信息可填</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>P-09</td>
+<td>移动端云端能力：登录、任务、产物下载</td>
+<td>判断 1：移动端不是主战场，不重投入</td>
+<td>Android 打包、P-01</td>
+<td>10</td>
+<td>登录/任务/下载可用；不新增独立功能</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+<tr>
+<td>P-10</td>
+<td>错误文案与可访问性：统一错误码文案、键盘可达、对比度</td>
+<td>判断 3-E：减少客服工单</td>
+<td>无</td>
+<td>2</td>
+<td>关键错误可理解；主要流程键盘可操作</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="42">4.2 服务端与模型质量</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>编号</th>
+<th>任务</th>
+<th>为什么做</th>
+<th>依赖</th>
+<th>人日</th>
+<th>验收标准</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S-01</td>
+<td>生产配置 fail-fast 补齐：<code>JWT_SECRET</code> 占位符/长度、DB/S3 默认口令、CORS 通配；启动打印缺失项</td>
+<td>判断 3-B：License/mock 已有闸门，但 JWT/DB/S3 仍可能照抄示例</td>
+<td>无</td>
+<td>2</td>
+<td>生产启动遇占位符/短密钥直接失败；测试覆盖每类缺失；错误信息可操作</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>S-02</td>
+<td>provider 必填与生产收口：<code>schemas.py</code> 去掉默认 <code>mock</code>；生产请求 mock/fake 403、回调 404</td>
+<td>判断 3-A：当前默认 provider=mock，客户端不传即触发</td>
+<td>无</td>
+<td>1</td>
+<td>无默认 provider；生产 mock/fake 不可下单/不可回调；测试覆盖</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>S-03</td>
+<td>真实模型接入与运行护栏：<code>LLM_API_KEY</code> 生产必填、禁 <code>MODEL_STUB</code>；<code>/readyz</code> 探测模型；超时/重试/单任务成本上限；失败不计费</td>
+<td>判断 3-C：没有真实模型就无法验证质量与毛利</td>
+<td>真实模型 Key/额度</td>
+<td>3</td>
+<td>生产启动缺 Key 失败；<code>/readyz</code> 反映模型可用；单任务成本超限中止；失败任务不扣额</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>S-04</td>
+<td>黄金评测集与质量基线：20–30 本/章样本，覆盖男频/女频/短篇/长篇；指标：拆解字段完整率、章号映射正确率、设定冲突率、体检精确率/召回率；CI 出报告</td>
+<td>判断 3-C：没有基线就无法证明「值这个钱」</td>
+<td>标注样本、S-03</td>
+<td>6</td>
+<td>基线报告入库；CI 回归；核心指标达标（字段完整率 ≥90%、章号映射 100%、冲突率 &lt;5%、体检精确率 ≥70%/召回 ≥80%）</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>S-05</td>
+<td>服务端整本导出：复用 <code>export_book.py</code> 逻辑，生成 docx/md/txt + JSON zip，预签名下载；AIGC 标注默认开启</td>
+<td>判断 2/3-D：云端交付物的最后一公里</td>
+<td>无</td>
+<td>4</td>
+<td><code>/v1/runs/{id}/export</code> 产出 zip；格式/章节顺序/标注校验；P-03 可对接</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>S-06</td>
+<td>长文一致性与相似度报告接入：跨章设定冲突检测；把已有 <code>similarity.json</code> 纳入交付物与体检 UI</td>
+<td>判断 2：回答「像不像原文、设定有没有崩」</td>
+<td>S-05</td>
+<td>4</td>
+<td>跨章冲突可定位到章节/字段；相似度摘要进入报告；阈值可配</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>S-07</td>
+<td>失败重试/断点续跑/租约回收：任务级重试、步骤级续跑、Postgres <code>skip_locked</code> 并发测试</td>
+<td>判断 3-C：试点必须能扛住失败</td>
+<td>Postgres 环境</td>
+<td>4</td>
+<td>失败任务可续跑；重复执行 0；租约回收有测试；BYOK 路由有测试</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>S-08</td>
+<td>通知投递调度：续费/支付失败/额度告警/任务完成；退避、最大次数、死信；站内信优先</td>
+<td>判断 3-E：已有表与服务，但投递不完整</td>
+<td>SMTP/短信服务商</td>
+<td>4</td>
+<td>关键事件 24h 内送达；失败可重试；死信可查</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>S-09</td>
+<td>自动退款与开票自动化：重复扣款/失败补偿/风控命中规则；开票状态机自动流转；对账差异告警</td>
+<td>判断 3-A：规模变大后人工不可持续</td>
+<td>支付/发票凭据</td>
+<td>5</td>
+<td>规则命中自动退款并审计；发票申请→开具→回传；差异告警</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>S-10</td>
+<td>Postgres 集成与并发测试：额度并发不超卖、租约回收、迁移 <code>alembic check</code> 进 CI</td>
+<td>判断 3-C：SQLite 测不出真实并发</td>
+<td>CI Postgres</td>
+<td>4</td>
+<td>CI 跑 PG 关键用例；并发 100 次不超卖；迁移漂移为 0</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>S-11</td>
+<td>指标与告警：worker 指标端点、任务成功率/失败率、模型成本、回调失败率；Prometheus/Grafana 面板</td>
+<td>判断 3-E：没有可观测性就无法运营试点</td>
+<td>监控服务</td>
+<td>3</td>
+<td>worker 指标可见；核心面板上线；阈值告警</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+<tr>
+<td>S-12</td>
+<td>账号生命周期：邮箱验证、密码找回、注销（冷却期+级联清理）、数据导出</td>
+<td>判断 3-B：个人信息权利与账号安全</td>
+<td>邮件服务</td>
+<td>5</td>
+<td>全流程可用；操作审计；注销 30 日内完成</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+<tr>
+<td>S-13</td>
+<td>真实 IP 与限流：<code>TRUST_PROXY</code>/可信网段、统一 <code>get_real_ip()</code>、回调白名单按代理后 IP</td>
+<td>判断 3-B：XFF 可伪造绕过限流；反代后回调白名单失效</td>
+<td>部署拓扑</td>
+<td>2</td>
+<td>伪造 XFF 不影响限流；反代下回调白名单正确</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="43">4.3 商业化与支付</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>编号</th>
+<th>任务</th>
+<th>为什么做</th>
+<th>依赖</th>
+<th>人日</th>
+<th>验收标准</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B-01</td>
+<td>真实支付渠道接入：微信/支付宝/Stripe 至少 1 条生产可用；沙箱 E2E（下单→回调→退款）</td>
+<td>判断 3-A：没有真实渠道就无法收款</td>
+<td>商户号/密钥/备案/域名</td>
+<td>5 + 审批</td>
+<td>沙箱全链路通过；生产小额验证；退款到账；回调验签/幂等</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>B-02</td>
+<td>live 测试门控：去掉无条件 skip，改为「有凭据 + <code>-m live</code>」手动触发；记录沙箱证据</td>
+<td>判断 3-C：现有 live 用例永远 skip，上线即未知</td>
+<td>B-01 凭据</td>
+<td>1</td>
+<td>有凭据时真实跑；无凭据时明确 skip 原因；证据归档</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>B-03</td>
+<td>定价与套餐口径统一：seed/前端/文档/合同四处一致；确定年付折扣、额度包、BYOK/托管差价、免费额度</td>
+<td>判断 3-A：价格不一致无法报价与算毛利</td>
+<td>人工决策（§6.3）</td>
+<td>1</td>
+<td>四处一致；变更留版本；下单金额与合同一致</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>B-04</td>
+<td>退款/发票/客服 SOP：退款规则、开票流程、工单 SLA、话术</td>
+<td>判断 3-A：收款后必须有售后路径</td>
+<td>B-01、C-01</td>
+<td>3</td>
+<td>7 日内可退、发票 5 个工作日、工单首响 4h；SOP 可执行</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>B-05</td>
+<td>对账与续费提醒：日对账、差异工单、支付失败/续费 T-7/T-1 提醒</td>
+<td>判断 3-E：减少漏收与客诉</td>
+<td>S-08</td>
+<td>3</td>
+<td>日对账差异 0 未处理；提醒按时触达</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>B-06</td>
+<td>工作室试点合同：3 家试点、¥1,999/季、验收与续费条款</td>
+<td>判断 2：验证「工作室愿意为组合付费」</td>
+<td>3 家工作室、C-01</td>
+<td>3</td>
+<td>3 家签约、2 家完成首单、1 家预付/续费</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>B-07</td>
+<td>优惠码/试用码/推荐返利：可控发放、防薅羊毛</td>
+<td>判断 3-E：获客工具</td>
+<td>P-04、B-03</td>
+<td>3</td>
+<td>单人/单企业限领；可撤销；归因可查</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+<tr>
+<td>B-08</td>
+<td>发票自动化对接（诺诺等）：申请→开具→回传→作废</td>
+<td>判断 3-A：规模化后人工开票不可持续</td>
+<td>服务商凭据</td>
+<td>5</td>
+<td>全自动流转；失败可重试；审计完整</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="44">4.4 合规与运营</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>编号</th>
+<th>任务</th>
+<th>为什么做</th>
+<th>依赖</th>
+<th>人日</th>
+<th>验收标准</th>
+<th>优先级</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C-01</td>
+<td>法律文本上线与勾选留痕：隐私政策、用户协议、退款政策、AIGC 标识说明、投诉渠道；注册/支付前显式勾选，记录版本+时间+账号</td>
+<td>判断 3-B：没有这些不能合法收款，也过不了渠道审核</td>
+<td>法务评审（C-04）</td>
+<td>3</td>
+<td>四份文本可访问；勾选留痕可导出；版本变更需重新同意</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>C-02</td>
+<td>云端权利确认版本化：把 legal gate 的条款版本、AIGC 标注方式写入审计；桌面/云端同一版本号</td>
+<td>判断 3-B：现有 <code>rights_confirmed</code> 无版本，无法证明同意内容</td>
+<td>C-01</td>
+<td>2</td>
+<td>任务审计含条款版本/标注方式/时间；桌面与云端一致</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>C-03</td>
+<td>法务口径决策备忘录：参考作品改编/洗稿边界、AIGC 标识、退款规则、数据留存期限</td>
+<td>判断 2/3-B：能力越强，叙事越要干净</td>
+<td>人工决策</td>
+<td>1</td>
+<td>一页备忘录签字；对外话术/条款/产品文案统一引用</td>
+<td><span class="badge p0">P0</span></td>
+</tr>
+<tr>
+<td>C-04</td>
+<td>密钥与数据清理：<code>user_prompt_settings.txt</code> 移出 Git、<code>dist/</code> 用户书稿清理、<code>.tmp_third/</code> 清理、生产 secrets 轮换</td>
+<td>判断 3-B：泄露护城河与用户隐私</td>
+<td>无</td>
+<td>2</td>
+<td>仓库无明文提示词；发布包无用户数据；轮换记录</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>C-05</td>
+<td>发布检查清单与灰度/回滚：12 项上线检查、10%→50%→100% 灰度、回滚演练；核对自动更新签名</td>
+<td>判断 3-E：上线事故不可控</td>
+<td>Docker、更新签名</td>
+<td>2</td>
+<td>清单全过才发布；灰度指标达标；回滚 30 分钟内完成</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>C-06</td>
+<td>案例与落地页：3 个工作室案例（前后对比、成本、耗时）、演示视频、可统计转化</td>
+<td>判断 2：信任来自案例，不来自功能列表</td>
+<td>B-06 试点</td>
+<td>5</td>
+<td>3 个案例上线；落地页可统计；演示 5 分钟内</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>C-07</td>
+<td>客服工单与 SLA：邮箱/后台工单、退款/发票/技术三类、SLA 看板</td>
+<td>判断 3-E：试点期客诉必须闭环</td>
+<td>B-04</td>
+<td>2</td>
+<td>首响 4h、退款 3 日、发票 5 日；超时升级</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>C-08</td>
+<td>监控与备份演练：uptime、队列积压、错误率、备份恢复季度演练</td>
+<td>判断 3-E：故障必须可发现、可恢复</td>
+<td>监控服务</td>
+<td>2</td>
+<td>关键告警可达；恢复演练有记录；RTO/RPO 达标</td>
+<td><span class="badge p1">P1</span></td>
+</tr>
+<tr>
+<td>C-09</td>
+<td>敏感词库与平台规则跟踪：每月更新词表、平台 AI 规则、误报率统计</td>
+<td>判断 2：词库是体检价值的一部分</td>
+<td>词表来源</td>
+<td>3</td>
+<td>每月更新；误报率 &lt;5%；规则变更 7 日内同步</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+<tr>
+<td>C-10</td>
+<td>隐私数据权利：用户数据导出、删除、Cookie/统计告知</td>
+<td>判断 3-B：PIPL/GDPR 类要求</td>
+<td>C-01</td>
+<td>3</td>
+<td>用户可自助导出/删除；30 日内完成；审计留痕</td>
+<td><span class="badge p2">P2</span></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="5-p0">5. P0 汇总（不做就没法收钱/验证）</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>编号</th>
+<th>一句话</th>
+<th>外部依赖</th>
+<th>责任角色</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P-01</td>
+<td>支付前端闭环</td>
+<td>支付凭据</td>
+<td>前端 + 支付</td>
+</tr>
+<tr>
+<td>P-02</td>
+<td>BYOK 云端透传</td>
+<td>无</td>
+<td>前端 + 服务端</td>
+</tr>
+<tr>
+<td>P-03</td>
+<td>整本交付包</td>
+<td>S-05</td>
+<td>前端 + 服务端</td>
+</tr>
+<tr>
+<td>S-01</td>
+<td>生产配置 fail-fast</td>
+<td>无</td>
+<td>服务端</td>
+</tr>
+<tr>
+<td>S-02</td>
+<td>provider 必填、生产收口</td>
+<td>无</td>
+<td>服务端</td>
+</tr>
+<tr>
+<td>S-03</td>
+<td>真实模型接入与护栏</td>
+<td>真实模型 Key</td>
+<td>服务端 + 算法</td>
+</tr>
+<tr>
+<td>S-04</td>
+<td>黄金评测集与基线</td>
+<td>标注样本</td>
+<td>算法</td>
+</tr>
+<tr>
+<td>B-01</td>
+<td>真实支付渠道</td>
+<td>商户号/备案</td>
+<td>商业化</td>
+</tr>
+<tr>
+<td>B-02</td>
+<td>live 测试门控</td>
+<td>支付凭据</td>
+<td>服务端</td>
+</tr>
+<tr>
+<td>B-03</td>
+<td>定价与套餐口径</td>
+<td>人工决策</td>
+<td>商业化</td>
+</tr>
+<tr>
+<td>C-01</td>
+<td>法律文本与勾选留痕</td>
+<td>法务</td>
+<td>合规</td>
+</tr>
+<tr>
+<td>C-03</td>
+<td>法务口径备忘录</td>
+<td>人工决策</td>
+<td>合规</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>P0 关键路径</strong>：<code>B-03/C-01/C-03 决策 → B-01 凭据 → P-01/S-02 → B-02 验证 → P-03/S-05 → 收费试点</code>。<br />
+<strong>可并行</strong>：S-03/S-04 质量线、P-02 BYOK 线不依赖支付，可第 1 周同时开工。</p>
+<hr />
+<h2 id="6-4">6. 4 周排期</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>周次</th>
+<th>产品与前端</th>
+<th>服务端与模型质量</th>
+<th>商业化与支付</th>
+<th>合规与运营</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>W1</strong></td>
+<td>P-01 支付前端；P-02 BYOK 透传</td>
+<td>S-01 配置 fail-fast；S-02 provider 收口；S-03 真实模型接入</td>
+<td>B-03 定价决策；B-01 凭据申请；B-02 live 门控</td>
+<td>C-03 法务口径；C-01 文本起草；C-04 数据清理</td>
+</tr>
+<tr>
+<td><strong>W2</strong></td>
+<td>P-03 整本交付包；P-04 付费墙/额度</td>
+<td>S-04 评测集与基线；S-05 服务端导出</td>
+<td>B-01 沙箱联调；B-04 退款/开票 SOP</td>
+<td>C-01 文本上线与勾选；C-02 条款版本化；C-06 案例素材</td>
+</tr>
+<tr>
+<td><strong>W3</strong></td>
+<td>P-05 弱网重试；P-06 体检报告</td>
+<td>S-06 一致性与相似度；S-07 重试/续跑；S-10 PG 并发</td>
+<td>B-05 对账/续费提醒；B-06 3 家工作室试点</td>
+<td>C-05 发布检查；C-07 客服 SLA；C-08 监控</td>
+</tr>
+<tr>
+<td><strong>W4</strong></td>
+<td>P-07 onboarding；P-08 套餐加购</td>
+<td>S-08 通知投递；S-09 自动退款/开票（启动）</td>
+<td>收费试点；B-05 复盘；续费跟进</td>
+<td>C-06 案例上线；C-09 词库更新</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>W4 之后的 8 周（不展开排期）</strong>：收费试点扩到 8–10 家 → 修复高频问题 → 正式发布与续费；同时评估企业私有化与短剧项目制。</p>
+<p><strong>关键路径与缓冲</strong></p>
+<ul>
+<li>支付凭据审批不可压缩：W1 提交，W2 联调，W3 才能真实收款；若审批延迟，先用「人工收款 + 后台开通」跑试点，但不能对外宣传自助支付。</li>
+<li>法务文本不可代写：W1 必须给律师可审的初稿，W2 上线；否则 P-01 上线也不能公开收款。</li>
+<li>评测集标注需要 3–5 天人工：W1 启动，W2 出基线；不要等到 W3 才做。</li>
+</ul>
+<hr />
+<h2 id="7">7. 人工决策项</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>决策</th>
+<th>选项</th>
+<th>建议</th>
+<th>截止</th>
+<th>影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>定价</strong></td>
+<td>A：维持 seed 三档 9.9 / 29.9 / 69.9；B：按 BP 个人 29/49、工作室 199/299、企业 19,800/年；C：混合——三档保留 + BYOK 立减 ¥20/月 + 席位 ¥39/席/月</td>
+<td><strong>建议 C</strong>：首发不改三档结构，BYOK/托管做差价，工作室用专业版 + 席位；试点 3 家后再决定是否独立 199/299 档</td>
+<td>W1 D2</td>
+<td>前端 SKU、合同、发票、毛利模型</td>
+</tr>
+<tr>
+<td><strong>免费额度</strong></td>
+<td>A：不开放免费，仅演示；B：注册送 1 次拆解（≤3 万字、10 章、导出水印、不可改编）；C：送 1 次体检</td>
+<td><strong>建议 B</strong>：可验证价值、可控滥用；导出水印与不可改编是硬约束</td>
+<td>W1 D2</td>
+<td>获客成本、薅羊毛风险、转化率</td>
+</tr>
+<tr>
+<td><strong>法律文本口径</strong></td>
+<td>A：严格——仅自有/授权/公版，默认 AIGC 标注，禁止「去 AI 味/洗稿」宣传；B：宽松——只做免责声明</td>
+<td><strong>建议 A</strong>：与「合规拆解与再创作」定位一致；宽松口径会把产品变成法律负债</td>
+<td>W1 D2</td>
+<td>条款、产品文案、销售话术、平台审核</td>
+</tr>
+<tr>
+<td><strong>支付渠道优先级</strong></td>
+<td>A：微信 + 支付宝；B：Stripe；C：先接一家</td>
+<td><strong>建议 A（先微信，再支付宝）</strong>：中文工作室主流；Stripe 留给海外/企业</td>
+<td>W1 D3</td>
+<td>B-01 工作量、审批周期</td>
+</tr>
+<tr>
+<td><strong>云端 BYOK 开放范围</strong></td>
+<td>A：所有付费档；B：仅专业版/工作室；C：仅本地</td>
+<td><strong>建议 A</strong>：BYOK 是差异点，云端不开放会让套餐承诺落空；用额度区隔而不是功能阉割</td>
+<td>W1 D3</td>
+<td>P-02 优先级、毛利模型</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>需要人工签字的三份东西</strong>：① 价格表（含年付/加购/退款规则）；② 隐私政策 + 用户协议 + 退款政策 + AIGC 标识说明；③ 参考作品使用与改编边界的法务备忘录。</p>
+<hr />
+<h2 id="8">8. 验收与复盘</h2>
+<h3 id="81">8.1 三个月成功标准</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>指标</th>
+<th>口径</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>技术</td>
+<td>1 本 15 万字端到端 ≤60 分钟；任务失败率 &lt;5%；单本模型成本 ≤¥10</td>
+<td>真实模型、非 stub；含拆解+改编+体检</td>
+</tr>
+<tr>
+<td>质量</td>
+<td>评测集基线达标；体检高危召回 ≥80%、误报 ≤20%；拆解字段完整率 ≥90%</td>
+<td>S-04 报告</td>
+</tr>
+<tr>
+<td>商业</td>
+<td>≥8 人购买 ¥99「拆解+体检」；≥3 家工作室 ¥1,999/季试点；≥2 家续费/转订阅；≥1 笔真实支付</td>
+<td>BP §8 的验证门槛</td>
+</tr>
+<tr>
+<td>合规</td>
+<td>100% 拆解/改编任务有 <code>rights_confirmed</code>；100% 导出有 AIGC 标注；0 未授权样本</td>
+<td>审计导出抽查</td>
+</tr>
+<tr>
+<td>运营</td>
+<td>首响 4h、退款 3 日、发票 5 日；续费提醒触达率 ≥95%</td>
+<td>B-04/C-07</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="82">8.2 复盘节奏</h3>
+<ul>
+<li><strong>每周五</strong>：看板复盘（P0 完成度、阻塞项、成本/失败率）。</li>
+<li><strong>W2 末</strong>：支付沙箱 + 评测基线 gate；不达标不进入试点。</li>
+<li><strong>W4 末</strong>：收费试点 gate；不达标则转「工作室定制服务」，不继续堆功能（与 BP §8 一致）。</li>
+</ul>
+<hr />
+<h2 id="9">9. 来源与未证实清单</h2>
+<h3 id="91-2026-11-06">9.1 主要来源（查询日期 2026-11-06）</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>编号</th>
+<th>来源</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S1</td>
+<td>阅文作家助手官网/下载页、App Store 官方描述</td>
+<td>功能、端、评分</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>阅文作家专区帮助中心、模板中心</td>
+<td>模板、章纲提取、角色管理</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>作家助手版本记录（5.25.0，约 2026-11-02）</td>
+<td>妙笔、模型、风险提示</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>妙笔官方使用说明/公告</td>
+<td>指令清单、版权说明、禁止洗稿</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>妙笔通鉴官方公告 + 作者社区反馈</td>
+<td>问全书、开放范围、长文边界</td>
+</tr>
+<tr>
+<td>S6</td>
+<td>妙笔通鉴知识库/墨水公告</td>
+<td>墨水、限免</td>
+</tr>
+<tr>
+<td>S7</td>
+<td>阅文社区/创作学堂</td>
+<td>大神攻略、课程</td>
+</tr>
+<tr>
+<td>S8</td>
+<td>作家专区功能更新</td>
+<td>章纲、角色、设定灵感</td>
+</tr>
+<tr>
+<td>S9</td>
+<td>阅文签约/投稿帮助</td>
+<td>签约门槛与流程</td>
+</tr>
+<tr>
+<td>S10</td>
+<td>阅文 IP 改编合作说明</td>
+<td>改编边界</td>
+</tr>
+<tr>
+<td>S11</td>
+<td>番茄作家专区 AI 写作工具文章</td>
+<td>开书灵感、续写、扩写、限制</td>
+</tr>
+<tr>
+<td>S12</td>
+<td>番茄章节风险提示公告</td>
+<td>风险提示</td>
+</tr>
+<tr>
+<td>S13</td>
+<td>番茄作家等级文章</td>
+<td>AI 配额（数字需复核）</td>
+</tr>
+<tr>
+<td>S14</td>
+<td>蛙蛙写作官方升级文章（2026-11-02）</td>
+<td>价格、功能</td>
+</tr>
+<tr>
+<td>S15</td>
+<td>笔灵 AI 官方拆书页</td>
+<td>拆书、口号、合规风险</td>
+</tr>
+<tr>
+<td>S16</td>
+<td>秘塔写作猫官网</td>
+<td>功能、价格、模型</td>
+</tr>
+<tr>
+<td>S17</td>
+<td>腾讯 Effidit 官网</td>
+<td>功能、研究原型定位</td>
+</tr>
+<tr>
+<td>S18</td>
+<td>彩云小梦会员页</td>
+<td>价格、权益</td>
+</tr>
+<tr>
+<td>S19</td>
+<td>墨狐 AI 官方/第三方</td>
+<td>功能、价格（未证实）</td>
+</tr>
+<tr>
+<td>S20</td>
+<td>NovelAI 官网/第三方</td>
+<td>功能、价格（未证实）</td>
+</tr>
+<tr>
+<td>S21</td>
+<td>Sudowrite 官方 pricing/FAQ</td>
+<td>价格、模型、Story Bible</td>
+</tr>
+<tr>
+<td>S22</td>
+<td>Novelcrafter 官方 pricing/docs</td>
+<td>价格、Codex、BYOK</td>
+</tr>
+<tr>
+<td>S23</td>
+<td>AI Dungeon 官方 membership/docs</td>
+<td>价格、Story Cards</td>
+</tr>
+<tr>
+<td>S24</td>
+<td>Squibler 官方 pricing</td>
+<td>价格、导出</td>
+</tr>
+<tr>
+<td>S25</td>
+<td>KoboldAI 官方仓库/文档</td>
+<td>开源、World Info</td>
+</tr>
+<tr>
+<td>S26</td>
+<td>SillyTavern 官方仓库/文档</td>
+<td>角色卡、BYOK、AGPL</td>
+</tr>
+<tr>
+<td>S27</td>
+<td>Dreamily 停服公告（2026-04-21）</td>
+<td>停服、数据删除</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="92">9.2 未证实（不得当作事实）</h3>
+<ul>
+<li>NovelAI 月价与 Anlas 用量（官网 pricing 抓取失败）。</li>
+<li>墨狐 AI 具体金额（官方仅给权益天数）。</li>
+<li>蛙蛙导出格式、彩云小梦文件导出。</li>
+<li>番茄 AI 配额具体次数（官方等级文章口径，数字需复核）。</li>
+<li>阅文 Word 导出、移动端通鉴体验（第三方/社区）。</li>
+<li>Dreamily 历史价格与用户数据（停服后不可核验）。</li>
+<li>蛙蛙「30 万创作者」、笔灵「200 万用户」、Novelcrafter「25 万+」为自述口径。</li>
+</ul>
+<hr />
+<p><strong>一句话收尾</strong>：这四个星期不是「把功能做完」，而是把「能收钱、敢收钱、值这个钱」三件事做成可验证的证据链；功能清单可以延后，证据链不能。</p>
+    </main>
+  </div>
+  <footer>本清单为内部执行与商业分析，不构成法律意见；公开竞品信息会变动，引用前请复核查询日期。</footer>
+</div>
+</body>
+</html>

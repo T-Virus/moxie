@@ -1,0 +1,37 @@
+{
+  "profiles": {
+    "p_mvw8s21n": {
+      "name": "Deepseek",
+      "provider": "DeepSeek",
+      "base_url": "https://api.deepseek.com",
+      "model": "deepseek-v4-flash",
+      "temperature": null,
+      "price_in": 2,
+      "price_out": 8
+    }
+  },
+  "bindings": {
+    "decompose": "p_mvw8s21n",
+    "adapt": "p_mvw8s21n",
+    "storymap": "p_mvw8s21n",
+    "expand_outline": "p_mvw8s21n",
+    "expand_continue": "p_mvw8s21n",
+    "expand_expand": "p_mvw8s21n",
+    "expand_rewrite": "p_mvw8s21n",
+    "expand_polish": "p_mvw8s21n",
+    "expand_selection": "p_mvw8s21n",
+    "review": "p_mvw8s21n"
+  },
+  "stage_models": {},
+  "prices": {
+    "in": 2,
+    "out": 8
+  },
+  "daily_goal": 3000,
+  "memory": {
+    "enabled": true,
+    "top_k": 3,
+    "max_chars": 1600
+  },
+  "prompt_overrides": {}
+}

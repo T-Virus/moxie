@@ -1,0 +1,2 @@
+# 桌面端 unittest 的最小运行依赖（cloud.py 在非 Windows 平台用 AES-GCM 加密凭据）
+pycryptodome>=3.20

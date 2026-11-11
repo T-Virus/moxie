@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>竞品对比：阅文/起点官方写作工具 vs 墨写工作台</title>
+<style>
+  :root {
+    --bg: #f3f6f9;
+    --card: #ffffff;
+    --ink: #17202a;
+    --muted: #5b6b7c;
+    --line: #dbe4ec;
+    --brand: #0d5c63;
+    --brand-2: #0d9488;
+    --accent: #b45309;
+    --yes: #0f766e;
+    --no: #b91c1c;
+    --partial: #b45309;
+    --unknown: #6b7280;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: linear-gradient(180deg, #e9f0f4 0, var(--bg) 360px, var(--bg) 100%);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    font-size: 16px;
+    line-height: 1.78;
+  }
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 20px 72px; }
+  .hero {
+    background: linear-gradient(135deg, #083b40 0%, #0d5c63 52%, #0f766e 100%);
+    color: #fff;
+    border-radius: 22px;
+    padding: 42px 46px 36px;
+    box-shadow: 0 18px 50px rgba(8, 59, 64, .22);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: ""; position: absolute; right: -90px; top: -110px;
+    width: 320px; height: 320px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,.18), rgba(255,255,255,0) 68%);
+  }
+  .eyebrow { font-size: 12px; letter-spacing: .18em; opacity: .78; text-transform: uppercase; }
+  .hero h1 { margin: 10px 0 16px; font-size: clamp(26px, 4vw, 42px); line-height: 1.25; font-weight: 750; }
+  .hero .meta { color: rgba(255,255,255,.84); font-size: 14px; line-height: 1.8; max-width: 900px; }
+  .hero .stamp {
+    display: inline-block; margin-top: 20px; padding: 6px 12px; border-radius: 999px;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.24);
+    font-size: 12px; letter-spacing: .04em;
+  }
+  .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 26px; margin-top: 26px; align-items: start; }
+  .toc {
+    position: sticky; top: 18px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; padding: 18px 18px 14px; box-shadow: 0 8px 24px rgba(23,32,42,.05);
+    max-height: calc(100vh - 40px); overflow: auto;
+  }
+  .toc-title { font-weight: 750; font-size: 13px; letter-spacing: .12em; color: var(--brand); margin-bottom: 8px; }
+  .toc ol { margin: 0; padding-left: 18px; }
+  .toc li { margin: 6px 0; font-size: 13px; line-height: 1.5; }
+  .toc a { color: var(--muted); text-decoration: none; }
+  .toc a:hover { color: var(--brand-2); }
+  main {
+    background: var(--card); border: 1px solid var(--line); border-radius: 20px;
+    padding: 34px 40px 46px; box-shadow: 0 12px 36px rgba(23,32,42,.06);
+    min-width: 0;
+  }
+  h2 { margin: 44px 0 14px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 24px; line-height: 1.35; color: #0b3f45; }
+  h2:first-of-type { margin-top: 8px; padding-top: 0; border-top: 0; }
+  h3 { margin: 30px 0 10px; font-size: 19px; color: #0d5c63; }
+  p { margin: 10px 0; }
+  a { color: #0b6f78; }
+  strong { color: #0b3f45; }
+  blockquote {
+    margin: 14px 0; padding: 12px 18px; border-left: 4px solid var(--brand-2);
+    background: #f0fbfa; color: #33555a; border-radius: 0 10px 10px 0;
+  }
+  code {
+    background: #eef4f6; color: #0b4f57; padding: 2px 6px; border-radius: 5px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: .9em;
+    word-break: break-word;
+  }
+  .table-wrap { overflow-x: auto; margin: 16px 0 24px; border: 1px solid var(--line); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.65; min-width: 720px; }
+  thead th {
+    background: #0d5c63; color: #fff; text-align: left; font-weight: 650;
+    padding: 10px 12px; border-right: 1px solid rgba(255,255,255,.16); vertical-align: top;
+  }
+  tbody td { padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: top; word-break: break-word; }
+  tbody tr:nth-child(even) { background: #f7fafb; }
+  tbody tr:hover { background: #eef8f7; }
+  .badge {
+    display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+    font-weight: 700; line-height: 1.7; white-space: nowrap;
+  }
+  .badge.yes { color: #fff; background: var(--yes); }
+  .badge.no { color: #fff; background: var(--no); }
+  .badge.partial { color: #fff; background: var(--partial); }
+  .badge.unknown { color: #fff; background: var(--unknown); }
+  hr { border: 0; border-top: 1px dashed var(--line); margin: 26px 0; }
+  footer { margin-top: 26px; color: var(--muted); font-size: 12px; text-align: center; }
+  @media (max-width: 920px) {
+    .layout { grid-template-columns: 1fr; }
+    .toc { position: static; max-height: none; }
+    main { padding: 26px 22px 36px; }
+    .hero { padding: 30px 24px 26px; }
+  }
+  @media print {
+    body { background: #fff; }
+    .hero { box-shadow: none; }
+    .toc { display: none; }
+    .layout { display: block; }
+    main { border: 0; box-shadow: none; padding: 0; }
+    .table-wrap { overflow: visible; }
+    table { min-width: 0; }
+    tr { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div class="eyebrow">Competitive Analysis · 2026-11-06</div>
+    <h1>竞品对比：阅文/起点官方写作工具 vs 墨写工作台</h1>
+    <div class="meta">对比对象：作家助手（App / 桌面端 / 网页）、妙笔、妙笔通鉴（问全书 / 知识库）<br>对比范围：AI 功能清单、作者实际价值与限制、与我方「拆解→改编→章节写作→体检」工作台的逐项差距、差异化定位<br>查询日期：<strong>2026-11-06</strong>（Asia/Shanghai）｜公开页面会变动，签约/采购前请复核<br>阅读约定：<code>【官方】</code>=阅文官方页面/协议/版本说明；<code>【媒体】</code>=P1 媒体报道；<code>【作者社区】</code>=签约作者或用户发言；<code>【我方·代码】</code>=本仓库源码/文档；<code>【未证实】</code>/<code>【假设】</code>=不作为事实使用</div>
+    <div class="stamp">查询日期：2026-11-06 · Asia/Shanghai</div>
+  </header>
+  <div class="layout">
+    <nav class="toc"><div class="toc-title">目录</div><ol><li><a href="#0">0. 结论先行</a></li>
+<li><a href="#1">1. 对象、方法与同名辨析</a></li>
+<li><a href="#2-ai">2. 阅文官方 AI 功能清单（逐项）</a></li>
+<li><a href="#3">3. 对作者的实际价值与限制</a></li>
+<li><a href="#4">4. 与我方能力的逐项对比</a></li>
+<li><a href="#5">5. 「有起点大神站台」的真实含义</a></li>
+<li><a href="#6">6. 结论：避开哪些正面战场、主打哪些差异点</a></li>
+<li><a href="#7">7. 风险与边界（必须写进产品与营销）</a></li>
+<li><a href="#8">8. 来源与查询日期</a></li>
+<li><a href="#9">9. 未证实 / 假设清单</a></li>
+<li><a href="#10">10. 附：我方能力证据（便于内部对齐）</a></li></ol></nav>
+    <main>
+<h2 id="0">0. 结论先行</h2>
+<p><strong>一句话：阅文官方工具是「码字 + 发布 + 签约」的操作系统，AI 是嵌在写作页里的辅助问答/润色/章纲；墨写是「拆解→改编→体检→成稿」的工业化中间层。两者不是替代关系，正面对打必输，互补定位才有机会。</strong></p>
+<p>三个判断：</p>
+<ol>
+<li><strong>功能面</strong>：阅文在「起名/简介、灵感、润色、纠错、章纲、发布、签约、作品数据」上明显更强；在「参考作品结构化拆解、可编辑中间层、批量改编、体检报告、BYOK、多模型、本地/离线、工程化导出」上<strong>明确不做</strong>（或只做很浅）。</li>
+<li><strong>商业面</strong>：阅文是「免费 + 官方分发 + 墨水消耗」；我方是「订阅 + 用量 + 席位 + 私有化」。<strong>不要跟免费打，要跟「可交付、可审计、可私有化」打</strong>。</li>
+<li><strong>风险面</strong>：阅文官方明确禁止 AI 洗稿；「参考他人作品→换名→逐章改编」不能作为公开卖点。我方能力可以做，但叙事必须转成「合规再创作 / 改编差异报告」，否则增长越快、法律与平台风险越大。</li>
+</ol>
+<p><strong>三条可执行定位（详见 §6.3）</strong>：</p>
+<ul>
+<li><strong>投稿前工作台</strong>：不替代作家助手码字，做「开书前拆解 + 投稿前体检」的互补工具。</li>
+<li><strong>工作室交付台</strong>：批量拆解/改编/体检 + 可编辑 JSON 中间层 + docx/md/txt + 成本账单 + 私有化。</li>
+<li><strong>合规再创作</strong>：权利声明 + 差异报告 + 敏感词/风险体检 + AIGC 披露；明确「不洗稿、不绕过检测、不保证签约」。</li>
+</ul>
+<hr />
+<h2 id="1">1. 对象、方法与同名辨析</h2>
+<h3 id="11">1.1 产品地图</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>产品/模块</th>
+<th>形态与端</th>
+<th>定位</th>
+<th>证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>作家助手</strong></td>
+<td>Android / iOS / 鸿蒙 / 桌面端 / 网页（write.qq.com）</td>
+<td>全平台免费码字应用 + 作家社区 + 发布/签约/数据</td>
+<td>[S1][S2]</td>
+</tr>
+<tr>
+<td><strong>妙笔</strong></td>
+<td>写作页内 AI 助手；App 与桌面端</td>
+<td>挂载章节问答：提取大纲、角色关系、起名/简介、爽点、场景、评价、纠错、润色、深化剧情、提升代入感、后续十章章纲、让模型提问</td>
+<td>[S4]</td>
+</tr>
+<tr>
+<td><strong>妙笔通鉴·问全书</strong></td>
+<td>全书级长文问答；2025-10 起对所有作家开放</td>
+<td>查设定、找伏笔、算数值、理线索、挖角色；官方称「全书百晓生」</td>
+<td>[S5][S6]</td>
+</tr>
+<tr>
+<td><strong>妙笔通鉴·知识库</strong></td>
+<td>2025-12 新功能</td>
+<td>面向所有作家；官方曾做 31 天免墨水</td>
+<td>[S6]</td>
+</tr>
+<tr>
+<td><strong>模板中心 / 章纲提取 / 风险段落提示 / 一键发布 / 申请签约</strong></td>
+<td>作家助手功能模块</td>
+<td>大纲/角色/设定模板、章纲回溯、发布预审、签约申请</td>
+<td>[S1][S2][S3][S9]</td>
+</tr>
+<tr>
+<td><strong>作家助手 Claw（内测）</strong></td>
+<td>据报道 2026-03-15 内测，基于 OpenClaw</td>
+<td>一键部署 agent/skills</td>
+<td>[S15]，细节【未证实】</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>同名辨析（重要）</strong>：</p>
+<ul>
+<li><strong>阿里云「妙笔」</strong>是企业写作平台，不是阅文产品。</li>
+<li><strong>「妙笔生花」（wordflower.cn）</strong>是第三方 AI 写作工具，主打拆书/续写/剧本，<strong>不是阅文妙笔</strong>。</li>
+<li>番茄小说有「AI 续写」「章节风险提示」，<strong>不是阅文功能</strong>，不能混算到作家助手头上（[S26][S27]）。</li>
+<li>本报告的「妙笔」只指<strong>作家助手内的妙笔/AI 助手</strong>。</li>
+</ul>
+<h3 id="12">1.2 方法与可信度</h3>
+<ul>
+<li><strong>P0 官方</strong>：阅文官网、作家助手下载页、App Store 官方描述与版本记录、作家专区帮助中心、用户协议、官方社区公告。</li>
+<li><strong>P1 媒体</strong>：光明网、新浪财经、中国作家网。</li>
+<li><strong>P3 社区/第三方</strong>：签约作者发言、用户评论、第三方下载站。P3 只作体验参考，不作为功能有无的唯一依据。</li>
+<li>状态定义：<strong>有</strong>=官方功能清单/版本记录明确存在；<strong>仅部分</strong>=存在但只覆盖某一段（如只做章纲提取、只做发布前提示）；<strong>无</strong>=官方明确没有或功能清单/版本记录均无；<strong>仅特定作者可用</strong>=需要签约/内测/会员；<strong>未证实</strong>=只有社区/第三方口径，官方未确认。</li>
+</ul>
+<hr />
+<h2 id="2-ai">2. 阅文官方 AI 功能清单（逐项）</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>功能</th>
+<th>状态</th>
+<th>官方/证据</th>
+<th>实际形态与限制</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>AI 起名 / 简介</strong></td>
+<td><span class="badge yes">有</span></td>
+<td>妙笔指令【生成书名】：「帮我总结故事梗概，想一个书名和简介」[S4]；作家专区早期「快速起名」[S8]</td>
+<td>需要先挂载章节；质量依赖上下文；不是独立起名器，也不做书名/简介批量对比</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>灵感 / 设定灵感</strong></td>
+<td><span class="badge yes">有</span></td>
+<td>妙笔「设定灵感」新增宝物道具 [S8]；5.0 功能含「灵感便签」[S3]；模板中心提供大纲/角色/设定模板 [S2]</td>
+<td>偏「提示 + 模板」，不是结构化灵感库；模板是官方流派模板，不是从参考书提炼</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>正文续写</strong></td>
+<td><span class="badge no">无</span>（官方）／<span class="badge unknown">未证实</span></td>
+<td>官方功能清单与版本记录中未见「正文续写」；妙笔只有「后续十章章纲」联想 [S4]</td>
+<td>不能把番茄「AI 续写」算到阅文头上 [S26]；阅文的「续」目前是章纲级，不是正文级</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>改写 / 润色 / 纠错</strong></td>
+<td><span class="badge yes">有</span></td>
+<td>妙笔指令【纠错】【润色】【深化剧情】【提升代入感】【场景描写】[S4]；App Store 功能含「智能纠错」[S3]</td>
+<td>章节级、指令式；非全文批量润色；不提供「保持原意」的逐句改写契约</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>大纲 / 章纲生成</strong></td>
+<td><span class="badge partial">仅部分</span></td>
+<td>「章纲智能提取、一键章节概要」[S8]；「后续十章章纲」[S4]；模板中心大纲模板 [S2]</td>
+<td><strong>提取强于生成</strong>：能从已有章节回溯章纲，但没有「从一句设定生成全书大纲」的入口</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>人物 / 势力设定</strong></td>
+<td><span class="badge yes">有（辅助）</span></td>
+<td>妙笔【角色关系】；设定灵感；模板中心角色/设定模板；作家专区「角色管理」[S2][S4][S8]</td>
+<td>对话式/模板式；不是字段化、可编辑、可导出的全书设定库</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>敏感词 / 风险提示</strong></td>
+<td><span class="badge partial">仅部分</span></td>
+<td>发布「风险段落提示」「预审」[S3]；写作页「会员风险提示」[S8]；智能纠错 [S3]</td>
+<td>偏<strong>发布前审核提示</strong>；是否有独立全文敏感词库扫描，官方未明确 →【未证实】；第三方称可识别「敏感表述」[S19]，仅参考</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>章节体检 / 签约评估</strong></td>
+<td><span class="badge no">无 AI 签约评估</span>；仅发布风险提示</td>
+<td>官方无 AI 签约评分/过稿预测入口；签约是「申请 → 责编审核」[S9]；风险段落提示 [S3]</td>
+<td>「发布预审」不等于「签约评估」；签约结果仍由编辑人工判断</td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>数据榜 / 热词</strong></td>
+<td><span class="badge partial">仅部分</span></td>
+<td>作品数据：订阅、追读、收藏、打赏、稿酬 [S3]；读者画像/行为偏好、作家指数榜 [S8]</td>
+<td>有平台内作品数据与榜单；<strong>全网热词/选题热词</strong>未证实</td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>发布 / 签约链路</strong></td>
+<td><span class="badge yes">有</span></td>
+<td>一键发布、定时发布、预审、风险段落提示 [S3]；申请签约、投稿、签约状态 [S9]</td>
+<td>绑定阅文站点；站外平台（番茄/晋江等）不适用；签约门槛：起点/昆仑 10 万字，QQ阅读/红袖/潇湘 5 万字 [S9]</td>
+</tr>
+<tr>
+<td>11</td>
+<td><strong>参考他人作品结构化拆解</strong></td>
+<td><span class="badge no">无</span></td>
+<td>官方只做「自己稿件」的章纲提取 [S8]；没有「上传他人作品→拆结构」入口</td>
+<td><strong>这是我方核心差异</strong>；官方定位是辅助自己写作，不是拆解参考书</td>
+</tr>
+<tr>
+<td>12</td>
+<td><strong>结构化改编 / 换名改写</strong></td>
+<td><span class="badge no">无</span></td>
+<td>官方明确「不得利用 AI 洗稿侵犯他人作品版权」[S4]；改编制作仅限阅文开放合作的阅文 IP [S10]</td>
+<td>我方有能力，但<strong>不能公开叫「去抄袭」</strong>；必须做合规叙事（见 §7）</td>
+</tr>
+<tr>
+<td>13</td>
+<td><strong>可审计中间层</strong></td>
+<td><span class="badge no">无</span></td>
+<td>妙笔是对话式黑盒；没有 JSON 中间层/字段化设定导出</td>
+<td>我方 <code>decomposed.json</code> / <code>chapters.json</code> 可编辑、可 diff、可复用</td>
+</tr>
+<tr>
+<td>14</td>
+<td><strong>BYOK / 自带模型 Key</strong></td>
+<td><span class="badge no">无</span></td>
+<td>只能用官方内置模型；无自带 Key/第三方端点入口</td>
+<td>我方本地可 BYOK；云端服务端已支持 <code>X-BYOK-Key</code>，客户端尚未接线（[S22] P1-3）</td>
+</tr>
+<tr>
+<td>15</td>
+<td><strong>多模型</strong></td>
+<td><span class="badge partial">仅部分</span></td>
+<td>官方内置：妙笔接入 Qwen3-Max 推理版（2025-12-03）[S3]；新增 DeepSeek V4.1（5.25.0，约 2026-11-02）[S3]</td>
+<td>官方可在自家模型间选；<strong>用户不能接入第三方模型/自定义端点</strong></td>
+</tr>
+<tr>
+<td>16</td>
+<td><strong>本地 / 离线</strong></td>
+<td><span class="badge partial">仅部分</span></td>
+<td>本地实时保存、离线码字、多端同步 [S13]；AI 功能需联网</td>
+<td>离线只能写，不能 AI；数据默认云端同步</td>
+</tr>
+<tr>
+<td>17</td>
+<td><strong>导出</strong></td>
+<td><span class="badge partial">仅部分</span></td>
+<td>官方问答/作者反馈：章节可导出到电脑、可反向导入 [S14]；第三方称桌面端可导出 Word/邮件分享 [S20]</td>
+<td>有章节/草稿导出；<strong>无结构化 JSON/API/流水线导出</strong>；Word 格式仅第三方口径【未证实】</td>
+</tr>
+<tr>
+<td>18</td>
+<td><strong>成本计量 / 额度</strong></td>
+<td><span class="badge partial">仅部分</span></td>
+<td>妙笔/通鉴消耗「墨水」；官方曾限时免墨水 31 天 [S6]；作者称「浪费我 300 墨水」[S5]</td>
+<td>有虚拟币消耗，但无 token/成本明细；现金价目未公开【未证实】</td>
+</tr>
+<tr>
+<td>19</td>
+<td><strong>批量 / 工作室</strong></td>
+<td><span class="badge no">无</span></td>
+<td>定位个人码字工具；无多书批量、席位、审稿流</td>
+<td>我方有批量/并发/多书目录；多人协作仍弱（[S22]）</td>
+</tr>
+<tr>
+<td>20</td>
+<td><strong>账号 / 订阅 / 支付 / 发票</strong></td>
+<td><span class="badge partial">仅部分</span></td>
+<td>App 免费；部分服务收费（如创作学堂会员）[S10]；墨水消耗 [S6]</td>
+<td>有账号与会员，但无对外 SaaS 订阅/发票体系；我方服务端已建账号/订阅/订单/发票（[S24]）</td>
+</tr>
+<tr>
+<td>21</td>
+<td><strong>多端</strong></td>
+<td><span class="badge yes">有</span></td>
+<td>Android、iOS、鸿蒙、桌面端、网页 [S1][S2][S3]</td>
+<td>阅文明显更强；我方目前 Windows exe + Android APK，无 iOS/Mac/Linux</td>
+</tr>
+<tr>
+<td>22</td>
+<td><strong>品牌 / 分发 / 信任</strong></td>
+<td><span class="badge yes">有</span></td>
+<td>官方身份；App Store 3.7 万个评分、4.8 分、免费效率榜 #132（查询日）[S3]；官网称「全网顶流作家首选」[S1]</td>
+<td>官方+免费+全端是获客主因；「大神」是信任催化剂，不是转化引擎（见 §5）</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="3">3. 对作者的实际价值与限制</h2>
+<h3 id="31">3.1 真实价值</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>价值</th>
+<th>具体表现</th>
+<th>谁最受益</th>
+<th>证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>零成本开写</strong></td>
+<td>App 免费，全端同步，模板/社区/课程齐全</td>
+<td>新人、学生、兼职作者</td>
+<td>[S1][S3][S13]</td>
+</tr>
+<tr>
+<td><strong>写作页内 AI 即用</strong></td>
+<td>不用切工具：挂载章节就能问大纲、角色、爽点、润色、纠错</td>
+<td>日更作者、卡文作者</td>
+<td>[S4]</td>
+</tr>
+<tr>
+<td><strong>长文回溯</strong></td>
+<td>妙笔通鉴问全书：查设定/找伏笔/算数值/理线索/挖角色</td>
+<td>百万字长篇、设定复杂的作者</td>
+<td>[S5][S6]</td>
+</tr>
+<tr>
+<td><strong>发布/签约闭环</strong></td>
+<td>一键发布、定时、预审、风险段落提示、申请签约</td>
+<td>阅文站点作者</td>
+<td>[S3][S9]</td>
+</tr>
+<tr>
+<td><strong>数据反馈</strong></td>
+<td>订阅、追读、收藏、打赏、稿酬、读者画像、作家指数榜</td>
+<td>需要数据调整策略的作者</td>
+<td>[S3][S8]</td>
+</tr>
+<tr>
+<td><strong>社区/课程</strong></td>
+<td>编辑指路、大神攻略、创作学堂、拼字/闯关</td>
+<td>新人、需要陪伴感的人</td>
+<td>[S7][S12]</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="32">3.2 限制（逐条回答用户关心的问题）</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>事实</th>
+<th>对作者的实际影响</th>
+<th>证据/可信度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>是否绑定签约作者？</strong></td>
+<td><strong>AI 辅助不绑定</strong>：妙笔通鉴 2025-10 起「向所有作家开放」；作家助手「所有网文作家都能用」</td>
+<td>未签约也能用 AI；但<strong>发布/签约链路</strong>只对阅文站点作者有意义</td>
+<td>[S1][S5]【官方】</td>
+</tr>
+<tr>
+<td><strong>是否只在 App 内？</strong></td>
+<td>多端：Android/iOS/鸿蒙/桌面/网页；妙笔在 App 与桌面端都有</td>
+<td>不是 App 独占；但<strong>妙笔通鉴在移动端体验差</strong>：作者反馈「手机端完全用不了」「只有 PC 端能用」</td>
+<td>[S1][S2][S5]；移动端限制为【作者社区·未证实】</td>
+</tr>
+<tr>
+<td><strong>是否收费？</strong></td>
+<td>App 免费；部分服务收费（创作学堂会员）；妙笔/通鉴消耗墨水；2025-12 曾限免 31 天</td>
+<td>基础码字免费；AI 重度使用要墨水；<strong>现金价目未公开</strong>，是否可直接充值【未证实】</td>
+<td>[S6][S10]【官方】；「充的钱」为用户个人陈述 [S5]</td>
+</tr>
+<tr>
+<td><strong>是否只能用官方模型？</strong></td>
+<td>是。官方内置 DeepSeek V4.1 + Qwen3-Max 推理版；无 BYOK/第三方端点</td>
+<td>不能用自己 Key、不能接其他供应商；模型/价格/稳定性由阅文决定</td>
+<td>[S3]【官方】</td>
+</tr>
+<tr>
+<td><strong>是否能导出？</strong></td>
+<td>能导出章节/草稿到电脑，可反向导入；第三方称桌面端可导出 Word/邮件</td>
+<td>能备份、能投稿；但<strong>没有结构化 JSON/API/批量工程化导出</strong></td>
+<td>[S14]【官方社区】；Word 为【第三方·未证实】[S20]</td>
+</tr>
+<tr>
+<td><strong>是否能离线？</strong></td>
+<td>本地保存、离线码字、多端同步；AI 需联网</td>
+<td>断网能写不能 AI；数据默认云端</td>
+<td>[S13]【官方】</td>
+</tr>
+<tr>
+<td><strong>能否做参考书拆解？</strong></td>
+<td>不能。官方只做自己稿件的章纲提取</td>
+<td>想「学爆款结构」只能自己读/自己总结，或用第三方拆书工具</td>
+<td>[S8]【官方】</td>
+</tr>
+<tr>
+<td><strong>能否保证签约？</strong></td>
+<td>不能。签约是申请后责编审核；没有 AI 签约评分</td>
+<td>AI 只能辅助写作/提示风险，不能替代编辑判断</td>
+<td>[S9]【官方】</td>
+</tr>
+<tr>
+<td><strong>生成内容版权归谁？</strong></td>
+<td>官方：用户通过妙笔生成的内容由用户自行维护使用，阅文不申索版权；DeepSeek 固定参数、不拿输入输出再训练；但不得洗稿侵权</td>
+<td>版权压力较小；但<strong>平台规则/洗稿红线仍在</strong></td>
+<td>[S4]【官方】</td>
+</tr>
+<tr>
+<td><strong>长文可靠性？</strong></td>
+<td>作者反馈：问全书 12 万字开始「胡言乱语」；10 章 10 章问法「伏笔联系不上」；「错漏百出」「差评一片」</td>
+<td>长文 RAG 仍有边界；不能把 AI 回答当事实，需要人工核对</td>
+<td>[S5]【作者社区】</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="4">4. 与我方能力的逐项对比</h2>
+<h3 id="41">4.1 写作辅助层</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>能力</th>
+<th>阅文（作家助手/妙笔）</th>
+<th>墨写（我方）</th>
+<th>谁更强</th>
+<th>关键差距 / 机会</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AI 起名/简介</td>
+<td><span class="badge yes">有</span>：妙笔指令生成书名+简介 [S4]</td>
+<td><span class="badge yes">有</span>：模型可生成书名/简介（<code>adapt.py</code> 书级命名、<code>decompose.py</code> 梗概）</td>
+<td><strong>阅文</strong>（入口即时、免费）</td>
+<td>我方不做独立起名器；可把它做成「拆解后自动命名 + 多版本对比」的附属能力</td>
+</tr>
+<tr>
+<td>灵感/设定灵感</td>
+<td><span class="badge yes">有</span>：设定灵感、灵感便签、模板中心 [S3][S8]</td>
+<td><span class="badge partial">仅部分</span>：<code>story_bible</code> 字段 + 提示词，无专门灵感 UI</td>
+<td><strong>阅文</strong></td>
+<td>不正面做「灵感社区」；做「从参考书提炼灵感/桥段」</td>
+</tr>
+<tr>
+<td>正文续写</td>
+<td><span class="badge no">无</span>（官方未见）；仅「后续十章章纲」[S4]</td>
+<td><span class="badge yes">有</span>：<code>expand.py</code> 章节正文扩写；<code>adapt.py --sequel-chapters</code> 续集</td>
+<td><strong>墨写</strong>（能力面）</td>
+<td>这是我方少数「阅文明确不做」的正文级能力；但不要宣传「一键成书」</td>
+</tr>
+<tr>
+<td>改写/润色/纠错</td>
+<td><span class="badge yes">有</span>：润色、深化剧情、提升代入感、纠错 [S4]；智能纠错 [S3]</td>
+<td><span class="badge partial">仅部分</span>：<code>adapt.py</code> 改编级改写；<code>review.py</code> 只诊断不改写</td>
+<td><strong>阅文</strong>（逐句体验）</td>
+<td>不跟它比「润色手感」；我方做「改编级重写 + 体检建议」</td>
+</tr>
+<tr>
+<td>大纲/章纲</td>
+<td><span class="badge partial">仅部分</span>：章纲提取、后续十章章纲、模板 [S2][S4][S8]</td>
+<td><span class="badge yes">有</span>：拆解产出全书设定 + 逐章任务；<code>adapt.py</code> 章数规划；<code>storymap.py</code></td>
+<td><strong>阅文</strong>（单章提取） / <strong>墨写</strong>（全书结构）</td>
+<td>我方强在「全书结构 + 可编辑」；弱在「随手一问」的轻体验</td>
+</tr>
+<tr>
+<td>人物/势力设定</td>
+<td><span class="badge yes">有（辅助）</span>：角色关系、设定灵感、模板、角色管理 [S2][S4][S8]</td>
+<td><span class="badge yes">有</span>：21 个全书要素、24 个角色卡字段、10 类势力、18 种关系、9 种立场（[S21] §1.1；<code>story_bible.py</code>）</td>
+<td><strong>墨写</strong>（结构化）</td>
+<td>我方是字段化/可编辑/可导出；阅文是对话式/模板式</td>
+</tr>
+<tr>
+<td>敏感词/风险</td>
+<td><span class="badge partial">仅部分</span>：发布前风险段落提示/预审 [S3]</td>
+<td><span class="badge yes">有</span>：<code>sentinel.py</code> 本地词表扫描，命中词/次数/级别/上下文/下标；词表可自定义</td>
+<td><strong>墨写</strong>（可审计、可离线）</td>
+<td>我方强在「全文扫描 + 可复现」；弱在「平台审核规则库」不如官方实时</td>
+</tr>
+<tr>
+<td>章节体检/签约评估</td>
+<td><span class="badge no">无 AI 签约评估</span>；仅发布风险提示 [S3][S9]</td>
+<td><span class="badge yes">有</span>：<code>review.py</code> 多维体检（AI 味、主题偏离、错别字、设定/剧情一致性、违规风险、逻辑连贯、行文统计）+ 模型复核；带原文引用/行号/修改清单</td>
+<td><strong>墨写</strong>（系统化）</td>
+<td>我方不承诺「签约评分」；输出「高危/中危 + 怎么改」，不自动改写、不承诺绕过检测</td>
+</tr>
+<tr>
+<td>数据榜/热词</td>
+<td><strong>有（部分）</strong>：作品数据、读者画像、作家指数榜 [S3][S8]</td>
+<td><span class="badge no">无</span>平台数据接入；仅本地 <code>usage</code>/<code>Stats.vue</code></td>
+<td><strong>阅文</strong></td>
+<td>不做平台数据；可做「拆解报告里的结构指标」而非平台榜单</td>
+</tr>
+<tr>
+<td>发布/签约链路</td>
+<td><span class="badge yes">有</span>：一键发布、定时、预审、申请签约 [S3][S9]</td>
+<td><span class="badge no">无</span>平台发布 API；导出后人工投稿（<code>export_book.py</code>）</td>
+<td><strong>阅文</strong></td>
+<td>不碰发布/签约；做「投稿前最后一公里」的体检与格式整理</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="42">4.2 结构化/工程层（我方主战场）</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>能力</th>
+<th>阅文</th>
+<th>墨写</th>
+<th>谁更强</th>
+<th>关键差距 / 机会</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>参考作品结构化拆解</td>
+<td><span class="badge no">无</span>：只做自己稿件章纲提取 [S8]</td>
+<td><span class="badge yes">有</span>：<code>decompose.py</code> 支持 reference/outline 两种模式；输出 <code>decomposed.json</code> + <code>chapters.json</code>；12 万字符分段、10–16 章/段、8192→32768 重试、<code>--local</code> 无模型模式（[S21] §1.1）</td>
+<td><strong>墨写（独有）</strong></td>
+<td>核心差异；但要绑定「自有/授权/公版」权利声明（<code>compliance.py</code>）</td>
+</tr>
+<tr>
+<td>结构化改编/换名改写</td>
+<td><span class="badge no">无</span>：官方禁止 AI 洗稿；改编仅限阅文 IP [S4][S10]</td>
+<td><span class="badge yes">有</span>：<code>adapt.py</code> 默认 1:1 章号映射；<code>--target-chapters</code> 扩写/压缩；<code>--sequel-chapters</code> 续集；名字映射；4 路并发；20 章/段 → 约 15 章/批（[S21] §1.1）</td>
+<td><strong>墨写（独有，但高风险）</strong></td>
+<td>能力是差异，<strong>叙事是生死线</strong>：不能叫「去抄袭」；要输出差异报告、人工改写、AIGC 披露</td>
+</tr>
+<tr>
+<td>可审计中间层</td>
+<td><span class="badge no">无</span>：黑盒对话</td>
+<td><span class="badge yes">有</span>：<code>decomposed.json</code> / <code>chapters.json</code> 可逐章编辑；<code>compliance.jsonl</code> 权利声明留痕；<code>usage.jsonl</code> 调用记录；云端有审计日志 [S23][S24]</td>
+<td><strong>墨写（独有）</strong></td>
+<td>工作室愿意为「可检查、可复用、可交付」付费；这是订阅的支点</td>
+</tr>
+<tr>
+<td>BYOK / 自带 Key</td>
+<td><span class="badge no">无</span>：只能用官方模型 [S3]</td>
+<td><strong>有（本地）</strong>：Key 从本机 localStorage/环境变量读取；云端服务端支持 <code>X-BYOK-Key</code>，客户端尚未接线（[S22] P1-3）</td>
+<td><strong>墨写（独有）</strong></td>
+<td>本地 BYOK 是完整卖点；云端 BYOK 要补客户端透传，否则套餐承诺落空</td>
+</tr>
+<tr>
+<td>多模型</td>
+<td><span class="badge partial">仅部分</span>：官方内置 DeepSeek V4.1 + Qwen3-Max [S3]</td>
+<td><strong>有（配置级）</strong>：OpenAI 兼容端点，<code>llm_base_url</code> / <code>llm_model</code> 可配；默认 DeepSeek</td>
+<td><strong>墨写</strong>（任意端点） / <strong>阅文</strong>（开箱双模型）</td>
+<td>我方强在「可换供应商/可私有化」；弱在「没有内置模型选择 UI」</td>
+</tr>
+<tr>
+<td>本地/离线</td>
+<td><span class="badge partial">仅部分</span>：本地保存/离线码字，AI 需联网 [S13]</td>
+<td><span class="badge yes">有</span>：Windows exe、<code>127.0.0.1</code> 本地 Web、<code>--local</code> 无模型模式；数据在 <code>data/&lt;书名&gt;/</code>（[S23]）</td>
+<td><strong>墨写</strong>（本地优先）</td>
+<td>对保密工作室/机构是硬差异；但 Mac/Linux/iOS 缺（[S22] P2-9）</td>
+</tr>
+<tr>
+<td>导出工程化</td>
+<td><span class="badge partial">仅部分</span>：章节/草稿导出；Word 为第三方口径 [S14][S20]</td>
+<td><span class="badge yes">有</span>：<code>export_book.py</code> 合成 docx/md/txt；云端产物预签名下载；70+ HTTP 接口；JSON 中间层</td>
+<td><strong>墨写</strong></td>
+<td>不做「平台一键发布」；做「可投稿文件 + 可复用数据 + API」</td>
+</tr>
+<tr>
+<td>成本计量/额度</td>
+<td><span class="badge partial">仅部分</span>：墨水消耗，无 token 明细 [S5][S6]</td>
+<td><span class="badge yes">有</span>：<code>usage.py</code> 记录 token/耗时/成本；服务端 <code>usage_events</code>/<code>usage_aggregates</code>/<code>entitlements</code> 额度账本 [S23][S24]</td>
+<td><strong>墨写</strong></td>
+<td>工作室可按本/按章核算毛利；这是「比免费工具更贵但更可控」的理由</td>
+</tr>
+<tr>
+<td>批量/工作室</td>
+<td><span class="badge no">无</span>：个人码字工具</td>
+<td><strong>有（部分）</strong>：多书目录、改编 4 路并发、云端任务/worker；但多人协作/版本树弱（[S22]）</td>
+<td><strong>墨写</strong>（批量）</td>
+<td>先做「批量 + 交付」，不要先做「多人协作」；后者成本高、需求验证不足</td>
+</tr>
+<tr>
+<td>账号/订阅/支付/发票</td>
+<td><span class="badge partial">仅部分</span>：免费+会员/墨水 [S10]</td>
+<td><span class="badge yes">有</span>：服务端账号/设备/License/订阅/额度/订单/退款/发票/管理后台（[S24]）</td>
+<td><strong>墨写</strong>（SaaS 底座）</td>
+<td>基础设施已建；但运营/支付上线仍需真实渠道与合规（[S22]）</td>
+</tr>
+<tr>
+<td>多端</td>
+<td><span class="badge yes">有</span>：Android/iOS/鸿蒙/桌面/网页 [S1][S3]</td>
+<td><span class="badge partial">仅部分</span>：Windows exe + Android APK；无 iOS/Mac/Linux</td>
+<td><strong>阅文</strong></td>
+<td>不在移动端正面竞争；先做 Windows 工作室 + Web 云端</td>
+</tr>
+<tr>
+<td>品牌/分发/信任</td>
+<td><span class="badge yes">有</span>：官方、免费、3.7 万评分、4.8 分、免费榜 #132 [S1][S3]</td>
+<td><span class="badge no">无</span>：新品牌，无分发</td>
+<td><strong>阅文</strong></td>
+<td>不投品牌广告；用案例、报告、成本账单、开源/插件建立信任</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>一句话总结对比</strong>：</p>
+<hr />
+<h2 id="5">5. 「有起点大神站台」的真实含义</h2>
+<h3 id="51">5.1 证据拆解：官方背书、作者口碑，还是营销合作？</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>说法/现象</th>
+<th>证据</th>
+<th>性质</th>
+<th>可信度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>「全网顶流作家首选网文创作工具」</td>
+<td>阅文官网、App Store 描述 [S1][S3]</td>
+<td><strong>官方营销口号</strong></td>
+<td>官方确实这么写；但「首选」无公开数据支撑 → 营销口径</td>
+</tr>
+<tr>
+<td>「作家之声」署名作者评价</td>
+<td>下载官网列出林悦南兮、青衫取醉、薄也、呜喵王之怒等 [S13]</td>
+<td><strong>作者口碑/用户评价</strong></td>
+<td>真实署名，但属于产品页精选评价，不是正式代言</td>
+</tr>
+<tr>
+<td>「编辑指路 + 大神攻略」</td>
+<td>5.0 活动页 [S7]</td>
+<td><strong>社区内容运营</strong></td>
+<td>官方活动确实存在；「大神」是内容栏目，不是产品背书</td>
+</tr>
+<tr>
+<td>「平台作家一览：唐家三少、孑与2」</td>
+<td>作家专区「成为作家」页 [S12]</td>
+<td><strong>平台作者名单</strong></td>
+<td>他们是阅文平台作者，不是作家助手代言人</td>
+</tr>
+<tr>
+<td>「爱潜水的乌贼创作课」</td>
+<td>作家专区推荐课程 [S12]</td>
+<td><strong>课程讲师</strong></td>
+<td>平台作者/讲师合作，不是产品代言</td>
+</tr>
+<tr>
+<td>「拼字闯关：起点大神等你闯关」</td>
+<td>桌面端 V1.16.0 版本说明 [S8]</td>
+<td><strong>游戏化营销</strong></td>
+<td>用「大神」做玩法包装，不是功能背书</td>
+</tr>
+<tr>
+<td>「正式代言/签约站台」</td>
+<td>未找到官方代言公告/合同</td>
+<td><span class="badge unknown">未证实</span></td>
+<td>不能当事实；只能判断为「官方营销 + 作者口碑 + 社区内容」组合</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>结论</strong>：<br />
+「有起点大神站台」更准确的说法是：<strong>阅文用官方身份、平台作者名单、社区「大神攻略」和精选作者评价，构成一种「官方背书感」；但没有证据表明存在正式的付费代言或签约站台。</strong> 它既不是纯粹的作者口碑，也不是严格意义的官方功能背书，而是<strong>营销叙事 + 社区运营 + 平台作者资源</strong>的混合体。</p>
+<h3 id="52">5.2 对获客与信任的影响有多大？</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>影响</th>
+<th>判断</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>获客</strong></td>
+<td>官方 + 免费 + 全端 + 应用商店排名（免费效率榜 #132、3.7 万评分）是主因；「大神」是降低首访戒心的催化剂</td>
+<td><strong>强，但不是决定性</strong>；用户最终因为「免费/好用/能发布」留下</td>
+</tr>
+<tr>
+<td><strong>信任</strong></td>
+<td>官方身份让用户默认「不会跑路、数据在平台、能签约」；但 AI 功能差评会反噬品牌</td>
+<td><strong>中等偏强</strong>；品牌不保证 AI 满意度</td>
+</tr>
+<tr>
+<td><strong>转化</strong></td>
+<td>「大神都在用」对新人有效；对成熟作者/工作室，作用有限，他们更看交付与保密</td>
+<td><strong>分层有效</strong>：新人 &gt; 成熟作者 &gt; 工作室</td>
+</tr>
+<tr>
+<td><strong>对我方</strong></td>
+<td>不能借「大神」名义；也不需要在「大神」叙事上竞争</td>
+<td><strong>不跟</strong>；用可验证的作者案例、体检报告、成本账单建立信任</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>作者社区的真实反馈</strong>（说明品牌不能替代产品）：</p>
+<ul>
+<li>「问全书的话，我才 12 万字就已经开始胡言乱语了…10 章 10 章的问，有一些伏笔铺垫他又联系不上」[S5]</li>
+<li>「手机端完全用不了」「只有 PC 端能用」[S5]</li>
+<li>「不怎么样，错漏百出」「感觉差评一片」[S5]</li>
+<li>「浪费我 300 墨水，不如不用」[S5]</li>
+</ul>
+<p>这些反馈来自官方社区公开评论，<strong>不代表全部用户</strong>，但足以说明：<strong>「大神站台」能带来首访，不能保证留存；AI 长文可靠性仍是行业共同难题。</strong></p>
+<hr />
+<h2 id="6">6. 结论：避开哪些正面战场、主打哪些差异点</h2>
+<h3 id="61">6.1 应当避开的正面战场</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>不打的战场</th>
+<th>原因</th>
+<th>我方策略</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>通用码字/编辑器</strong></td>
+<td>阅文免费、全端、稳定、有云同步/历史版本；我方重做一个编辑器没有胜算</td>
+<td>不做编辑器；做「导入/导出 + 外部写作」</td>
+</tr>
+<tr>
+<td><strong>AI 续写/润色/纠错/起名（单点）</strong></td>
+<td>阅文在写作页内即用、免费、体验成熟；单点工具会被「免费」碾碎</td>
+<td>不卖「一键润色」；卖「改编级重写 + 体检建议」</td>
+</tr>
+<tr>
+<td><strong>发布/签约/平台数据</strong></td>
+<td>阅文是平台方，链路闭环；外部工具无法复制</td>
+<td>不碰发布；做「投稿前体检 + 格式整理」</td>
+</tr>
+<tr>
+<td><strong>移动端/全端体验</strong></td>
+<td>阅文 Android/iOS/鸿蒙/桌面/网页全覆盖；我方只有 Windows+Android</td>
+<td>先做 Windows 工作室 + Web 云端；移动端只做「查看/审批」</td>
+</tr>
+<tr>
+<td><strong>品牌广告/「大神」叙事</strong></td>
+<td>阅文官方品牌+平台作者资源；我方新品牌无预算</td>
+<td>不投品牌广告；用案例、报告、社区口碑</td>
+</tr>
+<tr>
+<td><strong>「AI 率降到 0 / 包过检测」</strong></td>
+<td>平台规则与法律风险极高；阅文官方也禁止洗稿</td>
+<td>明确不做；只做「风险提示 + 人工改写」</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="62">6.2 应当主打的差异点</h3>
+<ol>
+<li><strong>结构化拆解 + 可编辑中间层</strong>：把参考书变成 <code>decomposed.json</code> / <code>chapters.json</code>，章节、角色、势力、伏笔、道具都可检查、可改、可复用。阅文只做「自己稿件的章纲提取」，不做这个。</li>
+<li><strong>可迁移改编 + 批量交付</strong>：源章→目标章映射、名字映射、扩写/压缩/续集、4 路并发；一本参考书可产出多个版本。阅文明确禁止洗稿，也不做批量改编。</li>
+<li><strong>体检 + 合规报告</strong>：<code>review.py</code> 多维体检 + <code>sentinel.py</code> 敏感词扫描 + <code>compliance.py</code> 权利声明；输出高危/中危、原文引用、修改清单。阅文只有发布前风险提示，没有系统化体检报告。</li>
+<li><strong>本地 / BYOK / 多模型 / 私有化</strong>：数据不出机、Key 自己掌控、任意 OpenAI 兼容端点、Windows exe/本地 Web。阅文只能用官方模型、AI 必须联网。</li>
+<li><strong>成本透明 + 工程化导出</strong>：token/耗时/成本可查；docx/md/txt + JSON + 70+ HTTP 接口 + 云端预签名产物。阅文只有章节导出，没有成本账本/API。</li>
+<li><strong>工作室交付台</strong>：多书、批量、任务队列、额度账本、管理后台；按席位/项目收费。阅文是个人工具，不做工作室席位/审稿流。</li>
+</ol>
+<h3 id="63">6.3 三条可执行的差异化定位建议</h3>
+<h4 id="1_1">建议 1：做「投稿前工作台」，不做「第二个作家助手」</h4>
+<ul>
+<li><strong>话术</strong>：「作家助手负责写，墨写负责开书前拆解、投稿前体检。」</li>
+<li><strong>入口产品</strong>：免费「2 万字拆解 + 体检报告」——上传 2 万字，输出 1 页结构报告 + 高危/中危清单；需登录看完整版。</li>
+<li><strong>为什么可行</strong>：阅文不做参考书拆解、不做系统体检；作者在「开书前/投稿前」有真实痛点，且不与日常码字冲突。</li>
+<li><strong>KPI</strong>：报告→注册 ≥30%，注册→付费 ≥8%；体检报告分享率。</li>
+<li><strong>边界</strong>：不承诺签约/过稿；报告只做「风险提示 + 修改方向」。</li>
+</ul>
+<h4 id="2">建议 2：做「工作室交付台」，按「批量 + 保密 + 可交付」收费</h4>
+<ul>
+<li><strong>目标客户</strong>：3–10 人网文工作室/代写团队，每月 3 本以上。</li>
+<li><strong>产品组合</strong>：批量拆解/改编/体检 + 可编辑 JSON 中间层 + docx/md/txt 导出 + 成本账单 + 私有化部署。</li>
+<li><strong>价格锚</strong>：¥199/月起（BYOK），¥299/月（托管）；¥1,999/季试点；企业 ¥19,800/年起（参考 [S21] §5）。</li>
+<li><strong>为什么可行</strong>：阅文不做批量/席位/私有化；工作室愿意为「可复现交付 + 数据保密」付费。</li>
+<li><strong>KPI</strong>：3 家试点、2 家续费；单本交付周期缩短 ≥30%；毛利率 ≥70%。</li>
+</ul>
+<h4 id="3_1">建议 3：做「合规再创作」，把「可审计」变成信任卖点</h4>
+<ul>
+<li><strong>产品能力</strong>：权利声明（自有/授权/公版）→ <code>compliance.jsonl</code> 留痕；改编差异报告（人物/情节/主线变化比例）；<code>sentinel.py</code> 敏感词/风险扫描；AIGC 披露建议。</li>
+<li><strong>话术</strong>：「不洗稿、不绕过检测、不保证签约；每一步可审计、每一版可回溯。」</li>
+<li><strong>为什么可行</strong>：阅文官方明确禁止 AI 洗稿 [S4]；平台对 AI 正文容忍度低（作者社区称起点「不建议使用任何 AI」[S18]，【未证实官方规则】）；「合规」是工作室/机构采购的硬门槛。</li>
+<li><strong>边界</strong>：不做「去抄袭」宣传；不做「AI 率降到 0」；不做批量起号。把「参考他人作品」默认改为「自有/授权/公版」，并提供「结构迁移」而非「逐章换名」。</li>
+</ul>
+<hr />
+<h2 id="7">7. 风险与边界（必须写进产品与营销）</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>风险</th>
+<th>事实/证据</th>
+<th>后果</th>
+<th>我方必须做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>改编权/实质性相似</strong></td>
+<td>参考作品→换名→逐章改编，法律上更接近「改编」而非原创；商业计划书引用宁波 25 万、厦门 15 万判例 [S21] §4.2</td>
+<td>单案赔偿、下架、企业客户不敢采购</td>
+<td>默认「结构迁移」而非逐章映射；权利声明；差异报告；相似度/人工复核；法务审合同</td>
+</tr>
+<tr>
+<td><strong>平台 AI 规则</strong></td>
+<td>起点 AI 占比 &gt;10% 触发处理（商业计划书引公开报道 [S21]）；作者社区称起点「不建议使用任何 AI」[S18]【未证实官方】</td>
+<td>作品被移出榜单/拒签/封号</td>
+<td>不做「绕过检测」；输出 AIGC 披露建议；强制人工改写；限制批量</td>
+</tr>
+<tr>
+<td><strong>官方明确禁止洗稿</strong></td>
+<td>妙笔版权说明：「利用 AI 洗稿侵犯他人作品版权，仍然是不可以的」[S4]</td>
+<td>用户违规会连累产品口碑/法律风险</td>
+<td>产品内禁止「洗稿」话术；上传即声明；高风险阻断导出</td>
+</tr>
+<tr>
+<td><strong>长文一致性</strong></td>
+<td>我方跨批依赖 <code>name_map</code>/<code>target</code> 映射，缺语义一致性检查（[S21] §4.1 风险 3）</td>
+<td>人物动机漂移、伏笔断、章节重复</td>
+<td>建黄金评测集；人名/关系/时间线/伏笔自动检查；章节级重生成</td>
+</tr>
+<tr>
+<td><strong>云端合规缺口</strong></td>
+<td>云端任务创建无 <code>compliance_ack</code>，可绕开桌面版权闸门（[S22] P0-7）</td>
+<td>云端法律风险高于桌面端</td>
+<td>任务创建必填 <code>compliance_ack{version, accepted_at}</code> 并审计</td>
+</tr>
+<tr>
+<td><strong>数据/隐私</strong></td>
+<td>本地 <code>MOBIT_HOST=0.0.0.0</code> 无鉴权；Key 在 localStorage（[S21] §1.2）</td>
+<td>书稿泄露、Key 被窃</td>
+<td>局域网 token；Key 加密/系统钥匙串；日志脱敏；自动备份</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8">8. 来源与查询日期</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>来源</th>
+<th>类型</th>
+<th>URL</th>
+<th>内容日期</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S1</td>
+<td>阅文集团 · 作家助手官网</td>
+<td>P0 官方</td>
+<td>https://www.yuewen.com/app/?type=appzj</td>
+<td>持续更新</td>
+<td>全端、免费、功能、云端同步</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>作家助手桌面端广告页</td>
+<td>P0 官方</td>
+<td>https://write.qq.com/portal/advertising</td>
+<td>持续更新</td>
+<td>模板中心、好友拼字、多平台预览、章纲提取</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>App Store · 作家助手</td>
+<td>P0 官方</td>
+<td>https://apps.apple.com/cn/app/%E4%BD%9C%E5%AE%B6%E5%8A%A9%E6%89%8B/id1044537226</td>
+<td>5.25.0 约 2026-11-02</td>
+<td>功能清单、版本记录、评分/排名、模型更新</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>官方社区 · 妙笔挂载章节指令</td>
+<td>P0 官方</td>
+<td>https://write.qq.com/portal/community/topic/detail/89608351800941501</td>
+<td>1 年以前（约 2025）</td>
+<td>起名/简介、润色、纠错、章纲、版权说明</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>官方公告 · 妙笔通鉴全面开放</td>
+<td>P0 官方</td>
+<td>https://m.write.qq.com/portal/article/detail?CAID=91435970443932901</td>
+<td>2025-10（创作大会）</td>
+<td>全面开放、能力范围、作者反馈</td>
+</tr>
+<tr>
+<td>S6</td>
+<td>官方社区 · 问全书/知识库限时免墨水</td>
+<td>P0 官方</td>
+<td>https://write.qq.com/portal/community/topic/detail/92554221550885201</td>
+<td>2025-12-04</td>
+<td>墨水消耗、限免、知识库</td>
+</tr>
+<tr>
+<td>S7</td>
+<td>官方活动 · 作家助手 5.0</td>
+<td>P0 官方</td>
+<td>https://m.write.qq.com/portal/activity/codeWar</td>
+<td>2025</td>
+<td>问全书/挂章节/闪电键入/大神攻略</td>
+</tr>
+<tr>
+<td>S8</td>
+<td>官方 · 桌面端版本说明</td>
+<td>P0 官方</td>
+<td>https://write.qq.com/portal/version</td>
+<td>至 2024-01-22</td>
+<td>妙笔设定灵感、章纲智能提取、风险提示、快速起名</td>
+</tr>
+<tr>
+<td>S9</td>
+<td>官方 · 帮助中心</td>
+<td>P0 官方</td>
+<td>https://write.qq.com/about/help_center.html</td>
+<td>持续更新</td>
+<td>签约门槛、申请签约流程、审核规则</td>
+</tr>
+<tr>
+<td>S10</td>
+<td>官方 · 作家助手用户服务协议</td>
+<td>P0 官方</td>
+<td>https://write.qq.com/portal/author-apply-agreement ; https://activity.write.qq.com/noah/202211071</td>
+<td>持续更新</td>
+<td>收费服务、改编制作仅限阅文 IP、版权归属</td>
+</tr>
+<tr>
+<td>S11</td>
+<td>官方社区 · 5.0 更新简报</td>
+<td>P0 官方</td>
+<td>https://write.qq.com/portal/community/topic/detail/90095526988539201</td>
+<td>2025</td>
+<td>5.0 功能、作者需求反馈</td>
+</tr>
+<tr>
+<td>S12</td>
+<td>官方 · 作家专区/成为作家</td>
+<td>P0 官方</td>
+<td>https://m.write.qq.com/portal/appGuide/5 ; https://write.qq.com/</td>
+<td>持续更新</td>
+<td>平台作者名单、课程、作家福利</td>
+</tr>
+<tr>
+<td>S13</td>
+<td>官方下载页 · 作家之声</td>
+<td>P0 官方（含用户评价）</td>
+<td>https://zuojia.write.qq.com</td>
+<td>持续更新</td>
+<td>本地保存、多端同步、作者评价</td>
+</tr>
+<tr>
+<td>S14</td>
+<td>官方社区 · 导出/同步讨论</td>
+<td>P0 官方社区（作者发言）</td>
+<td>https://write.qq.com/portal/community/topic/detail/97421909599242801</td>
+<td>2026-07-02（评论）</td>
+<td>章节导出到电脑、反向导入</td>
+</tr>
+<tr>
+<td>S15</td>
+<td>光明网 · 作家助手 Claw 内测</td>
+<td>P1 媒体</td>
+<td>https://wenyi.gmw.cn/2026-04/03/content_38689000.htm</td>
+<td>2026-04-03</td>
+<td>Claw/OpenClaw 内测（细节未证实）</td>
+</tr>
+<tr>
+<td>S16</td>
+<td>新浪财经 · 妙笔通鉴</td>
+<td>P1 媒体</td>
+<td>https://finance.sina.com.cn/tech/roll/2025-10-23/doc-infuwnhi2340284.shtml</td>
+<td>2025-10-23</td>
+<td>千万字级理解、「第二大脑」、不做章节生成</td>
+</tr>
+<tr>
+<td>S17</td>
+<td>中国作家网 · DeepSeek 网文应用</td>
+<td>P1 媒体</td>
+<td>https://www.chinawriter.com.cn/n1/2025/0220/c403994-40422263.html</td>
+<td>2025-02-20</td>
+<td>行业背景：大纲/设定/润色/剧情评价</td>
+</tr>
+<tr>
+<td>S18</td>
+<td>官方社区 · 拒签与 AI</td>
+<td>P3 作者社区</td>
+<td>https://write.qq.com/portal/community/topic/detail/92388347498002901</td>
+<td>未标注</td>
+<td>作者称起点「不建议使用任何 AI」【未证实官方规则】</td>
+</tr>
+<tr>
+<td>S19</td>
+<td>游侠软件 · 作家助手介绍</td>
+<td>P3 第三方</td>
+<td>https://soft.ali213.net/down/36546.html</td>
+<td>持续更新</td>
+<td>智能纠错/敏感表述【第三方，未证实】</td>
+</tr>
+<tr>
+<td>S20</td>
+<td>飞翔下载 · 作家助手介绍</td>
+<td>P3 第三方</td>
+<td>https://m.fxxz.com/f/255282</td>
+<td>持续更新</td>
+<td>导出 Word/邮件【第三方，未证实】</td>
+</tr>
+<tr>
+<td>S21</td>
+<td>我方 · 商业计划书</td>
+<td>内部文档</td>
+<td>docs/墨写商业计划书-2026-11.md</td>
+<td>2026-11-04</td>
+<td>我方能力、成本、风险、定价</td>
+</tr>
+<tr>
+<td>S22</td>
+<td>我方 · 项目缺口清单</td>
+<td>内部文档</td>
+<td>docs/项目缺口清单-2026-11.md</td>
+<td>2026-11-04</td>
+<td>BYOK/云端合规/移动端/协作缺口</td>
+</tr>
+<tr>
+<td>S23</td>
+<td>我方 · 源码模块</td>
+<td>内部代码</td>
+<td>src/decompose.py、adapt.py、expand.py、review.py、sentinel.py、compliance.py、export_book.py、usage.py</td>
+<td>当前工作区</td>
+<td>能力证据</td>
+</tr>
+<tr>
+<td>S24</td>
+<td>我方 · 服务端设计</td>
+<td>内部文档</td>
+<td>docs/服务端架构与订阅计费设计-2026-11.md ; server/app</td>
+<td>2026-11</td>
+<td>账号/订阅/额度/订单/发票/审计</td>
+</tr>
+<tr>
+<td>S26</td>
+<td>番茄小说 · AI 写作工具</td>
+<td>竞品官方</td>
+<td>https://fanqienovel.com/writer/zone/article/7327136545129906238</td>
+<td>持续更新</td>
+<td>仅用于辨析：AI 续写是番茄功能，非阅文</td>
+</tr>
+<tr>
+<td>S27</td>
+<td>番茄小说 · 章节风险提示</td>
+<td>竞品官方</td>
+<td>https://fanqienovel.com/writer/zone/article/7553258797649625113</td>
+<td>持续更新</td>
+<td>仅用于辨析：风险提示是番茄功能，非阅文</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="9">9. 未证实 / 假设清单</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>事项</th>
+<th>当前口径</th>
+<th>处理方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>墨水现金价格/充值比例</td>
+<td>官方未公开；作者称「浪费 300 墨水」「充的钱」</td>
+<td><span class="badge unknown">未证实</span>；不写具体价格；只说「消耗虚拟币，可活动获取/限免」</td>
+</tr>
+<tr>
+<td>妙笔是否有正文级「续写」</td>
+<td>官方功能清单/版本记录未见；只有「后续十章章纲」</td>
+<td><strong>无（官方）</strong>；如未来上线，以官方公告为准</td>
+</tr>
+<tr>
+<td>妙笔通鉴移动端是否完全不可用</td>
+<td>作者反馈「手机端完全用不了」「只有 PC 端能用」</td>
+<td><span class="badge unknown">未证实</span>（作者社区口径）；不写成官方限制</td>
+</tr>
+<tr>
+<td>独立全文敏感词扫描</td>
+<td>官方有「风险段落提示/预审/智能纠错」；无独立词库扫描说明</td>
+<td><strong>仅部分/未证实</strong>；不把第三方「敏感表述」当官方功能</td>
+</tr>
+<tr>
+<td>导出 Word/邮件</td>
+<td>官方问答/作者反馈有「导出章节」；Word/邮件为第三方口径</td>
+<td><strong>部分证实</strong>；正文只写「章节导出」，Word 标注第三方</td>
+</tr>
+<tr>
+<td>正式「大神代言/签约站台」</td>
+<td>无官方代言公告/合同证据</td>
+<td><span class="badge unknown">未证实</span>；定性为「官方营销 + 作者口碑 + 社区内容」</td>
+</tr>
+<tr>
+<td>作家助手 Claw 具体能力</td>
+<td>2026-03 内测报道，细节截断</td>
+<td><span class="badge unknown">未证实</span>；只作趋势提示，不纳入功能对比</td>
+</tr>
+<tr>
+<td>「起点不建议使用任何 AI」</td>
+<td>作者社区帖子，非官方规则</td>
+<td><span class="badge unknown">未证实</span>；作为风险信号，不作为规则事实</td>
+</tr>
+<tr>
+<td>阅文 AI 是否对所有作者完全免费</td>
+<td>官方称「所有作家开放」；妙笔/通鉴消耗墨水；2025-12 限免 31 天</td>
+<td><strong>口径冲突</strong>；写「基础免费 + 虚拟币消耗 + 限时免墨水」</td>
+</tr>
+<tr>
+<td>全网热词/选题榜单</td>
+<td>官方有作品数据/作家指数榜；无全网热词证据</td>
+<td><span class="badge unknown">未证实</span>；只写「作品数据/榜单有，热词未证实」</td>
+</tr>
+<tr>
+<td>我方「去抄袭改编」的法律安全性</td>
+<td>代码支持换名/逐章映射；商业计划书自评高风险</td>
+<td><strong>假设/风险</strong>；不作为卖点，必须合规改造</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="10">10. 附：我方能力证据（便于内部对齐）</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>能力</th>
+<th>代码/文档</th>
+<th>关键事实</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>参考书拆解</td>
+<td><code>src/decompose.py</code></td>
+<td>reference/outline 两模式；输出 <code>decomposed.json</code> + <code>chapters.json</code>；12 万字符分段；8192→32768 重试；<code>--local</code> 无模型</td>
+</tr>
+<tr>
+<td>全书设定</td>
+<td><code>src/story_bible.py</code></td>
+<td>21 个全书要素、24 个角色卡字段、10 类势力、18 种关系、9 种立场</td>
+</tr>
+<tr>
+<td>结构化改编</td>
+<td><code>src/adapt.py</code></td>
+<td>1:1 章号映射；<code>--target-chapters</code> 扩写/压缩；<code>--sequel-chapters</code> 续集；名字映射；4 路并发；20 章/段</td>
+</tr>
+<tr>
+<td>章节正文</td>
+<td><code>src/expand.py</code></td>
+<td>章节骨架 + 全书设定 → 正文；输出 <code>data/&lt;书名&gt;/manuscript/NNN.txt</code>；强调「展示而非告知」、设定铁律</td>
+</tr>
+<tr>
+<td>体检</td>
+<td><code>src/review.py</code></td>
+<td>AI 味、主题偏离、错别字、设定/剧情一致性、违规风险、逻辑连贯、行文统计 + 模型复核；带 quote/行号/修改清单；不改写、不承诺绕过检测</td>
+</tr>
+<tr>
+<td>敏感词</td>
+<td><code>src/sentinel.py</code></td>
+<td>本地词表精确匹配；命中词/次数/级别/类别/上下文/下标；词表可自定义</td>
+</tr>
+<tr>
+<td>合规留痕</td>
+<td><code>src/compliance.py</code></td>
+<td>权利来源（自有/授权/公版）+ 权利确认 + AI 知情；写 <code>data/_system/compliance.jsonl</code></td>
+</tr>
+<tr>
+<td>导出</td>
+<td><code>src/export_book.py</code></td>
+<td>合成 docx / md / txt；只读成稿，不改数据</td>
+</tr>
+<tr>
+<td>成本</td>
+<td><code>src/usage.py</code></td>
+<td><code>data/_system/usage.jsonl</code>：token/耗时/模型/阶段；按配置单价估算成本</td>
+</tr>
+<tr>
+<td>本地/桌面</td>
+<td><code>src/webapp.py</code>、<code>src/desktop_app.py</code></td>
+<td>70+ HTTP 接口；默认 <code>127.0.0.1</code>；pywebview 桌面壳；<code>MOBIT_HOST=0.0.0.0</code> 可开局域网但无鉴权</td>
+</tr>
+<tr>
+<td>云端</td>
+<td><code>server/</code></td>
+<td>账号/设备/License/订阅/额度/用量/订单/退款/发票/任务/审计/管理后台</td>
+</tr>
+<tr>
+<td>管理后台</td>
+<td><code>admin/</code></td>
+<td>用户、订阅、订单、发票、对账、任务看板、告警、审计；写操作审计</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<p><em>免责声明：本报告为竞品与商业分析，不构成法律意见。版权、平台规则、税务与支付合规事项，请在上线前咨询专业律师/会计师。公开页面与产品功能会变动，引用前请复核查询日期与版本。</em></p>
+    </main>
+  </div>
+  <footer>本报告为竞品与商业分析，不构成法律意见；公开页面与产品功能会变动，引用前请复核查询日期与版本。</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,76 @@
+:root {
+  /* 色板：白底 + 墨色文字，主色青、辅助紫（沿用项目品牌），深色创作面板取自参考图 */
+  --color-bg: #ffffff;
+  --color-bg-soft: #f4f5f7;
+  --color-bg-softer: #f9fafb;
+  --color-surface: #ffffff;
+  --color-line: #e7e9ee;
+  --color-line-strong: #d7dbe2;
+  --color-text: #0f1720;
+  --color-text-2: #4b5563;
+  --color-text-3: #8b929d;
+  --color-brand: #0d9488;
+  --color-brand-hover: #0b7f74;
+  --color-accent: #7c3aed;
+  --color-cyan: #22d3ee;
+  --color-danger: #d92d20;
+  --color-danger-soft: #fef3f2;
+  --color-warn: #b54708;
+  --color-warn-soft: #fffaeb;
+  --color-success: #067647;
+  --color-success-soft: #ecfdf3;
+
+  /* 深色创作面板 */
+  --panel-bg-1: #0b1a2a;
+  --panel-bg-2: #071320;
+  --panel-text: #e8eef5;
+  --panel-text-2: #9fb0c2;
+  --panel-line: rgba(255, 255, 255, 0.12);
+  --panel-chip: rgba(255, 255, 255, 0.07);
+  --panel-chip-hover: rgba(255, 255, 255, 0.13);
+
+  /* 圆角 */
+  --radius-xl: 26px;
+  --radius-lg: 18px;
+  --radius-md: 12px;
+  --radius-sm: 9px;
+  --radius-pill: 999px;
+
+  /* 布局：顶栏高度（含 1px 分隔线），用于 calc(100dvh - 顶栏) 的首屏居中 */
+  --topbar-h: 65px;
+
+  /* 间距 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-14: 56px;
+
+  /* 字号：正文统一 14px，标题 15px 加粗 */
+  --text-xs: 14px;
+  --text-sm: 14px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 15px;
+  --text-xl: 28px;
+  --text-2xl: 38px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 32, 0.06);
+  --shadow-md: 0 10px 30px -18px rgba(15, 23, 32, 0.35);
+  --shadow-lg: 0 28px 60px -34px rgba(8, 20, 32, 0.6);
+
+  /* 动效 */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur-fast: 140ms;
+  --dur: 240ms;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Consolas,
+    'Liberation Mono', monospace;
+}
