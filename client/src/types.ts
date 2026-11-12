@@ -629,6 +629,8 @@ export interface CollectionField {
   required?: boolean
   placeholder?: string
   presets?: string[]
+  /** select 类型的备选项（带真实值与展示文案），优于 presets 文本 */
+  options?: { value: string; label: string }[]
   full?: boolean
   rows?: number
   min?: number
@@ -751,7 +753,7 @@ export interface Plan {
   price_month_cents: number
   price_year_cents: number
   currency: string
-  /** 服务端实际返回字典：{"byok":true,"managed":false,"support":"community"} */
+  /** 服务端实际返回字典：{"managed":false,"support":"community"} */
   features: string[] | Record<string, string | boolean | number>
   entitlements: PlanEntitlement[]
   /** 套餐定位描述（服务端未返回时客户端按 code 兜底） */

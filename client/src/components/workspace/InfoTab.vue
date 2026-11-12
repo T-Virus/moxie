@@ -941,10 +941,24 @@ const lengthText = computed(() => {
   return '—'
 })
 
+/** 与卷章概览/正文一致的合并章节数：chapters + outline.chapters + chapter_summaries 并集，排除隐藏章 */
+const mergedChapterCount = computed(() => {
+  const nos = new Set<number>([
+    ...(props.run.chapters || []).map((chapter) => chapter.no),
+    ...(props.run.outline?.chapters || []).map((chapter) => chapter.no),
+    ...(props.run.chapter_summaries || []).map((chapter) => chapter.no),
+  ])
+  const hidden = new Set(props.run.chapter_hidden || [])
+  for (const no of hidden) nos.delete(no)
+  return nos.size
+})
+
 const chapterCount = computed(() => {
+  // 优先用前端合并计数（与卷章概览/正文即时一致）；无章节时回退服务端聚合值
+  if (mergedChapterCount.value > 0) return mergedChapterCount.value.toLocaleString('zh-CN')
   const count = props.run.summary?.chapters_count
-  if (count === null || count === undefined) return '—'
-  return count.toLocaleString('zh-CN')
+  if (count != null) return count.toLocaleString('zh-CN')
+  return '—'
 })
 
 const totalWords = computed(() => {

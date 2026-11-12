@@ -52,27 +52,6 @@ import {
   type PayloadSession,
 } from './payloadCrypto'
 
-const BYOK_STORAGE_KEY = 'moxie_byok_key'
-
-/** 读取会话内的 BYOK Key（仅内存，不落 localStorage/落库；服务端只存 Redis TTL 1h）。 */
-export function getByokKey(): string {
-  try {
-    return sessionStorage.getItem(BYOK_STORAGE_KEY)?.trim() || ''
-  } catch {
-    return ''
-  }
-}
-
-export function setByokKey(key: string): void {
-  try {
-    const trimmed = key.trim()
-    if (trimmed) sessionStorage.setItem(BYOK_STORAGE_KEY, trimmed)
-    else sessionStorage.removeItem(BYOK_STORAGE_KEY)
-  } catch {
-    /* 私密浏览等环境下 sessionStorage 不可用时静默降级 */
-  }
-}
-
 export async function fetchGenres(): Promise<GenresResponse> {
   return apiFetch<GenresResponse>('/genres')
 }
@@ -89,8 +68,6 @@ export async function createRun(payload: CreateRunPayload): Promise<CreateRunRes
     // 缺少该头会返回 422 rights_confirmation_required（生产环境不可关闭）。
     headers['X-Rights-Confirmed'] = 'true'
   }
-  const byok = getByokKey()
-  if (byok) headers['X-BYOK-Key'] = byok
   return apiFetch<CreateRunResponse>('/agent-runs', {
     method: 'POST',
     headers,
@@ -966,8 +943,6 @@ export async function pauseRun(runId: string): Promise<void> {
 
 export async function resumeRun(runId: string, payload: ResumePayload): Promise<void> {
   const headers: Record<string, string> = {}
-  const byok = getByokKey()
-  if (byok) headers['X-BYOK-Key'] = byok
   await apiFetch(`/agent-runs/${encodeURIComponent(runId)}/resume`, {
     method: 'POST',
     headers,

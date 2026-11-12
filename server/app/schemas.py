@@ -38,6 +38,14 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=16)
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+
+
 class DeviceCreateRequest(BaseModel):
     device_hash: str = Field(min_length=8, max_length=128)
     platform: Literal["windows", "android", "web", "macos", "linux"]

@@ -379,14 +379,15 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-md);
-  font-weight: 700;
+  /* 与徽章/用时同字号同行高，保证整行文字水平对齐 */
+  font-size: var(--text-sm);
+  line-height: 20px;
+  font-weight: 400;
   color: var(--color-text-2);
 }
 
 .task-center__link.is-active .task-center__name {
   color: var(--color-brand);
-  font-weight: 700;
 }
 
 .task-center__badge {
@@ -444,6 +445,7 @@ button.task-center__action--danger:hover:not(:disabled) {
 .task-center__time {
   flex: none;
   font-size: 14px;
+  line-height: 20px;
   color: var(--color-text-3);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;

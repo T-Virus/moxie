@@ -89,9 +89,13 @@ class _SafeDict(dict):
 
 
 def _deliver(
-    delivery: NotificationDelivery, settings: Settings | None, now: datetime
+    delivery: NotificationDelivery, settings: Settings | None, now: datetime, *, forced: bool = False
 ) -> None:
-    """执行一次发送；结果写回 delivery。异常不外抛。"""
+    """执行一次发送；结果写回 delivery。异常不外抛。
+
+    forced=True 时忽略全局 NOTIFICATION_EMAIL_ENABLED 开关（验证码邮件等关键邮件
+    必须发出，不能因普通营销邮件开关被关而静默跳过），但仍受 NOTIFICATIONS_ENABLED 总开关约束。
+    """
     if settings is None:
         delivery.status = "skipped"
         delivery.meta = {**(delivery.meta or {}), "reason": "settings_unavailable"}
@@ -107,7 +111,7 @@ def _deliver(
         return
 
     if delivery.channel == "email":
-        if not settings.notification_email_enabled:
+        if not (forced or settings.notification_email_enabled):
             delivery.status = "skipped"
             delivery.meta = {**(delivery.meta or {}), "reason": "email_disabled"}
             return
@@ -280,3 +284,39 @@ def mark_all_read(session: Session, account_id: int, now: datetime | None = None
     if rows:
         session.flush()
     return len(rows)
+
+
+def send_verification_email(
+    session: Session,
+    *,
+    account: Account,
+    subject: str,
+    body: str,
+    settings: Settings | None,
+    dedupe_key: str,
+) -> NotificationDelivery | None:
+    """发送邮箱验证码/验证邮件：绕过全局 email 开关，只要配置了 SMTP 就尽量投递。
+
+    返回 delivery；调用方据 delivery.status == "sent" 判断是否真正发出（未配置 SMTP
+    时为 skipped，便于上层在开发环境把验证链接直接返回给前端）。
+    """
+    now = utcnow()
+    if not account or not account.email:
+        return None
+    delivery = NotificationDelivery(
+        account_id=account.id,
+        channel="email",
+        category="email_verification",
+        recipient=account.email,
+        subject=subject[:200],
+        body=body,
+        status="queued",
+        attempts=0,
+        max_attempts=(settings.notification_max_attempts if settings else 3),
+        dedupe_key=dedupe_key,
+        meta={},
+    )
+    session.add(delivery)
+    session.flush()
+    _deliver(delivery, settings, now, forced=True)
+    return delivery

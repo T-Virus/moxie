@@ -362,14 +362,14 @@ function planEntitlements(plan: Plan): PlanEntitlement[] {
     })
 }
 
-/** 服务端 plan.features 是字典（books_month/adapt_chapters/byok/support…），转成中文条目。 */
+/** 服务端 plan.features 是字典（books_month/adapt_chapters/support…），转成中文条目。 */
 function planFeatures(plan: Plan): string[] {
   const features = plan.features
   if (Array.isArray(features)) {
     return features.filter(
       (item) =>
         item &&
-        !['支持自带密钥（BYOK）', '平台托管模型', '优先技术支持'].includes(item),
+        !['平台托管模型', '优先技术支持'].includes(item),
     )
   }
   return Object.entries(features)
@@ -378,8 +378,8 @@ function planFeatures(plan: Plan): string[] {
 }
 
 function featureText(key: string, value: string | boolean | number): string {
-  // BYOK / 平台托管 / 优先技术支持不对外展示
-  if (key === 'byok' || key === 'managed') return ''
+  // 平台托管 / 优先技术支持不对外展示
+  if (key === 'managed') return ''
   if (key === 'support') {
     if (value === 'priority') return ''
     if (value === 'community') return ''

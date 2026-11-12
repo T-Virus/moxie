@@ -104,54 +104,6 @@
         @keydown.enter.prevent="open(character)"
         @keydown.space.prevent="open(character)"
       >
-        <div class="char-card__actions">
-          <button
-            type="button"
-            class="char-card__action"
-            :disabled="!canEdit"
-            :title="canEdit ? '编辑角色' : '运行中的作品暂不可编辑'"
-            aria-label="编辑角色"
-            @click.stop="openEdit(character)"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="char-card__action char-card__action--danger"
-            :disabled="!canEdit"
-            :title="canEdit ? '删除角色' : '运行中的作品暂不可编辑'"
-            aria-label="删除角色"
-            @click.stop="openDelete(character)"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M3 6h18" />
-              <path d="M8 6V4h8v2" />
-              <path d="M6 6l1 15h10l1-15" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-            </svg>
-          </button>
-        </div>
-
         <span class="char-card__avatar" :class="`is-${genderKey(character.gender)}`" aria-hidden="true">
           {{ firstChar(character.name) }}
         </span>
@@ -164,6 +116,53 @@
             </i>
             <span v-if="character.age" class="char-card__age">{{ character.age }} 岁</span>
             <span v-if="character.type" class="char-card__type">{{ character.type }}</span>
+            <div class="char-card__actions">
+              <button
+                type="button"
+                class="char-card__action"
+                :disabled="!canEdit"
+                :title="canEdit ? '编辑角色' : '运行中的作品暂不可编辑'"
+                aria-label="编辑角色"
+                @click.stop="openEdit(character)"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="char-card__action char-card__action--danger"
+                :disabled="!canEdit"
+                :title="canEdit ? '删除角色' : '运行中的作品暂不可编辑'"
+                aria-label="删除角色"
+                @click.stop="openDelete(character)"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M6 6l1 15h10l1-15" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <p v-if="character.alias" class="char-card__alias">别名 · {{ character.alias }}</p>
@@ -835,9 +834,8 @@ function resetFilters(): void {
 }
 
 .char-card__actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+  flex: none;
+  margin-left: auto;
   display: flex;
   gap: 2px;
   opacity: 0;
@@ -920,7 +918,6 @@ function resetFilters(): void {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding-right: 52px;
 }
 
 .char-card__name {

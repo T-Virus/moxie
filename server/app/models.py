@@ -70,8 +70,25 @@ class Account(Base):
     password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
     role: Mapped[str] = mapped_column(String(16), default="user", nullable=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class EmailVerification(Base):
+    """邮箱验证令牌：注册/重发时生成，点击邮件链接消费后激活账号。
+
+    只存令牌哈希，不存明文；过期/消费后留痕，便于审计与防重放。
+    """
+
+    __tablename__ = "email_verifications"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("accounts.id"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
 
 
 class Device(Base):
@@ -653,4 +670,5 @@ __all__ = [
     "AgentRunStep",
     "AgentRunEvent",
     "StoredObject",
+    "EmailVerification",
 ]

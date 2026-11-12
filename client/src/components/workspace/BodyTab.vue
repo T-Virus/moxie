@@ -88,7 +88,7 @@
           </button>
         </header>
 
-        <div class="reader__pane" :class="`is-${themeKey}`">
+        <div ref="paneRef" class="reader__pane" :class="`is-${themeKey}`">
           <article
             class="reader__body markdown"
             :style="{ fontSize: `${fontSize}px`, lineHeight }"
@@ -122,7 +122,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import type { ChapterContent, RunDetail } from '@/types'
+import type { ChapterContent, ChapterSummary, RunDetail } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{ run: RunDetail; chapter: number }>()
@@ -153,8 +153,58 @@ const lineKey = ref<(typeof LINE_OPTIONS)[number]['value']>('normal')
 const themeKey = ref<(typeof THEME_OPTIONS)[number]['value']>('light')
 const copied = ref(false)
 const collapsed = ref<string[]>([])
+/** 右侧正文滚动容器：切换章节时重置到顶部 */
+const paneRef = ref<HTMLElement | null>(null)
 
-const chapters = computed(() => props.run.chapters || [])
+/** 合并 正文(chapters) / 大纲(outline.chapters) / 逐章概括(chapter_summaries)，
+ *  与「卷章概览」保持一致的完整章节列表，避免正文目录与概览不同步 */
+interface ReaderChapter {
+  no: number
+  title: string
+  content: string
+  words?: number
+  /** 是否有正文内容（否则仅概括占位） */
+  hasContent: boolean
+}
+
+const contentMap = computed(() => {
+  const map = new Map<number, ChapterContent>()
+  for (const chapter of props.run.chapters || []) map.set(chapter.no, chapter)
+  return map
+})
+const summaryMap = computed(() => {
+  const map = new Map<number, ChapterSummary>()
+  for (const summary of props.run.chapter_summaries || []) map.set(summary.no, summary)
+  return map
+})
+const outlineChapters = computed(() => props.run.outline?.chapters || [])
+/** 概览中隐藏/删除的章号：正文也一并隐藏，保证与卷章概览完全一致 */
+const hiddenNos = computed(() => new Set(props.run.chapter_hidden || []))
+
+const chapters = computed<ReaderChapter[]>(() => {
+  const nos = new Set<number>([
+    ...contentMap.value.keys(),
+    ...summaryMap.value.keys(),
+    ...outlineChapters.value.map((chapter) => chapter.no),
+  ])
+  return [...nos]
+    .filter((no) => !hiddenNos.value.has(no))
+    .sort((a, b) => a - b)
+    .map((no) => {
+      const content = contentMap.value.get(no)
+      const summary = summaryMap.value.get(no)
+      const outline = outlineChapters.value.find((chapter) => chapter.no === no)
+      // 标题/字数优先级与「卷章概览」保持一致：概括优先于正文、正文优先于大纲
+      const title = summary?.title || content?.title || outline?.title || `第 ${no} 章`
+      return {
+        no,
+        title,
+        content: content?.content || '',
+        words: summary?.words ?? content?.words,
+        hasContent: Boolean(content?.content),
+      }
+    })
+})
 
 const volumes = computed(() => {
   const all = chapters.value
@@ -177,7 +227,7 @@ const volumes = computed(() => {
     })
     if (mapped.some((volume) => volume.chapters.length)) return mapped.filter((v) => v.chapters.length)
   }
-  const result: Array<{ key: string; title: string; chapters: ChapterContent[] }> = []
+  const result: Array<{ key: string; title: string; chapters: ReaderChapter[] }> = []
   const volumeCount = Math.max(1, Math.round(all.length / FALLBACK_VOLUME_TARGET))
   const base = Math.floor(all.length / volumeCount)
   const extra = all.length % volumeCount
@@ -230,12 +280,16 @@ const lineHeight = computed(
 const rendered = computed(() => {
   const chapter = current.value
   if (!chapter) return ''
-  const content = chapter.content || ''
   const heading = `# 第${chapter.no}章 ${chapter.title || ''}`.trim()
-  const text = /^#\s*第\s*\d+\s*章/m.test(content)
-    ? content
-    : `${heading}\n\n${content}`
-  return renderMarkdown(text)
+  const content = chapter.content || ''
+  if (content) {
+    const text = /^#\s*第\s*\d+\s*章/m.test(content) ? content : `${heading}\n\n${content}`
+    return renderMarkdown(text)
+  }
+  // 仅有概括、无正文：展示概括并提示正文尚未生成
+  const summary = summaryMap.value.get(chapter.no)?.summary
+  const body = summary ? `> ${summary}` : '_正文尚未生成，可前往「卷章概览」补全概括。_'
+  return renderMarkdown(`${heading}\n\n${body}`)
 })
 
 function select(no: number): void {
@@ -249,7 +303,7 @@ function toggleVolume(key: string): void {
   else collapsed.value.push(key)
 }
 
-function chapterText(chapter: ChapterContent | null): string {
+function chapterText(chapter: ReaderChapter | null): string {
   if (!chapter) return ''
   const content = chapter.content || ''
   if (/^#\s*第\s*\d+\s*章/m.test(content)) return content
@@ -267,7 +321,13 @@ async function copyChapter(): Promise<void> {
   }
 }
 
-watch(currentNo, scrollActiveIntoView, { flush: 'post' })
+watch(currentNo, onChapterChange, { flush: 'post' })
+
+/** 切换章节：正文滚动回顶部，并让目录中当前章滚动到可见处 */
+function onChapterChange(): void {
+  if (paneRef.value) paneRef.value.scrollTop = 0
+  scrollActiveIntoView()
+}
 
 function scrollActiveIntoView(): void {
   document

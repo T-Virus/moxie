@@ -87,7 +87,7 @@
             <col style="width: 8%" />
             <col style="width: 9%" />
             <col style="width: 64px" />
-            <col style="width: 72px" />
+            <col style="width: 75px" />
           </colgroup>
           <thead>
             <tr>

@@ -6,12 +6,14 @@ import Runs from '@/views/Runs.vue'
 import Tools from '@/views/Tools.vue'
 import Workspace from '@/views/Workspace.vue'
 import Legal from '@/views/Legal.vue'
+import VerifyEmail from '@/views/VerifyEmail.vue'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'home', component: Home },
     { path: '/login', name: 'login', component: Auth },
+    { path: '/verify-email', name: 'verify-email', component: VerifyEmail },
     { path: '/plans', name: 'plans', component: Plans },
     { path: '/runs', name: 'runs', component: Runs },
     { path: '/runs/:id', name: 'workspace', component: Workspace, props: true },

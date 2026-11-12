@@ -3,7 +3,7 @@
     <div class="auth__head">
       <h1 class="page-title">{{ tab === 'login' ? '登录墨写' : '注册墨写' }}</h1>
       <p class="page-sub">
-        {{ tab === 'login' ? '登录后可创建任务、查看额度与历史作品。' : '邮箱注册，注册成功即自动登录。' }}
+        {{ tab === 'login' ? '登录后可创建任务、查看额度与历史作品。' : '邮箱注册，注册后请查收验证邮件完成激活。' }}
       </p>
     </div>
 
@@ -11,7 +11,24 @@
       <SegmentedTabs v-model="tab" :tabs="tabs" />
     </div>
 
-    <form class="card auth__card" novalidate @submit.prevent="submit">
+    <!-- 待验证：注册成功但邮箱尚未激活 -->
+    <div v-if="mode === 'sent'" class="card auth__card auth__sent">
+      <h2 class="auth__sent-title">验证邮件已发送</h2>
+      <p class="auth__sent-text">
+        我们已向 <strong>{{ pendingEmail }}</strong> 发送了一封验证邮件，请点击邮件中的链接完成激活后再登录。
+      </p>
+      <p v-if="sentInfo" class="auth__info" role="status">{{ sentInfo }}</p>
+      <p v-if="error" class="alert" role="alert">{{ error }}</p>
+      <button class="btn btn--brand auth__submit" type="button" :disabled="resending" @click="resend">
+        <span v-if="resending" class="auth__spinner" aria-hidden="true" />
+        {{ resending ? '发送中…' : '重新发送验证邮件' }}
+      </button>
+      <p class="auth__switch">
+        已完成验证？<button type="button" class="auth__link" @click="toLogin">去登录</button>
+      </p>
+    </div>
+
+    <form v-else class="card auth__card" novalidate @submit.prevent="submit">
       <div class="field">
         <label class="field__label" for="auth-email">邮箱</label>
         <input
@@ -62,7 +79,7 @@
 
       <button class="btn btn--brand auth__submit" type="submit" :disabled="submitting">
         <span v-if="submitting" class="auth__spinner" aria-hidden="true" />
-        {{ submitting ? '提交中…' : tab === 'login' ? '登录' : '注册并登录' }}
+        {{ submitting ? '提交中…' : tab === 'login' ? '登录' : '注册' }}
       </button>
 
       <p class="auth__switch">
@@ -85,9 +102,17 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import SegmentedTabs, { type SegmentedTab } from '@/components/SegmentedTabs.vue'
-import { login, register, authErrorMessage, LEGAL_VERSION } from '@/services/authApi'
+import {
+  login,
+  register,
+  resendVerification,
+  authErrorMessage,
+  LEGAL_VERSION,
+  type PendingVerification,
+} from '@/services/authApi'
 import { ApiError } from '@/services/http'
 import { session, setAccount } from '@/stores/session'
+import type { AuthResponse } from '@/types'
 
 const tabs: SegmentedTab[] = [
   { id: 'login', label: '登录' },
@@ -98,12 +123,16 @@ const route = useRoute()
 const router = useRouter()
 
 const tab = ref<'login' | 'register'>(route.query.tab === 'register' ? 'register' : 'login')
+const mode = ref<'form' | 'sent'>('form')
 const email = ref('')
 const password = ref('')
 const consented = ref(false)
 const touched = ref(false)
 const submitting = ref(false)
+const resending = ref(false)
 const error = ref('')
+const sentInfo = ref('')
+const pendingEmail = ref('')
 
 const emailError = computed(() => {
   if (!touched.value) return ''
@@ -126,9 +155,15 @@ const consentError = computed(() => {
 
 function switchTab(next: 'login' | 'register'): void {
   tab.value = next
+  mode.value = 'form'
   error.value = ''
+  sentInfo.value = ''
   touched.value = false
   consented.value = false
+}
+
+function toLogin(): void {
+  switchTab('login')
 }
 
 function nextPath(): string {
@@ -136,23 +171,37 @@ function nextPath(): string {
   return typeof raw === 'string' && raw.startsWith('/') ? raw : '/'
 }
 
+function finishLogin(auth: AuthResponse): void {
+  setAccount(auth.account)
+  session.ready = true
+  void router.replace(nextPath())
+}
+
 async function submit(): Promise<void> {
   touched.value = true
   error.value = ''
+  sentInfo.value = ''
   if (emailError.value || passwordError.value || consentError.value || submitting.value) return
 
   submitting.value = true
   try {
-    const auth =
-      tab.value === 'login'
-        ? await login(email.value.trim(), password.value)
-        : await register(email.value.trim(), password.value, {
-            terms: { version: LEGAL_VERSION, accepted: true },
-            privacy: { version: LEGAL_VERSION, accepted: true },
-          })
-    setAccount(auth.account)
-    session.ready = true
-    await router.replace(nextPath())
+    if (tab.value === 'login') {
+      const auth = await login(email.value.trim(), password.value)
+      finishLogin(auth)
+      return
+    }
+    const result = await register(email.value.trim(), password.value, {
+      terms: { version: LEGAL_VERSION, accepted: true },
+      privacy: { version: LEGAL_VERSION, accepted: true },
+    })
+    // 邮箱验证开启时，注册只返回待验证状态，不登录
+    if (result && 'access_token' in result && result.access_token) {
+      finishLogin(result)
+    } else {
+      const pending = result as PendingVerification
+      mode.value = 'sent'
+      pendingEmail.value = pending.email || email.value.trim()
+    }
   } catch (err) {
     if (err instanceof ApiError) {
       error.value = authErrorMessage(err.status, err.code, err.message)
@@ -161,6 +210,24 @@ async function submit(): Promise<void> {
     }
   } finally {
     submitting.value = false
+  }
+}
+
+async function resend(): Promise<void> {
+  resending.value = true
+  error.value = ''
+  sentInfo.value = ''
+  try {
+    await resendVerification(pendingEmail.value.trim())
+    sentInfo.value = '验证邮件已重新发送，请查收。'
+  } catch (err) {
+    if (err instanceof ApiError) {
+      error.value = authErrorMessage(err.status, err.code, err.message)
+    } else {
+      error.value = '网络异常，请稍后重试'
+    }
+  } finally {
+    resending.value = false
   }
 }
 </script>
@@ -186,6 +253,27 @@ async function submit(): Promise<void> {
 .auth__error {
   font-size: var(--text-xs);
   color: var(--color-danger);
+}
+
+.auth__info {
+  font-size: var(--text-xs);
+  color: var(--color-success, #1a9c6b);
+}
+
+.auth__sent {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.auth__sent-title {
+  font-size: var(--text-lg);
+  color: var(--color-text-1);
+}
+
+.auth__sent-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-2);
+  line-height: 1.7;
 }
 
 .auth__consent {

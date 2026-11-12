@@ -92,53 +92,6 @@
     <div v-else class="items__list">
       <div class="items__grid">
       <article v-for="item in paged" :key="item.name" class="item-card">
-        <div class="item-card__actions">
-          <button
-            type="button"
-            class="item-card__action"
-            :disabled="!canEdit"
-            :title="canEdit ? '编辑道具' : '运行中的作品暂不可编辑'"
-            aria-label="编辑道具"
-            @click="openEdit(item)"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="item-card__action item-card__action--danger"
-            :disabled="!canEdit"
-            :title="canEdit ? '删除道具' : '运行中的作品暂不可编辑'"
-            aria-label="删除道具"
-            @click="openDelete(item)"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M3 6h18" />
-              <path d="M8 6V4h8v2" />
-              <path d="M6 6l1 15h10l1-15" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-            </svg>
-          </button>
-        </div>
         <header class="item-card__head">
           <div class="item-card__title">
             <h3 class="item-card__name">{{ item.name }}</h3>
@@ -146,6 +99,53 @@
             <span v-if="item.category" class="item-card__cat">{{ item.category }}</span>
           </div>
           <span v-if="chapterText(item.first_chapter)" class="item-card__chapter">{{ chapterText(item.first_chapter) }}</span>
+          <div class="item-card__actions">
+            <button
+              type="button"
+              class="item-card__action"
+              :disabled="!canEdit"
+              :title="canEdit ? '编辑道具' : '运行中的作品暂不可编辑'"
+              aria-label="编辑道具"
+              @click="openEdit(item)"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="item-card__action item-card__action--danger"
+              :disabled="!canEdit"
+              :title="canEdit ? '删除道具' : '运行中的作品暂不可编辑'"
+              aria-label="删除道具"
+              @click="openDelete(item)"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="M6 6l1 15h10l1-15" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+              </svg>
+            </button>
+          </div>
         </header>
 
         <div v-if="itemFacts(item).length" class="item-card__facts">
@@ -625,9 +625,7 @@ function resetFilters(): void {
 }
 
 .item-card__actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+  flex: none;
   display: flex;
   gap: 2px;
   opacity: 0;
@@ -674,7 +672,6 @@ function resetFilters(): void {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding-right: 52px;
 }
 
 .item-card__title {

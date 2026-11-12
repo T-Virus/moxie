@@ -73,14 +73,24 @@
     </section>
 
     <section v-if="currentVolume" class="vol-card" aria-label="卷概括信息">
-      <div class="vol-card__head">
+      <div
+        class="vol-card__head"
+        role="button"
+        tabindex="0"
+        :aria-expanded="!volumeCollapsed"
+        :aria-label="volumeCollapsed ? '展开卷内容' : '收起卷内容'"
+        :title="volumeCollapsed ? '展开卷内容' : '收起卷内容'"
+        @click="volumeCollapsed = !volumeCollapsed"
+        @keydown.enter.prevent="volumeCollapsed = !volumeCollapsed"
+        @keydown.space.prevent="volumeCollapsed = !volumeCollapsed"
+      >
         <h3 class="vol-card__title">{{ currentVolume.title }}</h3>
         <span v-if="rangeText" class="vol-card__range">{{ rangeText }}</span>
         <div class="vol-card__stats">
           <span>章节 <b>{{ currentVolume.chapters.length }}</b> 章</span>
           <span v-if="volumeWordsText">合计 <b>{{ volumeWordsText }}</b></span>
         </div>
-        <div v-if="currentVolume.key !== 'unassigned'" class="summaries__acts">
+        <div v-if="currentVolume.key !== 'unassigned'" class="summaries__acts" @click.stop>
           <button
             type="button"
             class="summaries__act"
@@ -128,23 +138,25 @@
           </button>
         </div>
       </div>
-      <div v-if="currentVolume.summary || currentVolume.conflict" class="vol-card__grid">
-        <div v-if="currentVolume.summary" class="vol-card__block">
-          <span class="vol-card__label">卷概括</span>
-          <p class="vol-card__text">{{ currentVolume.summary }}</p>
+      <template v-if="!volumeCollapsed">
+        <div v-if="currentVolume.summary || currentVolume.conflict" class="vol-card__grid">
+          <div v-if="currentVolume.summary" class="vol-card__block">
+            <span class="vol-card__label">卷概括</span>
+            <p class="vol-card__text">{{ currentVolume.summary }}</p>
+          </div>
+          <div v-if="currentVolume.conflict" class="vol-card__block">
+            <span class="vol-card__label">冲突主线</span>
+            <p class="vol-card__text">{{ currentVolume.conflict }}</p>
+          </div>
         </div>
-        <div v-if="currentVolume.conflict" class="vol-card__block">
-          <span class="vol-card__label">冲突主线</span>
-          <p class="vol-card__text">{{ currentVolume.conflict }}</p>
+        <!-- 卷规划字段：只渲染服务端实际下发的字段 -->
+        <div v-if="volumeExtraFields.length" class="vol-card__grid vol-card__grid--extra">
+          <div v-for="item in volumeExtraFields" :key="item.label" class="vol-card__block">
+            <span class="vol-card__label">{{ item.label }}</span>
+            <p class="vol-card__text">{{ item.value }}</p>
+          </div>
         </div>
-      </div>
-      <!-- 卷规划字段：只渲染服务端实际下发的字段 -->
-      <div v-if="volumeExtraFields.length" class="vol-card__grid vol-card__grid--extra">
-        <div v-for="item in volumeExtraFields" :key="item.label" class="vol-card__block">
-          <span class="vol-card__label">{{ item.label }}</span>
-          <p class="vol-card__text">{{ item.value }}</p>
-        </div>
-      </div>
+      </template>
     </section>
 
     <div v-if="!currentVolume?.chapters.length" class="summaries__empty">
@@ -172,57 +184,57 @@
         @keydown.enter="openDetail(chapter)"
         @keydown.space.prevent="openDetail(chapter)"
       >
-        <div class="summaries__acts chapter-card__acts">
-          <button
-            type="button"
-            class="summaries__act"
-            :disabled="!canEdit"
-            :title="canEdit ? '编辑章节概览' : '运行中的作品暂不可编辑'"
-            aria-label="编辑章节概览"
-            @click.stop="openEditChapter(chapter)"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            class="summaries__act summaries__act--danger"
-            :disabled="!canEdit"
-            :title="canEdit ? '删除章节概览' : '运行中的作品暂不可编辑'"
-            aria-label="删除章节概览"
-            @click.stop="openDeleteChapter(chapter)"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M3 6h18" />
-              <path d="M8 6V4h8v2" />
-              <path d="M6 6l1 15h10l1-15" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-            </svg>
-          </button>
-        </div>
         <header class="chapter-card__head">
           <span class="chapter-card__no">第 {{ chapter.no }} 章</span>
           <h3 class="chapter-card__title">{{ chapter.title || '未命名章节' }}</h3>
           <span v-if="wordsText(chapter)" class="chapter-card__words">{{ wordsText(chapter) }}</span>
+          <div class="summaries__acts chapter-card__acts">
+            <button
+              type="button"
+              class="summaries__act"
+              :disabled="!canEdit"
+              :title="canEdit ? '编辑章节概览' : '运行中的作品暂不可编辑'"
+              aria-label="编辑章节概览"
+              @click.stop="openEditChapter(chapter)"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="summaries__act summaries__act--danger"
+              :disabled="!canEdit"
+              :title="canEdit ? '删除章节概览' : '运行中的作品暂不可编辑'"
+              aria-label="删除章节概览"
+              @click.stop="openDeleteChapter(chapter)"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="M6 6l1 15h10l1-15" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+              </svg>
+            </button>
+          </div>
         </header>
 
         <div v-if="chapter.summary" class="chapter-card__section">
@@ -405,15 +417,36 @@ const itemOptions = computed(() =>
   (props.run.items || []).map((item) => item.name).filter(Boolean),
 )
 
+/** 章节「归属卷」下拉选项：基于已下发的真实卷（卷=连续章号区间模型） */
+const volumeOptions = computed<{ value: string; label: string }[]>(() => {
+  const raw = props.run.volumes || []
+  if (Array.isArray(raw) && raw.length) {
+    return raw.map((volume, index) => {
+      const no = typeof volume.no === 'number' && volume.no > 0 ? volume.no : index + 1
+      return { value: String(no), label: volumeTitle(no, volume.title) }
+    })
+  }
+  // 服务端未下发卷时，至少给出当前合成卷，保证下拉可显示
+  return [{ value: currentVolume.value.key, label: currentVolume.value.title }]
+})
+
 /** 章节里的角色/势力/道具从已有资料中选择，减少手输不一致 */
-const chapterFields = computed<CollectionField[]>(() =>
-  CHAPTER_FIELDS.map((field) => {
+const chapterFields = computed<CollectionField[]>(() => {
+  const base = CHAPTER_FIELDS.map((field) => {
     if (field.key === 'roles') return { ...field, presets: characterOptions.value }
     if (field.key === 'factions') return { ...field, presets: factionOptions.value }
     if (field.key === 'items') return { ...field, presets: itemOptions.value }
     return field
-  }),
-)
+  })
+  const volumeField: CollectionField = {
+    key: 'volume',
+    label: '归属卷',
+    type: 'select',
+    options: volumeOptions.value,
+    hint: '保存时按连续章号区间调整该章所属卷',
+  }
+  return [...base, volumeField]
+})
 
 const volumeDialogOpen = ref(false)
 const volumeEditingNo = ref(-1)
@@ -583,7 +616,11 @@ function openCreateChapter(): void {
   if (!canEdit.value) return
   const nextNo = Math.max(0, ...allChapters.value.map((chapter) => chapter.no)) + 1
   chapterEditingNo.value = -1
-  chapterValue.value = { ...blankValue(CHAPTER_FIELDS), no: nextNo }
+  chapterValue.value = {
+    ...blankValue(CHAPTER_FIELDS),
+    no: nextNo,
+    volume: volumeOptions.value[0]?.value ?? '',
+  }
   chapterError.value = ''
   chapterDialogOpen.value = true
 }
@@ -591,12 +628,14 @@ function openCreateChapter(): void {
 function openEditChapter(chapter: ChapterSummary): void {
   if (!canEdit.value) return
   chapterEditingNo.value = chapter.no
+  const currentKey = volumeKeyForChapter(chapter.no)
   chapterValue.value = {
     ...clone(chapter),
     key_events: [...(chapter.key_events || [])],
     roles: [...(chapter.roles || [])],
     factions: [...(chapter.factions || [])],
     items: [...(chapter.items || [])],
+    volume: currentKey === 'unassigned' ? '' : currentKey,
   }
   chapterError.value = ''
   chapterDialogOpen.value = true
@@ -615,8 +654,10 @@ async function saveChapter(values: Record<string, any>): Promise<void> {
   chapterSaving.value = true
   chapterError.value = ''
   try {
+    // 归属卷是元字段，不写入章节本身
+    const { volume: targetVolume, ...rest } = values
     const next = {
-      ...values,
+      ...rest,
       no,
       title: String(values.title || '').trim() || `第 ${no} 章`,
     }
@@ -630,10 +671,16 @@ async function saveChapter(values: Record<string, any>): Promise<void> {
     const list = [...chapterMap.values()].sort((a, b) => a.no - b.no)
     // 新增/改章号时同时解除隐藏，保证重新添加曾删除的章号能立即显示
     const hidden = (props.run.chapter_hidden || []).filter((item) => item !== no)
-    await updateRunCollections(props.run.run_id, {
-      chapter_summaries: list,
-      chapter_hidden: hidden,
-    })
+
+    // 归属卷变化：按连续章号区间重划分卷的起始/结束章号
+    const currentKey = volumeKeyForChapter(no)
+    const payload: Record<string, any> = { chapter_summaries: list, chapter_hidden: hidden }
+    if (targetVolume && targetVolume !== currentKey) {
+      const nextVolumes = reassignChapterVolume(no, targetVolume)
+      if (nextVolumes) payload.volumes = volumesPayload(nextVolumes)
+    }
+
+    await updateRunCollections(props.run.run_id, payload)
     chapterDialogOpen.value = false
     selectedKey.value = volumeKeyForChapter(no)
     page.value = 1
@@ -686,6 +733,8 @@ const keyword = ref('')
 const page = ref(1)
 const selectedKey = ref('1')
 const detailChapter = ref<ChapterSummary | null>(null)
+// 卷概括/冲突/卷规划字段默认收起，避免内容过长挤占卷章概览空间
+const volumeCollapsed = ref(true)
 
 function openDetail(chapter: ChapterSummary): void {
   detailChapter.value = chapter
@@ -857,6 +906,70 @@ function volumeKeyForChapter(no: number): string {
       (volume.to === null || no <= volume.to),
   )
   return hit?.key ?? 'unassigned'
+}
+
+/**
+ * 把章号 no 重新划给目标卷（连续区间模型）：
+ * - 扩展目标卷区间使其包含 no；
+ * - 收缩源卷及其与目标卷之间各卷的右侧/左侧边界到 no 的相邻处，
+ *   使卷始终保持连续、不重叠（中间章会随边界一并推移）。
+ * 返回更新后的卷定义数组；若没有可调整的卷则返回 null。
+ */
+function reassignChapterVolume(no: number, targetKey: string): VolumeContent[] | null {
+  const raw = (props.run.volumes || []).map((volume) => clone(volume)) as VolumeContent[]
+  if (!raw.length) return null
+  // 与下拉选项保持一致：卷key = 有 no 用 no，否则用序号
+  const keyOf = (volume: VolumeContent, i: number): string =>
+    String(typeof volume.no === 'number' && volume.no > 0 ? volume.no : i + 1)
+  const targetIdxInRaw = raw.findIndex((volume, i) => keyOf(volume, i) === targetKey)
+  if (targetIdxInRaw < 0) return null
+
+  // 按起始章号升序排列，连续区间才便于重切边界
+  const sorted = raw
+    .map((volume) => volume)
+    .sort((a, b) => {
+      const fa = a.chapter_from ?? a.no ?? 0
+      const fb = b.chapter_from ?? b.no ?? 0
+      return fa - fb
+    })
+  const target = raw[targetIdxInRaw]
+  const tIdx = sorted.indexOf(target)
+  const sIdx = sorted.findIndex((volume) => {
+    const f = volume.chapter_from ?? -Infinity
+    const t = volume.chapter_to ?? Infinity
+    return no >= f && no <= t
+  })
+
+  // 扩展目标卷包含该章
+  const tf = target.chapter_from ?? no
+  const tt = target.chapter_to ?? no
+  target.chapter_from = Math.min(tf, no)
+  target.chapter_to = Math.max(tt, no)
+
+  // 源卷不存在（未分卷）时无需收缩，仅把该章并入目标卷
+  if (sIdx < 0) return sorted
+
+  const lo = Math.min(sIdx, tIdx)
+  const hi = Math.max(sIdx, tIdx)
+  for (let i = lo; i <= hi; i++) {
+    if (i === tIdx) continue
+    const volume = sorted[i]
+    if (tIdx > sIdx) {
+      // 向右划归：中间各卷收缩上界到 no-1
+      volume.chapter_to = Math.min(volume.chapter_to ?? Infinity, no - 1)
+    } else {
+      // 向左划归：中间各卷收缩下界到 no+1
+      volume.chapter_from = Math.max(volume.chapter_from ?? -Infinity, no + 1)
+    }
+  }
+
+  // 丢弃因收缩而变空的卷（起始 > 结束）
+  return sorted.filter((volume) => {
+    const f = volume.chapter_from
+    const t = volume.chapter_to
+    if (f != null && t != null && f > t) return false
+    return true
+  })
 }
 
 const currentVolume = computed(
@@ -1342,6 +1455,21 @@ function jump(no: number): void {
   font-variant-numeric: tabular-nums;
 }
 
+.vol-card__head {
+  cursor: pointer;
+  user-select: none;
+}
+
+.vol-card__head:hover .vol-card__title {
+  color: var(--color-brand);
+}
+
+.vol-card__head:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .vol-card__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1387,9 +1515,7 @@ function jump(no: number): void {
 }
 
 .chapter-card__acts {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+  flex: none;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease);
 }
@@ -1427,7 +1553,6 @@ function jump(no: number): void {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding-right: 52px;
 }
 
 .chapter-card__no {
@@ -1552,6 +1677,10 @@ function jump(no: number): void {
 
   .chapter-card__head {
     flex-wrap: wrap;
+  }
+
+  .chapter-card__acts {
+    margin-left: auto;
   }
 
   .chapter-card__title {

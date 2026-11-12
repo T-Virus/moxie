@@ -89,7 +89,7 @@
             </div>
             <p class="ws__generating-text">正在生成…</p>
           </div>
-          <div v-else class="panel__body panel__body--tab">
+          <div v-else class="panel__body panel__body--tab" ref="panelBodyRef">
             <InfoTab v-if="activeTab === 'info'" :run="run" @updated="loadRun(true)" />
             <OutlineTab v-else-if="activeTab === 'outline'" :run="run" @updated="loadRun(true)" />
             <CharactersTab v-else-if="activeTab === 'characters'" :run="run" @updated="loadRun(true)" />
@@ -103,6 +103,29 @@
             />
             <BodyTab v-else :run="run" :chapter="selectedChapter" @select="selectChapter" />
           </div>
+          <Transition name="fade">
+            <button
+              v-if="showBackTop"
+              type="button"
+              class="ws__backtop"
+              :style="{ right: `${backTopRight}px` }"
+              aria-label="回到顶部"
+              title="回到顶部"
+              @click="scrollToTop"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M18 15l-6-6-6 6" />
+              </svg>
+            </button>
+          </Transition>
         </section>
 
         <TaskCenter :current-id="run.run_id" :status="run.status" />
@@ -130,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppDialog from '@/components/AppDialog.vue'
 import BodyTab from '@/components/workspace/BodyTab.vue'
@@ -151,6 +174,106 @@ const props = defineProps<{ id: string }>()
 const run = ref<RunDetail | null>(null)
 const loading = ref(false)
 const loadError = ref('')
+
+// ---------- 回到顶部：内容滚动超过阈值时显示浮动按钮 ----------
+const backTopThreshold = 100
+const showBackTop = ref(false)
+const panelBodyRef = ref<HTMLElement | null>(null)
+// 最近一次滚动的真实容器：滚动事件的 target 就是实际滚动元素（面板自身或内层如 .info__body）
+let lastScroller: HTMLElement | null = null
+let rafPending = false
+
+function computeBackTop(target: EventTarget | null): void {
+  if (target instanceof HTMLElement) {
+    lastScroller = target
+    showBackTop.value = target.scrollTop > backTopThreshold
+    return
+  }
+  // 窄屏内容走页面滚动
+  const y = window.scrollY || document.documentElement.scrollTop || 0
+  showBackTop.value = y > backTopThreshold
+}
+
+// rAF 节流：每帧最多算一次，滚动不卡顿
+function scheduleBackTop(target: EventTarget | null): void {
+  if (rafPending) return
+  rafPending = true
+  requestAnimationFrame(() => {
+    rafPending = false
+    computeBackTop(target)
+  })
+}
+
+// scroll 不冒泡，但捕获阶段会经过祖先：在面板根上捕获即可截获自身与所有内层滚动容器，
+// 事件 target 即真实滚动元素，无需猜测/扫描 DOM
+function onScrollCapture(e: Event): void {
+  scheduleBackTop(e.target)
+}
+
+function onWindowScroll(): void {
+  scheduleBackTop(null)
+}
+
+function updateBackTop(): void {
+  computeBackTop(lastScroller && panelBodyRef.value?.contains(lastScroller) ? lastScroller : null)
+}
+
+function scrollToTop(): void {
+  if (lastScroller && panelBodyRef.value?.contains(lastScroller)) {
+    lastScroller.scrollTo({ top: 0, behavior: 'smooth' })
+  } else {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+// 在面板根上挂/摘捕获监听（面板出现晚于挂载时，由 watch(run) 补挂）
+let boundRoot: HTMLElement | null = null
+
+function attachScrollRoot(): void {
+  const el = panelBodyRef.value
+  if (el === boundRoot) return
+  if (boundRoot) boundRoot.removeEventListener('scroll', onScrollCapture, { capture: true })
+  boundRoot = el
+  if (boundRoot) boundRoot.addEventListener('scroll', onScrollCapture, { capture: true, passive: true })
+}
+
+// ---------- 按钮水平定位：左缘对齐任务中心卡片左缘（任务中心下方空白处） ----------
+const BACKTOP_SIZE = 42
+const backTopRight = ref(24)
+
+function updateBackTopPosition(): void {
+  const aside = document.querySelector<HTMLElement>('.ws__layout .task-center')
+  // 窄屏任务中心换到内容下方，按钮回退到视窗右下角默认位
+  if (!aside || window.innerWidth <= 980) {
+    backTopRight.value = 24
+    return
+  }
+  const rect = aside.getBoundingClientRect()
+  backTopRight.value = Math.max(window.innerWidth - rect.left - BACKTOP_SIZE, 24)
+}
+
+function onWindowResize(): void {
+  updateBackTopPosition()
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', onWindowScroll, { passive: true })
+  window.addEventListener('resize', onWindowResize)
+  attachScrollRoot()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', onWindowScroll)
+  window.removeEventListener('resize', onWindowResize)
+  if (boundRoot) boundRoot.removeEventListener('scroll', onScrollCapture, { capture: true })
+  boundRoot = null
+})
+
+// 数据加载后面板才渲染：补挂捕获监听并重测按钮位置
+watch(run, () => nextTick(() => {
+  attachScrollRoot()
+  updateBackTopPosition()
+}))
 type WorkspaceTab =
   | 'info'
   | 'outline'
@@ -172,6 +295,15 @@ const WORKSPACE_TABS: Array<{ id: WorkspaceTab; label: string }> = [
 const route = useRoute()
 const router = useRouter()
 const activeTab = ref<WorkspaceTab>('info')
+
+// 切换标签页后重置滚动来源并重算（面板根捕获监听无需重挂）
+watch(activeTab, () => {
+  lastScroller = null
+  nextTick(() => {
+    updateBackTopPosition()
+    updateBackTop()
+  })
+})
 const selectedChapter = ref(1)
 const tabRefs: Partial<Record<WorkspaceTab, HTMLButtonElement>> = {}
 
@@ -463,6 +595,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 /* 作品信息内容较短，去掉固定最小高度，避免说明文字删除后留下大片空白 */
@@ -609,6 +742,49 @@ onBeforeUnmount(() => {
 .panel__body.panel__body--tab::-webkit-scrollbar-thumb {
   background: #d7dde5;
   border-radius: 8px;
+}
+
+/* ---------- 回到顶部浮动按钮（钉在视窗右下角，而非容器内） ---------- */
+.ws__backtop {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 50;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+  transition: transform 0.15s ease;
+}
+
+.ws__backtop:hover {
+  transform: translateY(-2px);
+}
+
+.ws__backtop:active {
+  transform: translateY(0);
+}
+
+.ws__backtop svg {
+  width: 20px;
+  height: 20px;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 /* ---------- 内容面板 ---------- */

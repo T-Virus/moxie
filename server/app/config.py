@@ -241,6 +241,16 @@ class Settings(BaseSettings):
     legal_gate_enabled: bool = True
     # 法律文本当前版本号：注册勾选时校验并写入留痕；升级后旧客户端需重新同意
     legal_terms_version: str = "2026-11-01"
+
+    # 邮箱验证：注册后必须验证邮箱才能登录（测试环境可关闭）
+    email_verification_required: bool = True
+    # 验证令牌有效期（分钟）
+    email_verify_token_ttl_minutes: int = 1440
+    # 前端基地址：用于拼接验证邮件里的链接；留空则使用请求 Origin 头
+    app_client_base_url: str = ""
+    # 同一账号两次验证邮件的最小发送间隔（秒）：防止接口被无限盗刷/对第三方邮箱轰炸
+    email_resend_cooldown_seconds: int = 60
+
     # 多 worker 部署必须显式配置 License 私钥；禁止自动生成临时密钥
     license_allow_ephemeral_key: bool = False
 

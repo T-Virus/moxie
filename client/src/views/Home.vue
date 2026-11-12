@@ -96,29 +96,6 @@
         <div class="home__meta">
           <p class="home__desc">{{ modeDesc }}</p>
         </div>
-        <div class="byok">
-          <button
-            type="button"
-            class="byok__toggle"
-            :aria-expanded="byokOpen"
-            @click="byokOpen = !byokOpen"
-          >
-            {{ byokKey ? '自带密钥（BYOK）已设置' : '使用自带密钥（BYOK）' }}
-          </button>
-          <div v-if="byokOpen" class="byok__box">
-            <input
-              v-model="byokKey"
-              class="byok__input"
-              type="password"
-              autocomplete="off"
-              placeholder="粘贴模型 API Key，仅本次会话内存保存"
-              @input="onByokInput"
-            />
-            <button v-if="byokKey" type="button" class="byok__clear" @click="clearByok">
-              清除
-            </button>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -151,7 +128,7 @@ import type {
   RunMode,
   CreateRunPayload,
 } from '@/types'
-import { fetchGenres, createRun, uploadSource, getByokKey, setByokKey } from '@/services/agentApi'
+import { fetchGenres, createRun, uploadSource } from '@/services/agentApi'
 import { ApiError } from '@/services/http'
 import { session } from '@/stores/session'
 
@@ -195,18 +172,6 @@ const customAllowed = ref(true)
 const touched = ref(false)
 const submitting = ref(false)
 const titleInput = ref<HTMLInputElement | null>(null)
-/* BYOK：仅会话内存保存，创建/续跑时透传 X-BYOK-Key；服务端只存 Redis TTL 1h */
-const byokKey = ref(getByokKey())
-const byokOpen = ref(false)
-
-function onByokInput(): void {
-  setByokKey(byokKey.value)
-}
-
-function clearByok(): void {
-  byokKey.value = ''
-  setByokKey('')
-}
 /* 页面级提示：同一时间只显示一条，可关闭，不遮挡创作面板 */
 const toastText = ref('')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -646,50 +611,6 @@ onMounted(async () => {
 .home__desc {
   color: var(--color-text-2);
   font-size: var(--text-sm);
-}
-
-/* ---------- BYOK：默认收起的次级入口，不干扰一键创作 ---------- */
-.byok__toggle {
-  font-size: var(--text-xs);
-  color: var(--color-text-3);
-  background: none;
-  padding: 0;
-  cursor: pointer;
-}
-
-.byok__toggle:hover {
-  color: var(--color-brand);
-}
-
-.byok__box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.byok__input {
-  flex: 1;
-  max-width: 360px;
-  height: 34px;
-  padding: 0 10px;
-  font-size: var(--text-sm);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-bg);
-  color: var(--color-text-1);
-}
-
-.byok__clear {
-  font-size: var(--text-xs);
-  color: var(--color-text-3);
-  background: none;
-  padding: 0;
-  cursor: pointer;
-}
-
-.byok__clear:hover {
-  color: var(--color-danger);
 }
 
 /* ---------- 页面级 toast：底部居中、可关闭、不遮挡创作面板 ---------- */

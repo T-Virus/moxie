@@ -35,6 +35,7 @@ def settings(tmp_path) -> Settings:
         invoice_provider="stub",
         invoice_callback_secret="test-invoice-secret",
         legal_gate_enabled=False,
+        email_verification_required=False,
         llm_base_url="http://upstream.test",
         llm_api_key="server-secret-key",
         gateway_max_retries=1,

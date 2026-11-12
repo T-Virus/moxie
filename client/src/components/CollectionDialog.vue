@@ -31,23 +31,39 @@
             :placeholder="field.placeholder || ''"
           />
           <template v-else-if="field.type === 'select'">
-            <input
+            <select
+              v-if="field.options?.length"
               v-model="form[field.key]"
               class="input"
-              :placeholder="field.placeholder || ''"
-            />
-            <div v-if="field.presets?.length" class="collect-form__presets">
-              <button
-                v-for="preset in field.presets"
-                :key="preset"
-                type="button"
-                class="collect-form__pill"
-                :class="{ 'is-active': form[field.key] === preset }"
-                @click="form[field.key] = form[field.key] === preset ? '' : preset"
+            >
+              <option value="">— 不指定 —</option>
+              <option
+                v-for="opt in field.options"
+                :key="opt.value"
+                :value="opt.value"
               >
-                {{ preset }}
-              </button>
-            </div>
+                {{ opt.label }}
+              </option>
+            </select>
+            <template v-else>
+              <input
+                v-model="form[field.key]"
+                class="input"
+                :placeholder="field.placeholder || ''"
+              />
+              <div v-if="field.presets?.length" class="collect-form__presets">
+                <button
+                  v-for="preset in field.presets"
+                  :key="preset"
+                  type="button"
+                  class="collect-form__pill"
+                  :class="{ 'is-active': form[field.key] === preset }"
+                  @click="form[field.key] = form[field.key] === preset ? '' : preset"
+                >
+                  {{ preset }}
+                </button>
+              </div>
+            </template>
           </template>
           <input
             v-else-if="field.type === 'number'"
