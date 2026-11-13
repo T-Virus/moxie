@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -318,8 +318,18 @@ def execute_task(
         session.flush()
         return task.status
 
-    task.status = "running"
-    task.attempts += 1
+    # 原子认领：只有 queued 才能被领取；重复投递/并发执行时这里直接跳过，避免双跑
+    claimed = session.execute(
+        update(Task)
+        .where(Task.id == task.id, Task.status == "queued")
+        .values(status="running", attempts=Task.attempts + 1)
+    )
+    if claimed.rowcount != 1:
+        session.expire(task)
+        append_event(session, task.id, "任务已被其它 worker 认领，跳过本次重复执行", level="warning")
+        session.flush()
+        return task.status
+    session.expire(task)
     if task.started_at is None:
         task.started_at = now
     task.lease_until = now + timedelta(

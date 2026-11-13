@@ -22,18 +22,19 @@ import logging
 import time
 from datetime import datetime, time as dtime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .config import Settings
 from .db import Database, utcnow
 from .metrics import increment
-from .models import AuditLog, Subscription, Task, UsageEvent
+from .models import AgentRun, AuditLog, Subscription, Task, UsageEvent
 from .services import credits as creditsvc
 from .services import notifications as nsvc
 from .services import reconcile as reconcilesvc
 from .services import subscription as subsvc
 from .services.audit import write_audit
 from .services.tasks import append_event
+from .worker import enqueue_agent_run, enqueue_task
 
 logger = logging.getLogger("moxie.scheduler")
 
@@ -57,8 +58,13 @@ def _recent_audit(session, action: str, target_id: str, now: datetime) -> bool:
     )
 
 
-def sweep_leases(session, settings: Settings, now: datetime | None = None) -> int:
-    """running 且租约超时的任务重新入队；条件更新 + 行锁避免双跑。"""
+def sweep_leases(
+    session, settings: Settings, now: datetime | None = None, requeued_out: list[str] | None = None
+) -> int:
+    """running 且租约超时的任务重新入队；条件更新 + 行锁避免双跑。
+
+    requeued_out：调用方可传入列表收集被重排的 task_id，commit 后统一重新投递 RQ。
+    """
     now = now or utcnow()
     rows = session.scalars(
         select(Task)
@@ -73,6 +79,8 @@ def sweep_leases(session, settings: Settings, now: datetime | None = None) -> in
         task.heartbeat_at = now
         task.error_code = None
         append_event(session, task.id, "租约超时，任务重新入队（未完成的步骤保留）", level="warning")
+        if requeued_out is not None:
+            requeued_out.append(task.id)
         increment("moxie_tasks_requeued_total")
     write_audit(
         session,
@@ -83,6 +91,89 @@ def sweep_leases(session, settings: Settings, now: datetime | None = None) -> in
         meta={"count": len(rows), "task_ids": [t.id for t in rows]},
     )
     return len(rows)
+
+
+def requeue_stuck_runs(
+    session,
+    settings: Settings,
+    now: datetime | None = None,
+    task_out: list[str] | None = None,
+    run_out: list[str] | None = None,
+) -> int:
+    """孤儿任务自愈：重新投递滞留 queued / running 的任务与 Agent 运行。
+
+    RQ job 只在创建/resume/retry 时投递；批量让出、历史缺陷或 worker 崩溃会让
+    DB 里的 queued/running 行失去对应的 Redis job——看板显示队列有任务但永远
+    没人领取。这里按时间阈值兜底重新入队（执行入口有原子认领，重复投递无副作用）。
+    """
+    now = now or utcnow()
+    queued_deadline = now - timedelta(seconds=max(60, settings.stuck_queued_seconds))
+    running_deadline = now - timedelta(seconds=max(600, settings.stuck_running_seconds))
+    count = 0
+
+    stuck_tasks = session.scalars(
+        select(Task).where(
+            Task.status == "queued",
+            func.coalesce(Task.heartbeat_at, Task.created_at) < queued_deadline,
+        ).limit(100)
+    ).all()
+    for task in stuck_tasks:
+        if task_out is not None:
+            task_out.append(task.id)
+        count += 1
+
+    stuck_runs = session.scalars(
+        select(AgentRun).where(
+            AgentRun.status == "queued", AgentRun.updated_at < queued_deadline
+        ).limit(100)
+    ).all()
+    for run in stuck_runs:
+        if run_out is not None:
+            run_out.append(str(run.id))
+        count += 1
+
+    # worker 挂掉后 running 的 AgentRun 会永远卡住（Task 有租约清扫，AgentRun 此前没有）
+    stale_runs = session.scalars(
+        select(AgentRun).where(
+            AgentRun.status == "running", AgentRun.updated_at < running_deadline
+        ).limit(100)
+    ).all()
+    for run in stale_runs:
+        run.status = "queued"
+        run.error_code = None
+        run.error_message = None
+        run.updated_at = now
+        append_event(session, run.id, "run", "执行超时无心跳，任务重新入队（已完成节点保留）", level="warning")
+        if run_out is not None:
+            run_out.append(str(run.id))
+        count += 1
+        increment("moxie_tasks_requeued_total")
+
+    if count:
+        write_audit(
+            session,
+            actor_id=None,
+            action="task.stuck_requeue",
+            target_type="scheduler",
+            target_id="stuck",
+            meta={"count": count},
+        )
+        logger.warning("requeue stuck runs: %s", count)
+    return count
+
+
+def _dispatch_requeued(settings: Settings, task_ids: list[str], run_ids: list[str]) -> None:
+    """事务提交后重新投递 RQ；无 Redis（本地模式）时保持 queued，由 --loop 领取。"""
+    for task_id in task_ids:
+        if enqueue_task(settings, task_id):
+            logger.info("re-enqueued task %s", task_id)
+        else:
+            logger.warning("re-enqueue task %s failed（本地模式可用 --loop 执行）", task_id)
+    for run_id in run_ids:
+        if enqueue_agent_run(settings, run_id):
+            logger.info("re-enqueued agent run %s", run_id)
+        else:
+            logger.warning("re-enqueue agent run %s failed（本地模式可用 --loop 执行）", run_id)
 
 
 def expire_grace_period(session, settings: Settings, now: datetime | None = None) -> int:
@@ -309,9 +400,13 @@ def run_once(settings: Settings, db: Database | None = None, now: datetime | Non
     db = db or Database(settings)
     result: dict = {}
     session = db.session()
+    # 重新入队的任务在对应事务 commit 成功后再投递 RQ，避免 worker 抢在提交前认领
+    requeued_task_ids: list[str] = []
+    requeued_run_ids: list[str] = []
     try:
         phases = [
-            ("lease_reclaimed", lambda: sweep_leases(session, settings, now)),
+            ("lease_reclaimed", lambda: sweep_leases(session, settings, now, requeued_task_ids)),
+            ("stuck_requeued", lambda: requeue_stuck_runs(session, settings, now, requeued_task_ids, requeued_run_ids)),
             ("expired", lambda: subsvc.expire_due(session, now)),
             ("grace_expired", lambda: expire_grace_period(session, settings, now)),
             ("reminders", lambda: send_renewal_reminders(session, settings, now)),
@@ -327,10 +422,14 @@ def run_once(settings: Settings, db: Database | None = None, now: datetime | Non
                 value = fn()
                 session.commit()
                 result[name] = value
+                _dispatch_requeued(settings, requeued_task_ids, requeued_run_ids)
             except Exception:  # noqa: BLE001 - 单项失败不阻塞其它任务
                 session.rollback()
                 logger.exception("定时任务失败 phase=%s", name)
                 result[name] = "error"
+            finally:
+                requeued_task_ids.clear()
+                requeued_run_ids.clear()
     finally:
         session.close()
         if own_db:

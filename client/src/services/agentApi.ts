@@ -937,8 +937,18 @@ export async function cancelRun(runId: string): Promise<void> {
 }
 
 /** 停止任务 = 暂停：进入 paused 后可「开始」继续或「取消」终止 */
-export async function pauseRun(runId: string): Promise<void> {
-  await apiFetch(`/agent-runs/${encodeURIComponent(runId)}/pause`, { method: 'POST' })
+export async function pauseRun(runId: string, timeoutMs = 10000): Promise<void> {
+  // 无超时会一直挂在「停止中…」：请求卡死时主动中断，交由调用方兜底提示
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    await apiFetch(`/agent-runs/${encodeURIComponent(runId)}/pause`, {
+      method: 'POST',
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export async function resumeRun(runId: string, payload: ResumePayload): Promise<void> {

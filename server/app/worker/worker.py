@@ -22,6 +22,7 @@ from ..logging_setup import set_trace_id
 from ..models import AgentRun, Task
 from ..services.storage import build_storage
 from ..services.tasks import execute_task, get_runner
+from . import enqueue_agent_run, enqueue_task
 
 logger = logging.getLogger("moxie.worker")
 
@@ -71,6 +72,12 @@ def run_task_job(task_id: str) -> str:
             set_trace_id(task.id)
             status = _run(session, task, settings, storage)
             session.commit()
+            if status == "queued":
+                # 批量让出后本 RQ job 已结束：必须重新投递，否则任务永久滞留 queued（孤儿）
+                if enqueue_task(settings, task_id):
+                    logger.info("task %s rescheduled, re-enqueued", task_id)
+                else:
+                    logger.warning("task %s rescheduled but re-enqueue failed（本地模式可用 --loop 执行）", task_id)
             return status
     finally:
         db.dispose()
@@ -99,6 +106,12 @@ def run_agent_job(run_id: str) -> str:
                 api_key=byok or "",
             )
             session.commit()
+            if status == "queued":
+                # 批量上限让出后本 RQ job 已结束：必须重新投递，否则运行永久滞留 queued（孤儿）
+                if enqueue_agent_run(settings, run_id):
+                    logger.info("agent run %s rescheduled, re-enqueued", run_id)
+                else:
+                    logger.warning("agent run %s rescheduled but re-enqueue failed（本地模式可用 --loop 执行）", run_id)
             return status
     finally:
         db.dispose()

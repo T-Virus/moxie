@@ -142,6 +142,10 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False
     scheduler_interval_seconds: int = 60
     task_lease_seconds: int = 1800
+    # 孤儿任务自愈阈值：queued 超过该时长无人领取 / running 超过该时长无心跳，
+    # scheduler 重新入队（执行入口有原子认领，重复投递无副作用）
+    stuck_queued_seconds: int = 600
+    stuck_running_seconds: int = 7200
     metrics_enabled: bool = True
     # /metrics 访问令牌：配置后需带 X-Metrics-Token 头（或 ?token=）；
     # 生产环境未配置时 /metrics 直接拒绝，避免队列/业务指标公开暴露。

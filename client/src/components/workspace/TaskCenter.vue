@@ -102,7 +102,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppDialog from '@/components/AppDialog.vue'
 import type { RunDetail } from '@/types'
-import { cancelRun, listRuns, pauseRun, resumeRun } from '@/services/agentApi'
+import { cancelRun, getRun, listRuns, pauseRun, resumeRun } from '@/services/agentApi'
 import { ApiError } from '@/services/http'
 import { STATUS_TONE, statusLabel } from '@/utils/format'
 
@@ -110,6 +110,9 @@ const props = defineProps<{ currentId: string; status?: string }>()
 
 const PAGE_SIZE = 8
 const TERMINAL = ['succeeded', 'failed', 'canceled']
+/** 停止请求：running 的任务要等引擎在章节/段落边界落 paused，轮询确认避免「停止中…」悬挂 */
+const STOP_POLL_INTERVAL = 2000
+const STOP_POLL_TIMEOUT = 30000
 
 const items = ref<RunDetail[]>([])
 const page = ref(1)
@@ -221,6 +224,21 @@ function goPage(next: number): void {
   load()
 }
 
+/** 轮询运行状态直到离开 queued/running；查询失败立即放弃，避免无意义等待 */
+async function waitStopped(runId: string): Promise<boolean> {
+  const deadline = Date.now() + STOP_POLL_TIMEOUT
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, STOP_POLL_INTERVAL))
+    try {
+      const detail = await getRun(runId)
+      if (detail.status !== 'queued' && detail.status !== 'running') return true
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
 /** 停止 = 暂停：任务进入 paused，可再选「开始」继续或「取消」终止 */
 async function stop(task: RunDetail): Promise<void> {
   if (busyId.value) return
@@ -228,7 +246,12 @@ async function stop(task: RunDetail): Promise<void> {
   actionError.value = ''
   try {
     await pauseRun(task.run_id)
+    // running 的任务由引擎在章节/段落边界落 paused：轮询确认后再放开按钮
+    const stopped = await waitStopped(task.run_id)
     await load()
+    if (!stopped) {
+      actionError.value = '停止请求已提交，任务将在当前章节完成后暂停'
+    }
   } catch (err) {
     actionError.value = errorText(err, '停止失败，请稍后重试')
   } finally {

@@ -11,7 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -44,6 +44,12 @@ class NodeOutcome:
     duration_ms: int = 0
     error_code: str | None = None
     canceled: bool = False
+    paused: bool = False
+
+
+def _pause_requested(run: AgentRun) -> bool:
+    """用户请求停止（协作式标志），章节/段落循环内即时响应，不必等到层边界。"""
+    return bool((run.meta or {}).get("pause_requested"))
 
 
 def _segment_key(node_id: str, index: int) -> str:
@@ -197,6 +203,16 @@ def _run_segmented_node(
                 logs=logs,
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 canceled=True,
+            )
+        if _pause_requested(run):
+            return NodeOutcome(
+                node_id=node.id,
+                output=None,
+                error=None,
+                attempts=attempts_used,
+                logs=logs,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                paused=True,
             )
 
         index = segment.index
@@ -489,6 +505,19 @@ def _run_chaptered_node(
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 canceled=True,
             )
+        if _pause_requested(run):
+            # 与取消/失败路径一致：释放本节点章节预占，续跑时重新预占剩余章节
+            if chapter_reservation is not None:
+                quota.release(chapter_reservation)
+            return NodeOutcome(
+                node_id=node.id,
+                output=None,
+                error=None,
+                attempts=attempts_used,
+                logs=logs,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                paused=True,
+            )
         step_key = _chapter_key(node.id, index)
         row = rows.get(step_key)
         if row is not None and row.status == "done" and isinstance(row.output, dict):
@@ -703,11 +732,19 @@ def execute_agent_run(
         _finish_canceled(session, run, now=now)
         return run.status
 
-    run.status = "running"
-    run.attempts += 1
+    # 原子认领：只有 queued 才能被领取；重复投递/并发执行时这里直接跳过，避免双跑
+    claimed = session.execute(
+        update(AgentRun)
+        .where(AgentRun.id == run.id, AgentRun.status == "queued")
+        .values(status="running", attempts=AgentRun.attempts + 1, updated_at=now)
+    )
+    if claimed.rowcount != 1:
+        session.expire(run)
+        logger.warning("agent run %s skip: status=%s（重复投递或已被其它 worker 认领）", run.id, run.status)
+        return run.status
+    session.expire(run)
     if run.started_at is None:
         run.started_at = now
-    run.updated_at = now
     append_event(session, run.id, "run", f"开始执行（第 {run.attempts} 次尝试，mode={run.mode}）")
     increment("moxie_agent_runs_started_total", mode=run.mode)
     session.flush()
@@ -817,43 +854,47 @@ def execute_agent_run(
             )
 
         outcomes: list[NodeOutcome] = []
+        paused_mid = False
         # 分段/章级节点在主线程串行执行（需要写子级 checkpoint），其余节点同层并发
         for node in pending:
             if not node.segmented and not node.chaptered:
                 continue
             skill = overrides.get(node.skill) or registry.get(node.skill)
             if node.segmented:
-                outcomes.append(
-                    _run_segmented_node(
-                        session,
-                        run,
-                        node,
-                        view,
-                        state,
-                        extra,
-                        skill,
-                        settings,
-                        storage=storage,
-                        api_key=api_key,
-                        byok=byok,
-                    )
+                outcome = _run_segmented_node(
+                    session,
+                    run,
+                    node,
+                    view,
+                    state,
+                    extra,
+                    skill,
+                    settings,
+                    storage=storage,
+                    api_key=api_key,
+                    byok=byok,
                 )
             else:
-                outcomes.append(
-                    _run_chaptered_node(
-                        session,
-                        run,
-                        node,
-                        view,
-                        state,
-                        extra,
-                        skill,
-                        settings,
-                        api_key=api_key,
-                        byok=byok,
-                    )
+                outcome = _run_chaptered_node(
+                    session,
+                    run,
+                    node,
+                    view,
+                    state,
+                    extra,
+                    skill,
+                    settings,
+                    api_key=api_key,
+                    byok=byok,
                 )
-        parallel = [node for node in pending if not node.segmented and not node.chaptered]
+            outcomes.append(outcome)
+            if outcome.paused:
+                # 用户请求停止：不再启动本层剩余节点，落 paused 保留进度
+                paused_mid = True
+                break
+        parallel = [] if paused_mid else [
+            node for node in pending if not node.segmented and not node.chaptered
+        ]
         if parallel:
             workers = min(4, len(parallel))
             with ThreadPoolExecutor(max_workers=max(1, workers), thread_name_prefix="agent-node") as pool:
@@ -876,6 +917,12 @@ def execute_agent_run(
                 row.status = "pending"
                 row.output = None
                 row.error = "canceled"
+                continue
+            if outcome.paused:
+                # 节点未完成，checkpoint 保持 pending，续跑时从断点继续
+                row.status = "pending"
+                row.output = None
+                row.error = None
                 continue
             if outcome.output is not None:
                 row.status = "done"
@@ -915,6 +962,18 @@ def execute_agent_run(
                 outcome.duration_ms / 1000,
                 skill=spec.skill if spec else outcome.node_id,
             )
+
+        if any(outcome.paused for outcome in outcomes):
+            # 章节内用户停止：保留额度预占与已完成节点，转 paused 可续跑
+            meta = dict(run.meta or {})
+            meta.pop("pause_requested", None)
+            run.meta = meta
+            run.status = "paused"
+            run.current_stage = None
+            run.updated_at = finished
+            append_event(session, run.id, "run", "已按用户请求停止，可继续生成或取消任务", level="warning")
+            session.flush()
+            return run.status
 
         if canceled:
             _finish_canceled(session, run, reservation=reservation, now=finished)
