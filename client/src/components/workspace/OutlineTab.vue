@@ -54,25 +54,15 @@
               :add-label="field.key === 'beats' ? '添加节拍' : '添加一条'"
               :hint="field.key === 'beats' ? '阶段节拍只需记录关键转折，不是逐章细纲' : ''"
             />
-            <div v-else-if="field.key === 'ending_type'" class="outline-form__ending">
-              <input
-                v-model="form.ending_type"
-                class="input"
-                placeholder="如 HE 圆满 / BE 悲剧 / 开放式"
-              />
-              <div class="outline-form__choices" role="group" aria-label="结局类型预设">
-                <button
-                  v-for="preset in ENDING_PRESETS"
-                  :key="preset"
-                  type="button"
-                  class="outline-form__choice"
-                  :class="{ 'is-active': form.ending_type === preset }"
-                  @click="form.ending_type = form.ending_type === preset ? '' : preset"
-                >
-                  {{ preset }}
-                </button>
-              </div>
-            </div>
+            <Combobox
+              v-else-if="field.key === 'ending_type'"
+              v-model="form.ending_type"
+              :options="presetValues('outline_ending', ENDING_PRESETS)"
+              :multiple="false"
+              :allow-create="true"
+              :preset-type="'outline_ending'"
+              placeholder="如 HE 圆满 / BE 悲剧 / 开放式"
+            />
             <textarea
               v-else-if="field.rows"
               v-model="form[field.key]"
@@ -124,6 +114,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import ListInput from '@/components/ListInput.vue'
+import Combobox from '@/components/Combobox.vue'
+import { usePresets } from '@/composables/usePresets'
 import type { RunDetail } from '@/types'
 import { updateRunInfo, type RunInfoUpdatePayload } from '@/services/agentApi'
 import { ApiError } from '@/services/http'
@@ -187,7 +179,8 @@ const FORM_GROUPS: Array<{ title: string; fields: FormField[] }> = [
 ]
 
 const LIST_KEYS = new Set(['beats', 'selling_points', 'innovation_points', 'comparative_titles'])
-const ENDING_PRESETS = ['HE 圆满', 'BE 悲剧', '开放式', '反转结局', '双结局']
+const ENDING_PRESETS = ['HE 圆满', 'BE 悲剧', '开放式', '反转结局', '双结局', '暗线收束', '闭环结局', '留白', '苦乐参半', '救赎结局', '毁灭结局', '新生结局', '悬念结局']
+const { presetValues } = usePresets(['outline_ending'])
 const EDITABLE_LABELS = new Set([
   '全书主线',
   '核心冲突',

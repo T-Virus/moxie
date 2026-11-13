@@ -11,6 +11,7 @@ export type Permission =
   | 'audit:read'
   | 'model_config:read' | 'model_config:write'
   | 'offline_package:read' | 'offline_package:write'
+  | 'presets:read' | 'presets:write'
 
 const ADMIN_PERMISSIONS: Permission[] = [
   'users:read', 'users:write',
@@ -23,6 +24,7 @@ const ADMIN_PERMISSIONS: Permission[] = [
   'audit:read',
   'model_config:read', 'model_config:write',
   'offline_package:read', 'offline_package:write',
+  'presets:read', 'presets:write',
 ]
 
 const SUPPORT_PERMISSIONS: Permission[] = [
@@ -34,6 +36,7 @@ const SUPPORT_PERMISSIONS: Permission[] = [
   'tasks:read',
   'alerts:read',
   'audit:read',
+  'presets:read',
 ]
 
 const ROLE_MAP: Record<Role, Permission[]> = {
@@ -65,6 +68,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/model-configs', label: '模型配置', permission: 'model_config:read', group: '运维监控' },
   { path: '/offline-packages', label: '离线安装包', permission: 'offline_package:read', group: '运维监控' },
   { path: '/audit', label: '审计日志', permission: 'audit:read', group: '运维监控' },
+  { path: '/presets', label: '预设值维护', permission: 'presets:read', group: '运维监控' },
 ]
 
 export function visibleNav(role: Role | null): NavItem[] {

@@ -76,7 +76,11 @@ def require_staff(account: Account = Depends(get_current_account)) -> Account:
 
 
 def client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # 默认只取直连对端 IP；仅当显式信任代理时才解析 X-Forwarded-For，
+    # 否则客户端可伪造 XFF 让每次请求都"换 IP"，绕过基于 IP 的限流与失败锁定。
+    settings = getattr(request.app.state, "settings", None)
+    if getattr(settings, "trust_proxy", False):
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else None

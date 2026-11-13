@@ -687,11 +687,36 @@ class OfflinePackage(Base):
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
 
+class Preset(Base):
+    """统一预设值库：题材/枚举/分类/标签等全部预设集中入库，前端统一从 GET /presets 拉取。
+
+    builtin=True 为系统内置（account_id 为 NULL）；用户自定义的新选项可写入
+    account_id 归属该账户，与系统预设一并返回，方便后续复用。
+    唯一约束覆盖 (type, value, account_id)，允许系统预设与某用户同名自定义并存。
+    """
+
+    __tablename__ = "presets"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    value: Mapped[str] = mapped_column(String(128), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    audience: Mapped[str] = mapped_column(String(32), default="all", nullable=False)
+    sort: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    builtin: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    account_id: Mapped[int | None] = mapped_column(BIGINT, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("type", "value", "account_id", name="uq_preset_type_value_account"),
+    )
+
+
 __all__ = [
     "Base",
     "Account",
     "Device",
     "OfflinePackage",
+    "Preset",
     "ModelProviderConfig",
     "License",
     "Plan",

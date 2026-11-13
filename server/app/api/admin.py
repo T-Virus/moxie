@@ -24,6 +24,7 @@ from ..deps import require_admin, require_staff
 from ..errors import ApiError
 from ..models import (
     Account,
+    AgentRun,
     AuditLog,
     Device,
     ModelProviderConfig,
@@ -59,6 +60,11 @@ from ..services.model_config import describe_configs, encrypt_key, resolve_step_
 from ..services.model_gateway import complete_sync
 from ..services.uploads import safe_filename as safe_upload_name
 from ..services.quota import QuotaService, period_of
+
+# 统一预设值维护（后台纳管）
+from ..models import Preset
+from ..schemas import AdminPresetUpsert
+from ..seed import seed_presets
 
 health_router = APIRouter(tags=["ops"])
 
@@ -296,8 +302,13 @@ def get_user(
     devices = db.scalars(
         select(Device).where(Device.account_id == account_id).order_by(Device.id.desc()).limit(20)
     ).all()
+    # 用户详情「最近任务」同样要覆盖用户触发的写作运行，否则与创作页/看板数据不一致
     recent_tasks = db.scalars(
         select(Task).where(Task.account_id == account_id).order_by(Task.created_at.desc()).limit(10)
+    ).all()
+    recent_runs = db.scalars(
+        select(AgentRun).where(AgentRun.account_id == account_id)
+        .order_by(AgentRun.created_at.desc()).limit(10)
     ).all()
     usage = QuotaService(db).summary(account_id)["metrics"] if sub else []
     return {
@@ -320,16 +331,34 @@ def get_user(
             for d in devices
         ],
         "subscription": _sub_view(db, sub) if sub else None,
-        "recent_tasks": [
-            {
-                "id": t.id,
-                "type": t.type,
-                "status": t.status,
-                "progress": t.progress,
-                "created_at": t.created_at.isoformat(),
-            }
-            for t in recent_tasks
-        ],
+        "recent_tasks": sorted(
+            [
+                {
+                    "id": t.id,
+                    "type": t.type,
+                    "status": t.status,
+                    "progress": t.progress,
+                    "created_at": t.created_at.isoformat(),
+                    "source": "task",
+                    "title": None,
+                }
+                for t in recent_tasks
+            ]
+            + [
+                {
+                    "id": r.id,
+                    "type": f"agent_run:{r.mode}",
+                    "status": r.status,
+                    "progress": r.progress,
+                    "created_at": r.created_at.isoformat(),
+                    "source": "agent_run",
+                    "title": r.title,
+                }
+                for r in recent_runs
+            ],
+            key=lambda row: row["created_at"],
+            reverse=True,
+        )[:10],
         "usage": usage,
     }
 
@@ -478,12 +507,35 @@ def _delete_account(db: Session, account: Account, request: Request, admin: Acco
         if condition is not None:
             db.execute(sa_delete(relevant[name]).where(condition))
 
+    # 自定义预设仅以 account_id 软关联（Preset 未声明外键约束），
+    # 不在上面的拓扑遍历范围内，需手动级联清理，避免删除账号后留下孤儿数据。
+    db.execute(sa_delete(Preset).where(Preset.account_id == account_id))
+
     db.delete(account)
     write_audit(
         db, actor_id=admin.id, action="user.delete", request=request,
         target_type="account", target_id=str(account_id),
         meta={"email": email, "role": account.role},
     )
+
+
+# 静态路由必须注册在 /users/{account_id} 之前：Starlette 按注册顺序匹配，
+# 否则 DELETE /users/by-email 会被动态段吞掉，account_id="by-email" 导致 422。
+@admin_router.delete("/users/by-email")
+def delete_user_by_email(
+    payload: AdminDeleteByEmailRequest,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """按邮箱删除账号，便于调试邮箱注册产生的测试账号。"""
+    email = payload.email.strip()
+    account = db.scalars(select(Account).where(Account.email.ilike(email))).first()
+    if account is None:
+        raise _user_not_found()
+    _delete_account(db, account, request, admin)
+    db.commit()
+    return {"deleted": True, "id": account.id, "email": account.email}
 
 
 @admin_router.delete("/users/{account_id}")
@@ -500,23 +552,6 @@ def delete_user(
     _delete_account(db, account, request, admin)
     db.commit()
     return {"deleted": True, "id": account_id}
-
-
-@admin_router.delete("/users/by-email")
-def delete_user_by_email(
-    payload: AdminDeleteByEmailRequest,
-    request: Request,
-    admin: Account = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """按邮箱删除账号，便于调试邮箱注册产生的测试账号。"""
-    email = payload.email.strip()
-    account = db.scalars(select(Account).where(Account.email.ilike(email))).first()
-    if account is None:
-        raise _user_not_found()
-    _delete_account(db, account, request, admin)
-    db.commit()
-    return {"deleted": True, "id": account.id, "email": account.email}
 
 
 # ---- 订阅与额度 -------------------------------------------------------------
@@ -805,6 +840,9 @@ def admin_reconcile_reports(
 
 
 # ---- 任务看板 ---------------------------------------------------------------
+# 看板聚合两类「用户触发的任务」：拆解/改编任务（tasks）与写作运行（agent_runs）。
+# 二者由不同接口创建、落在不同表，早期看板只读 tasks，导致创作页触发的写作任务
+# 完全不出现在看板上。此处统一读取同一套 brief 结构，保证前后端数据一致。
 def _task_brief(task: Task) -> dict:
     return {
         "id": task.id,
@@ -817,7 +855,54 @@ def _task_brief(task: Task) -> dict:
         "lease_until": task.lease_until.isoformat() if task.lease_until else None,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "created_at": task.created_at.isoformat(),
+        "source": "task",
+        "title": None,
     }
+
+
+def _agent_run_brief(run: AgentRun) -> dict:
+    return {
+        "id": run.id,
+        "account_id": run.account_id,
+        "type": f"agent_run:{run.mode}",
+        "status": run.status,
+        "progress": run.progress,
+        "error_code": run.error_code,
+        "attempts": run.attempts,
+        "lease_until": None,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "created_at": run.created_at.isoformat(),
+        "source": "agent_run",
+        "title": run.title,
+    }
+
+
+def _status_counts(db: Session) -> dict[str, int]:
+    task_counts = dict(
+        db.execute(select(Task.status, func.count()).group_by(Task.status)).all()
+    )
+    run_counts = dict(
+        db.execute(select(AgentRun.status, func.count()).group_by(AgentRun.status)).all()
+    )
+    merged: dict[str, int] = {}
+    for status in set(task_counts) | set(run_counts):
+        merged[str(status)] = int(task_counts.get(status, 0)) + int(run_counts.get(status, 0))
+    return merged
+
+
+def _briefs_by_status(db: Session, status: str, *, order_by_started: bool) -> list[dict]:
+    order = Task.started_at if order_by_started else Task.created_at
+    tasks = db.scalars(
+        select(Task).where(Task.status == status).order_by(order.desc()).limit(20)
+    ).all()
+    run_order = AgentRun.started_at if order_by_started else AgentRun.created_at
+    runs = db.scalars(
+        select(AgentRun).where(AgentRun.status == status).order_by(run_order.desc()).limit(20)
+    ).all()
+    briefs = [_task_brief(t) for t in tasks] + [_agent_run_brief(r) for r in runs]
+    key = "started_at" if order_by_started else "created_at"
+    briefs.sort(key=lambda row: row[key] or row["created_at"] or "", reverse=True)
+    return briefs[:20]
 
 
 @admin_router.get("/tasks/dashboard")
@@ -825,28 +910,29 @@ def tasks_dashboard(
     _staff: Account = Depends(require_staff),
     db: Session = Depends(get_db),
 ):
-    counts = dict(db.execute(select(Task.status, func.count()).group_by(Task.status)).all())
-    running = db.scalars(
-        select(Task).where(Task.status == "running").order_by(Task.started_at.desc()).limit(20)
-    ).all()
-    failed = db.scalars(
-        select(Task).where(Task.status == "failed").order_by(Task.created_at.desc()).limit(20)
-    ).all()
+    counts = _status_counts(db)
+    retryable = int(
+        db.scalar(
+            select(func.count()).select_from(Task).where(
+                Task.status == "failed", Task.attempts < 3
+            )
+        ) or 0
+    ) + int(
+        db.scalar(
+            select(func.count()).select_from(AgentRun).where(
+                AgentRun.status == "failed", AgentRun.attempts < 3
+            )
+        ) or 0
+    )
     return {
         "queue_depth": int(counts.get("queued", 0)),
         "running_count": int(counts.get("running", 0)),
         "failed_count": int(counts.get("failed", 0)),
-        "retryable_count": int(
-            db.scalar(
-                select(func.count()).select_from(Task).where(
-                    Task.status == "failed", Task.attempts < 3
-                )
-            ) or 0
-        ),
+        "retryable_count": retryable,
         "generated_at": utcnow().isoformat(),
-        "running": [_task_brief(t) for t in running],
-        "failed": [_task_brief(t) for t in failed],
-        "by_status": {str(k): int(v) for k, v in counts.items()},
+        "running": _briefs_by_status(db, "running", order_by_started=True),
+        "failed": _briefs_by_status(db, "failed", order_by_started=False),
+        "by_status": counts,
     }
 
 
@@ -858,23 +944,39 @@ def retry_task(
     db: Session = Depends(get_db),
 ):
     task = db.get(Task, task_id)
-    if task is None:
+    if task is not None:
+        if task.status not in ("failed", "canceled"):
+            raise ApiError(409, "task_not_retryable", f"当前状态不可重试：{task.status}")
+        task.status = "queued"
+        task.cancel_requested = False
+        task.error_code = None
+        task.error_message = None
+        task.lease_until = None
+        task.attempts = 0
+        for step in db.scalars(select(TaskStep).where(TaskStep.task_id == task_id)).all():
+            if step.status in ("failed", "running"):
+                step.status = "pending"
+        write_audit(db, actor_id=admin.id, action="task.retry", request=request,
+                    target_type="task", target_id=task_id)
+        db.commit()
+        return {"ok": True, "task_id": task_id, "source": "task"}
+
+    # 写作运行：复用编排侧 resume 语义（重新预占额度、只重跑失败节点），
+    # 与用户端 /agent-runs/{id}/resume 保持一致，避免看板重试造成额度/状态漂移。
+    from ..agents.store import resume_run
+    from ..worker import enqueue_agent_run
+
+    run = db.get(AgentRun, task_id)
+    if run is None:
         raise ApiError(404, "task_not_found", "任务不存在")
-    if task.status not in ("failed", "canceled"):
-        raise ApiError(409, "task_not_retryable", f"当前状态不可重试：{task.status}")
-    task.status = "queued"
-    task.cancel_requested = False
-    task.error_code = None
-    task.error_message = None
-    task.lease_until = None
-    task.attempts = 0
-    for step in db.scalars(select(TaskStep).where(TaskStep.task_id == task_id)).all():
-        if step.status in ("failed", "running"):
-            step.status = "pending"
-    write_audit(db, actor_id=admin.id, action="task.retry", request=request,
-                target_type="task", target_id=task_id)
+    if run.status != "failed":
+        raise ApiError(409, "task_not_retryable", f"当前状态不可重试：{run.status}")
+    resume_run(db, run, approval=False, retry_failed=True)
+    write_audit(db, actor_id=admin.id, action="agent_run.retry", request=request,
+                target_type="agent_run", target_id=task_id)
     db.commit()
-    return {"ok": True, "task_id": task_id}
+    enqueue_agent_run(request.app.state.settings, run.id)
+    return {"ok": True, "task_id": task_id, "source": "agent_run"}
 
 
 @admin_router.get("/tasks")
@@ -885,13 +987,19 @@ def admin_tasks(
     _staff: Account = Depends(require_staff),
     db: Session = Depends(get_db),
 ):
-    query = select(Task).order_by(Task.created_at.desc()).limit(limit)
+    task_query = select(Task)
+    run_query = select(AgentRun)
     if status:
-        query = query.where(Task.status == status)
+        task_query = task_query.where(Task.status == status)
+        run_query = run_query.where(AgentRun.status == status)
     if account_id:
-        query = query.where(Task.account_id == account_id)
-    rows = db.scalars(query).all()
-    return {"items": [_task_brief(t) for t in rows]}
+        task_query = task_query.where(Task.account_id == account_id)
+        run_query = run_query.where(AgentRun.account_id == account_id)
+    tasks = db.scalars(task_query.order_by(Task.created_at.desc()).limit(limit)).all()
+    runs = db.scalars(run_query.order_by(AgentRun.created_at.desc()).limit(limit)).all()
+    items = [_task_brief(t) for t in tasks] + [_agent_run_brief(r) for r in runs]
+    items.sort(key=lambda row: row["created_at"], reverse=True)
+    return {"items": items[:limit]}
 
 
 # ---- 告警 / 通知 -------------------------------------------------------------
@@ -1303,6 +1411,9 @@ async def upload_offline_package(
 ):
     """上传并提交一个离线安装包（multipart）。上传后自动成为该平台的当前版本。"""
     settings = request.app.state.settings
+    platform = (platform or "").strip()
+    version = (version or "").strip()
+    release_notes = (release_notes or "").strip()
     if platform not in OFFLINE_PLATFORMS:
         raise ApiError(422, "bad_platform", "platform 必须为 windows 或 android")
     if not file.filename:
@@ -1402,3 +1513,205 @@ def download_offline_package(
         media_type=pkg.content_type or "application/octet-stream",
         headers={"Content-Disposition": disposition},
     )
+
+
+# ---- 统一预设值维护（题材 / 枚举 / 分类 / 标签） -------------------------------
+def _preset_view(row: Preset) -> dict:
+    return {
+        "id": row.id,
+        "type": row.type,
+        "value": row.value,
+        "label": row.label or row.value,
+        "audience": row.audience or "all",
+        "sort": row.sort,
+        "builtin": row.builtin,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        # 用户自定义预设（account_id 非 NULL）此前被维护列表过滤掉，导致
+        # 管理端看到的列表与前端实际可选数据不一致。这里显式带上归属信息。
+        "custom": row.account_id is not None,
+        "account_id": row.account_id,
+    }
+
+
+def _assert_preset_value(value: str) -> None:
+    """拒绝控制字符等非法的预设值，避免脏数据进入前端选项。"""
+    if not value or any(ord(ch) < 32 for ch in value):
+        raise ApiError(422, "invalid_preset", "预设值不能为空或包含控制字符")
+
+
+def _preset_duplicate(
+    db: Session,
+    ptype: str,
+    value: str,
+    exclude_id: int | None = None,
+    account_id: int | None = None,
+) -> bool:
+    """按归属范围查重：account_id=None 表示系统级；否则限定该用户的自定义项。
+
+    唯一约束是 (type, value, account_id)，不同用户可同名、系统项与用户项也可同名，
+    因此查重必须与待写入行的 account_id 一致，否则会把用户自定义项误判为重复。
+    """
+    conditions = [
+        Preset.type == ptype,
+        Preset.value == value,
+        Preset.account_id.is_(None) if account_id is None else Preset.account_id == account_id,
+    ]
+    if exclude_id is not None:
+        conditions.append(Preset.id != exclude_id)
+    return db.scalar(select(Preset.id).where(*conditions).limit(1)) is not None
+
+
+def _preset_scope_condition(scope: str):
+    """维护列表的可见范围：all=全部，system=仅系统级，custom=仅用户自定义项。"""
+    if scope == "system":
+        return Preset.account_id.is_(None)
+    if scope == "custom":
+        return Preset.account_id.is_not(None)
+    return None
+
+
+@admin_router.get("/presets")
+def admin_list_presets(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    type: str | None = Query(default=None, max_length=64),
+    q: str | None = Query(default=None, max_length=128),
+    scope: str = Query(default="all", pattern=r"^(all|system|custom)$"),
+    _staff: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """分页查询预设值。默认全部（系统级 + 用户自定义），与前端 GET /v1/presets
+    的数据口径一致；scope 可切到 system / custom。type 精确筛选，q 模糊匹配值/标签。
+    """
+    conditions = []
+    scope_condition = _preset_scope_condition(scope)
+    if scope_condition is not None:
+        conditions.append(scope_condition)
+    if type and type.strip():
+        conditions.append(Preset.type == type.strip())
+    keyword = q.strip() if q else ""
+    if keyword:
+        # like 的模式串作为绑定参数传入，不拼接 SQL；转义通配符避免误匹配
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        conditions.append(or_(Preset.value.like(pattern, escape="\\"), Preset.label.like(pattern, escape="\\")))
+    stmt = select(Preset).where(*conditions) if conditions else select(Preset)
+    total = _total(db, stmt)
+    rows = db.scalars(
+        stmt.order_by(Preset.type, Preset.sort, Preset.value)
+        .offset(_offset(page, page_size))
+        .limit(page_size)
+    ).all()
+    type_stmt = select(Preset.type).distinct()
+    if scope_condition is not None:
+        type_stmt = type_stmt.where(scope_condition)
+    types = list(db.scalars(type_stmt.order_by(Preset.type)).all())
+    return {
+        "items": [_preset_view(r) for r in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "types": types,
+        "scope": scope,
+    }
+
+
+@admin_router.post("/presets", status_code=201)
+def admin_create_preset(
+    payload: AdminPresetUpsert,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """新增系统级预设值；builtin=False 表示由后台维护而非程序种子。"""
+    _assert_preset_value(payload.value)
+    if _preset_duplicate(db, payload.type, payload.value):
+        raise ApiError(409, "preset_exists", "该类型下已存在同名预设值")
+    row = Preset(
+        type=payload.type,
+        value=payload.value,
+        label=payload.label or payload.value,
+        audience=payload.audience or "all",
+        sort=payload.sort,
+        builtin=False,
+        account_id=None,
+    )
+    db.add(row)
+    write_audit(
+        db, actor_id=_admin.id, action="preset.create", request=request,
+        target_type="preset", target_id=payload.type,
+        meta={"type": payload.type, "value": payload.value},
+    )
+    db.commit()
+    db.refresh(row)
+    return _preset_view(row)
+
+
+@admin_router.put("/presets/{preset_id}")
+def admin_update_preset(
+    preset_id: int,
+    payload: AdminPresetUpsert,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """修改预设值（系统级或用户自定义项均可维护），归属 account_id 保持不变。"""
+    row = db.get(Preset, preset_id)
+    if row is None:
+        raise ApiError(404, "not_found", "预设不存在")
+    _assert_preset_value(payload.value)
+    if _preset_duplicate(
+        db, payload.type, payload.value, exclude_id=preset_id, account_id=row.account_id
+    ):
+        raise ApiError(409, "preset_exists", "该类型下已存在同名预设值")
+    before = _preset_view(row)
+    row.type = payload.type
+    row.value = payload.value
+    row.label = payload.label or payload.value
+    row.audience = payload.audience or "all"
+    row.sort = payload.sort
+    write_audit(
+        db, actor_id=_admin.id, action="preset.update", request=request,
+        target_type="preset", target_id=payload.type,
+        meta={"before": before, "after": _preset_view(row)},
+    )
+    db.commit()
+    db.refresh(row)
+    return _preset_view(row)
+
+
+@admin_router.delete("/presets/{preset_id}")
+def admin_delete_preset(
+    preset_id: int,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """硬删除预设值（含用户自定义项）。系统级内置项删除后不会被种子自动复活。"""
+    row = db.get(Preset, preset_id)
+    if row is None:
+        raise ApiError(404, "not_found", "预设不存在")
+    snapshot = _preset_view(row)
+    db.delete(row)
+    write_audit(
+        db, actor_id=_admin.id, action="preset.delete", request=request,
+        target_type="preset", target_id=row.type, meta=snapshot,
+    )
+    db.commit()
+    return {"deleted": True, "id": preset_id}
+
+
+@admin_router.post("/presets/sync-seeds")
+def admin_sync_preset_seeds(
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """按程序内置清单补齐缺失预设（只插入，不覆盖已有、不删除），用于版本升级后补数据。"""
+    result = seed_presets(db, only_if_empty=False)
+    write_audit(
+        db, actor_id=_admin.id, action="preset.sync_seeds", request=request,
+        target_type="preset", target_id="seeds", meta=result,
+    )
+    db.commit()
+    return {"synced": True, **result}

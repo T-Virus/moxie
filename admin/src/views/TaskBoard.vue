@@ -81,7 +81,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <PageHeader title="任务看板" desc="查看拆解任务队列深度、运行中与失败任务，并对失败任务发起重试。页面每 30 秒自动刷新。">
+  <PageHeader title="任务看板" desc="聚合拆解/改编任务与创作页触发的写作运行，查看队列深度、运行中与失败任务并重试。页面每 30 秒自动刷新。">
     <label class="badge muted" style="cursor: pointer">
       <input v-model="autoRefresh" type="checkbox" style="margin-right: 5px" />自动刷新
     </label>
@@ -130,12 +130,16 @@ onUnmounted(() => {
       </div>
       <div v-if="runningTasks.length" class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>任务 ID</th><th>账号</th><th>类型</th><th>状态</th><th class="num">进度</th><th>开始时间</th><th>创建时间</th></tr></thead>
+          <thead><tr><th>任务 ID</th><th>账号</th><th>来源 / 类型</th><th>作品</th><th>状态</th><th class="num">进度</th><th>开始时间</th><th>创建时间</th></tr></thead>
           <tbody>
             <tr v-for="task in runningTasks" :key="task.id">
               <td class="mono truncate" :title="String(task.id)">{{ task.id }}</td>
               <td>{{ task.account_id ? `#${task.account_id}` : '—' }}</td>
-              <td>{{ task.type || '—' }}</td>
+              <td>
+                <span class="badge muted" style="font-size: 11px">{{ task.source === 'agent_run' ? '写作运行' : '拆解任务' }}</span>
+                {{ task.type || '—' }}
+              </td>
+              <td class="truncate" :title="task.title || ''">{{ task.title || '—' }}</td>
               <td><StatusBadge :value="task.status" dot /></td>
               <td class="num">{{ task.progress ?? 0 }}%</td>
               <td class="muted">{{ formatTime(task.started_at) }}</td>
@@ -156,13 +160,17 @@ onUnmounted(() => {
       <div v-if="failedTasks.length" class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>任务 ID</th><th>账号</th><th>类型</th><th>状态</th><th>错误码</th><th class="num">尝试</th><th>创建时间</th><th style="width: 90px">操作</th></tr>
+            <tr><th>任务 ID</th><th>账号</th><th>来源 / 类型</th><th>作品</th><th>状态</th><th>错误码</th><th class="num">尝试</th><th>创建时间</th><th style="width: 90px">操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="task in failedTasks" :key="task.id">
               <td class="mono truncate" :title="String(task.id)">{{ task.id }}</td>
               <td>{{ task.account_id ? `#${task.account_id}` : '—' }}</td>
-              <td>{{ task.type || '—' }}</td>
+              <td>
+                <span class="badge muted" style="font-size: 11px">{{ task.source === 'agent_run' ? '写作运行' : '拆解任务' }}</span>
+                {{ task.type || '—' }}
+              </td>
+              <td class="truncate" :title="task.title || ''">{{ task.title || '—' }}</td>
               <td><StatusBadge :value="task.status" dot /></td>
               <td class="mono">{{ task.error_code || '—' }}</td>
               <td class="num">{{ task.attempts ?? '—' }}</td>

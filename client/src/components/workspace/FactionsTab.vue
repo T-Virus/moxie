@@ -83,10 +83,9 @@
             <col style="width: 9%" />
             <col style="width: 11%" />
             <col style="width: 13%" />
-            <col style="width: 17%" />
+            <col style="width: 18%" />
             <col style="width: 8%" />
-            <col style="width: 9%" />
-            <col style="width: 64px" />
+            <col style="width: 10%" />
             <col style="width: 75px" />
           </colgroup>
           <thead>
@@ -99,13 +98,17 @@
               <th>地盘</th>
               <th class="factions__center">成员数</th>
               <th class="factions__center">首次登场</th>
-              <th class="factions__center">详情</th>
               <th class="factions__center">操作</th>
             </tr>
           </thead>
           <tbody>
             <template v-for="faction in paged" :key="faction.name">
-              <tr>
+              <tr
+                class="factions__body-row"
+                :class="{ 'is-open': isOpen(faction.name) }"
+                :title="isOpen(faction.name) ? '点击收起详情' : '点击展开详情'"
+                @click="toggle(faction.name)"
+              >
                 <td>
                   <span class="factions__name">{{ faction.name }}</span>
                 </td>
@@ -118,17 +121,7 @@
                 <td :title="faction.territory || ''">{{ faction.territory || '' }}</td>
                 <td class="factions__center">{{ membersCount(faction) }}</td>
                 <td class="factions__center">{{ firstChapter(faction) }}</td>
-                <td class="factions__center">
-                  <button
-                    type="button"
-                    class="factions__toggle"
-                    :aria-expanded="isOpen(faction.name)"
-                    @click="toggle(faction.name)"
-                  >
-                    {{ isOpen(faction.name) ? '收起' : '展开' }}
-                  </button>
-                </td>
-                <td class="factions__center">
+                <td class="factions__center" @click.stop>
                   <div class="factions__acts">
                     <button
                       type="button"
@@ -179,7 +172,7 @@
                 </td>
               </tr>
               <tr v-if="isOpen(faction.name)" class="factions__detail-row">
-                <td colspan="10">
+                <td colspan="9">
                   <div class="factions__detail">
                     <div v-if="factionFacts(faction).length" class="factions__fields">
                       <span v-for="fact in factionFacts(faction)" :key="fact.label">
@@ -332,6 +325,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { usePresets } from '@/composables/usePresets'
 import AppDialog from '@/components/AppDialog.vue'
 import CollectionDialog from '@/components/CollectionDialog.vue'
 import type { CollectionField, FactionContent, RunDetail } from '@/types'
@@ -343,12 +337,20 @@ const emit = defineEmits<{ (event: 'updated'): void }>()
 
 const FACTION_FIELDS: CollectionField[] = [
   { key: 'name', label: '势力名称', required: true, placeholder: '势力名称' },
-  { key: 'category', label: '势力大类', placeholder: '如 宗门 / 家族 / 商会' },
+  {
+    key: 'category',
+    label: '势力大类',
+    type: 'select',
+    presetType: 'faction_category',
+    presets: ['宗门', '家族', '朝廷', '商会', '帮派', '军队', '组织', '门派', '联盟', '圣地', '古族', '学宫', '书院', '神殿', '王朝', '公会', '教派', '海域', '魔门', '妖国', '亡灵', '佣兵团', '隐世'],
+    placeholder: '选择或输入，如 宗门 / 家族 / 商会',
+  },
   {
     key: 'type',
     label: '类型',
     type: 'select',
-    presets: ['宗门', '家族', '朝廷', '商会', '帮派', '军队', '组织'],
+    presetType: 'faction_type',
+    presets: ['宗门', '家族', '朝廷', '商会', '帮派', '军队', '组织', '门派', '联盟', '圣地', '古族', '学宫', '神殿', '王朝', '公会', '教派', '魔门', '妖国', '佣兵团', '隐世'],
     placeholder: '选择或输入',
   },
   { key: 'leader', label: '首领', placeholder: '首领姓名' },
@@ -357,7 +359,8 @@ const FACTION_FIELDS: CollectionField[] = [
     key: 'stance',
     label: '立场',
     type: 'select',
-    presets: ['正派', '反派', '中立', '亦正亦邪'],
+    presetType: 'faction_stance',
+    presets: ['正派', '反派', '中立', '亦正亦邪', '正义', '邪恶', '灰色地带', '守序', '混乱', '未知'],
     placeholder: '选择或输入',
   },
   { key: 'territory', label: '地盘', placeholder: '势力范围' },
@@ -375,14 +378,22 @@ const canEdit = computed(
 const characterOptions = computed(() =>
   (props.run.characters || []).map((item) => item.name).filter(Boolean),
 )
+const { presetValues } = usePresets(['faction_category', 'faction_type', 'faction_stance'])
+const factionPresetTypes: Record<string, string> = {
+  category: 'faction_category',
+  type: 'faction_type',
+  stance: 'faction_stance',
+}
 const factionFields = computed<CollectionField[]>(() =>
   FACTION_FIELDS.map((field) => {
     if (field.key === 'leader') {
-      return { ...field, type: 'select', presets: characterOptions.value }
+      return { ...field, type: 'select', presets: characterOptions.value, allowCreate: false, placeholder: '只能从已有角色中选择' }
     }
     if (field.key === 'members') {
-      return { ...field, presets: characterOptions.value }
+      return { ...field, presets: characterOptions.value, allowCreate: false }
     }
+    const t = factionPresetTypes[field.key]
+    if (t) return { ...field, presets: presetValues(t, (field.presets as string[]) || []) }
     return field
   }),
 )
@@ -820,10 +831,17 @@ function resetFilters(): void {
   font-variant-numeric: tabular-nums;
 }
 
-.factions__toggle {
-  font-size: 14px;
-  color: var(--color-brand);
-  font-family: inherit;
+/* 主行整体可点：点击展开/收缩详情；操作列已 stop 阻断冒泡 */
+.factions__body-row {
+  cursor: pointer;
+}
+
+.factions__body-row:hover td {
+  background: var(--color-bg-soft);
+}
+
+.factions__body-row.is-open td {
+  background: var(--color-bg-softer);
 }
 
 .factions__acts {

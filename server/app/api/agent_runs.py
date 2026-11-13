@@ -17,11 +17,11 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..agents import ARTIFACT_NAMES, cancel_run, create_run, get_run, pause_run, resume_run, run_to_dict
-from ..agents.genres import GENRES, list_genres
 from ..db import get_db
 from ..deps import AuthContext, get_auth
 from ..errors import ApiError
-from ..models import AgentRun, AgentRunEvent, AgentRunStep
+from ..models import AgentRun, AgentRunEvent, AgentRunStep, Preset
+from ..security import sanitize_free_json
 from ..schemas import (
     AgentCollectionsUpdateRequest,
     AgentCoverRequest,
@@ -52,8 +52,27 @@ def _store_byok(request: Request, run_id: str) -> None:
 
 
 @router.get("/genres")
-def genres():
-    return list_genres()
+def genres(db: Session = Depends(get_db)):
+    """题材目录：统一从 presets 表读取 type='genre' 的系统预设。"""
+    rows = db.scalars(
+        select(Preset)
+        .where(Preset.type == "genre", Preset.account_id.is_(None))
+        .order_by(Preset.sort, Preset.value)
+    ).all()
+    items = [
+        {
+            "id": r.value,
+            "name": r.value,
+            "audience": [a for a in (r.audience or "all").split(",") if a] or ["all"],
+            "tags": [],
+        }
+        for r in rows
+    ]
+    # 系统预设为空（例如管理端清空题材）时显式降级，前端才会启用内置兜底；
+    # 正常有数据时前端严格以服务端为准，保证维护列表与创作页一致。
+    if not items:
+        return {"items": [], "custom_allowed": True, "degraded": "系统题材预设为空，已使用内置题材兜底"}
+    return {"items": items, "custom_allowed": True}
 
 
 @router.post("/agent-runs", status_code=201)
@@ -135,16 +154,20 @@ def create_agent_run(
     }
 
 
-def _genre_condition(value: str):
-    """题材既可传 id 也可传中文名；同时命中目录别名时一并匹配。"""
+def _genre_condition(value: str, db: Session):
+    """题材既可传 id 也可传中文名；命中 presets 表同名题材时一并匹配。"""
     value = value.strip()
     conditions = [AgentRun.genre_id == value, AgentRun.genre_name == value]
-    for item in GENRES:
-        if value in (item["id"], item["name"]):
-            conditions.extend(
-                [AgentRun.genre_id == item["id"], AgentRun.genre_name == item["name"]]
+    if value:
+        match = db.scalar(
+            select(Preset).where(
+                Preset.type == "genre",
+                Preset.account_id.is_(None),
+                Preset.value == value,
             )
-            break
+        )
+        if match is not None:
+            conditions.extend([AgentRun.genre_id == match.value, AgentRun.genre_name == match.value])
     return or_(*conditions)
 
 
@@ -168,7 +191,7 @@ def list_agent_runs(
     if length is not None:
         conditions.append(AgentRun.length == length)
     if genre is not None and genre.strip():
-        conditions.append(_genre_condition(genre))
+        conditions.append(_genre_condition(genre, db))
 
     total = (
         db.scalar(select(func.count()).select_from(AgentRun).where(*conditions))
@@ -330,7 +353,7 @@ def update_agent_run_collections(
     if run.status in ("queued", "running"):
         raise ApiError(409, "run_active", "运行中的作品暂不可编辑，请先停止")
 
-    data = payload.model_dump(exclude_none=True)
+    data = sanitize_free_json(payload.model_dump(exclude_none=True))
     if not data:
         raise ApiError(422, "empty_update", "没有需要更新的内容")
 

@@ -14,7 +14,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db, utcnow
-from ..deps import AuthContext, get_auth
+from ..deps import AuthContext, client_ip as resolve_client_ip, get_auth
 from ..errors import ApiError
 from ..metrics import increment
 from ..models import Account, EmailVerification, LegalConsent, RefreshSession
@@ -111,12 +111,11 @@ def _lookup_account(db: Session, email: str | None, phone: str | None) -> Accoun
 def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
     limiter = request.app.state.limiter
-    ip = request.client.host if request.client else "-"
-    if not limiter.allow(
-        f"register:{ip}", settings.register_rate_limit_per_minute, 60
-    ):
+    ip = resolve_client_ip(request) or "-"
+    allowed, retry_after = limiter.check(f"register:{ip}", settings.register_rate_limit_per_minute, 60)
+    if not allowed:
         increment("moxie_rate_limited_total", scope="register")
-        raise ApiError(429, "rate_limited", "注册过于频繁，请稍后再试")
+        raise ApiError(429, "rate_limited", "注册过于频繁，请稍后再试", headers={"Retry-After": str(retry_after)})
     _require_consents(payload, settings)
     email = payload.email.strip().lower() if payload.email else None
     phone = payload.phone.strip() if payload.phone else None
@@ -222,10 +221,11 @@ def verify_email(payload: VerifyEmailRequest, request: Request, db: Session = De
 def resend_verification(payload: ResendVerificationRequest, request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
     limiter = request.app.state.limiter
-    ip = request.client.host if request.client else "-"
-    if not limiter.allow(f"resend:{ip}", settings.register_rate_limit_per_minute, 60):
+    ip = resolve_client_ip(request) or "-"
+    allowed, retry_after = limiter.check(f"resend:{ip}", settings.register_rate_limit_per_minute, 60)
+    if not allowed:
         increment("moxie_rate_limited_total", scope="resend")
-        raise ApiError(429, "rate_limited", "发送过于频繁，请稍后再试")
+        raise ApiError(429, "rate_limited", "发送过于频繁，请稍后再试", headers={"Retry-After": str(retry_after)})
     email = payload.email.strip().lower()
     account = _lookup_account(db, email, None)
     # 不泄露账号是否存在：仅当存在且处于待验证才真正发信
@@ -261,17 +261,35 @@ def resend_verification(payload: ResendVerificationRequest, request: Request, db
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
     limiter = request.app.state.limiter
-    ip = request.client.host if request.client else "-"
-    if not limiter.allow(f"login:{ip}", settings.login_rate_limit_per_minute, 60):
+    ip = resolve_client_ip(request) or "-"
+    allowed, retry_after = limiter.check(f"login:{ip}", settings.login_rate_limit_per_minute, 60)
+    if not allowed:
         increment("moxie_rate_limited_total", scope="login")
-        raise ApiError(429, "rate_limited", "登录尝试过于频繁，请稍后再试")
+        raise ApiError(429, "rate_limited", "登录尝试过于频繁，请稍后再试", headers={"Retry-After": str(retry_after)})
+
+    # 账号维度的失败锁定：窗口内连续输错达到上限即拒绝，防止针对固定账号撞库。
+    # 与上面的 IP 限流互补（IP 防刷量，本项防撞库）；登录成功即清零。
+    identity = (payload.email or payload.phone or "").strip()
+    if payload.email:
+        identity = identity.lower()
+    fail_key = f"login_fail:{identity or ip}"
+    failed, lock_ttl = limiter.status(fail_key)
+    if settings.login_failure_limit > 0 and failed >= settings.login_failure_limit:
+        increment("moxie_rate_limited_total", scope="login_failure")
+        raise ApiError(
+            429, "too_many_attempts", "密码错误次数过多，请稍后再试",
+            headers={"Retry-After": str(lock_ttl or settings.login_failure_window_seconds)},
+        )
+
     account = _lookup_account(db, payload.email, payload.phone)
     if account is None or not verify_password(payload.password, account.password_hash):
+        limiter.check(fail_key, settings.login_failure_limit, settings.login_failure_window_seconds)
         raise ApiError(401, "invalid_credentials", "账号或密码错误")
     if account.status != "active":
         if account.status == "pending":
             raise ApiError(403, "email_not_verified", "账号邮箱尚未验证，请先查收验证邮件完成验证后再登录")
         raise ApiError(403, "account_disabled", "账号已被停用")
+    limiter.reset(fail_key)
     write_audit(db, actor_id=account.id, action="account.login", request=request,
                 target_type="account", target_id=account.id)
     result = _issue_tokens(db, request, account)

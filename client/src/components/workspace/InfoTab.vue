@@ -327,55 +327,62 @@
             </label>
             <div class="info__form-field">
               <span class="info__form-label">主题标签</span>
-              <TagInput v-model="themeTags" :presets="THEME_PRESETS" placeholder="输入后回车添加" />
+              <Combobox
+                v-model="themeTags"
+                :options="presetValues('info_theme', THEME_PRESETS)"
+                :multiple="true"
+                :allow-create="true"
+                :preset-type="'info_theme'"
+                placeholder="选择或输入主题标签，回车添加"
+              />
             </div>
             <div class="info__form-field">
               <span class="info__form-label">叙事人称</span>
-              <input v-model="form.person" class="input" maxlength="60" />
-              <div class="info__preset-list" role="group" aria-label="叙事人称预设">
-                <button
-                  v-for="preset in PERSON_PRESETS"
-                  :key="preset"
-                  type="button"
-                  class="info__pill"
-                  :class="{ 'is-active': form.person === preset }"
-                  @click="toggleTextPreset('person', preset)"
-                >
-                  {{ preset }}
-                </button>
-              </div>
+              <Combobox
+                v-model="form.person"
+                :options="presetValues('info_person', PERSON_PRESETS)"
+                :multiple="false"
+                :allow-create="true"
+                :preset-type="'info_person'"
+                placeholder="如 第一人称 / 第三人称"
+              />
             </div>
             <div class="info__form-field">
               <span class="info__form-label">文风与语言</span>
-              <TagInput v-model="styleTags" :presets="VOICE_PRESETS" placeholder="输入后回车添加" />
+              <Combobox
+                v-model="styleTags"
+                :options="presetValues('info_voice', VOICE_PRESETS)"
+                :multiple="true"
+                :allow-create="true"
+                :preset-type="'info_voice'"
+                placeholder="选择或输入文风标签，回车添加"
+              />
             </div>
             <div class="info__form-field">
               <span class="info__form-label">目标平台</span>
-              <TagInput
+              <Combobox
                 v-model="platformTags"
-                :presets="PLATFORM_PRESETS"
-                placeholder="输入后回车添加"
+                :options="presetValues('info_platform', PLATFORM_PRESETS)"
+                :multiple="true"
+                :allow-create="true"
+                :preset-type="'info_platform'"
+                placeholder="选择或输入目标平台，回车添加"
               />
             </div>
             <div
-              v-for="field in SELECT_FIELDS"
+              v-for="field in selectFields"
               :key="field.key"
               class="info__form-field"
             >
               <span class="info__form-label">{{ field.label }}</span>
-              <input v-model="form[field.key]" class="input" :placeholder="field.placeholder" />
-              <div class="info__preset-list" role="group" :aria-label="`${field.label}预设`">
-                <button
-                  v-for="preset in field.presets"
-                  :key="preset"
-                  type="button"
-                  class="info__pill"
-                  :class="{ 'is-active': form[field.key] === preset }"
-                  @click="toggleTextPreset(field.key, preset)"
-                >
-                  {{ preset }}
-                </button>
-              </div>
+              <Combobox
+                v-model="form[field.key]"
+                :options="field.presets"
+                :multiple="false"
+                :allow-create="true"
+                :preset-type="field.presetType"
+                :placeholder="field.placeholder"
+              />
             </div>
             <label class="info__form-field info__form-field--full">
               <span class="info__form-label">世界观</span>
@@ -395,7 +402,14 @@
             </label>
             <div class="info__form-field info__form-field--full">
               <span class="info__form-label">核心卖点</span>
-              <TagInput v-model="sellingTags" placeholder="输入后回车添加" />
+              <Combobox
+                v-model="sellingTags"
+                :options="presetValues('info_selling_point', [])"
+                :multiple="true"
+                :allow-create="true"
+                :preset-type="'info_selling_point'"
+                placeholder="输入卖点关键词，回车添加"
+              />
             </div>
           </div>
         </section>
@@ -530,7 +544,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
 import GenrePicker from '@/components/GenrePicker.vue'
-import TagInput from '@/components/TagInput.vue'
+import Combobox from '@/components/Combobox.vue'
+import { usePresets } from '@/composables/usePresets'
 import type { Audience, GenreItem, GenreSelection, RunDetail, RunLength } from '@/types'
 import { ApiError } from '@/services/http'
 import {
@@ -542,6 +557,7 @@ import {
   uploadRunCover,
 } from '@/services/agentApi'
 import { MODE_LABEL, formatDateTime, relativeTime } from '@/utils/format'
+import { GENRE_PRESETS, mergeGenres } from '@/utils/genrePresets'
 
 const props = defineProps<{ run: RunDetail }>()
 const emit = defineEmits<{ (event: 'updated'): void }>()
@@ -566,8 +582,35 @@ const THEME_PRESETS = [
   '家国',
   '探索',
   '宿命',
+  '爱情',
+  '言情',
+  '修仙',
+  '穿越',
+  '重生',
+  '系统',
+  '种田',
+  '末日',
+  '废柴',
+  '天才',
+  '江湖',
+  '宫斗',
+  '宅斗',
+  '争霸',
+  '养成',
+  '无限流',
+  '克苏鲁',
+  '赛博',
+  '科幻',
+  '异能',
+  '灵气复苏',
+  '美食',
+  '神豪',
+  '直播',
+  '游戏',
+  '电竞',
+  '复仇爽文',
 ]
-const PERSON_PRESETS = ['第一人称', '第三人称限知', '第三人称全知', '双视角交替']
+const PERSON_PRESETS = ['第一人称', '第二人称', '第三人称限知', '第三人称全知', '多视角', '双视角交替', '主客观交替']
 const VOICE_PRESETS = [
   '快节奏爽文',
   '慢热细腻',
@@ -579,13 +622,21 @@ const VOICE_PRESETS = [
   '幽默讽刺',
   '悬念铺垫',
   '电影画面感',
+  '冷峻克制',
+  '古雅厚重',
+  '轻小说',
+  '吐槽风',
+  '严肃文学',
+  '纪实冷硬',
+  '诗意抒情',
+  '通俗直白',
 ]
-const TONE_PRESETS = ['热血', '轻松', '黑暗', '治愈', '悬疑', '虐心', '温馨', '史诗']
-const PLATFORM_PRESETS = ['番茄', '起点', '晋江', '七猫', '飞卢', 'QQ阅读', '纵横', '17K']
-const AGE_PRESETS = ['学生党', '18-24', '25-34', '35+', '全年龄']
-const UPDATE_PRESETS = ['日更', '双更', '三日一更', '周更', '不定期']
-const PACE_PRESETS = ['快节奏', '稳节奏', '慢热']
-const RATING_PRESETS = ['全年龄', '16+', '18+']
+const TONE_PRESETS = ['热血', '轻松', '黑暗', '治愈', '悬疑', '虐心', '温馨', '史诗', '搞笑', '燃', '悲壮', '苍凉', '诡谲', '浪漫', '唯美', '硬核', '轻喜剧', '暗黑']
+const PLATFORM_PRESETS = ['番茄', '起点', '晋江', '七猫', '飞卢', 'QQ阅读', '纵横', '17K', '知乎', '豆瓣', '刺猬猫', '少年梦', '塔读', '掌阅', '书旗', '咪咕', '次元']
+const AGE_PRESETS = ['学生党', '12-18', '14-17', '18-24', '25-34', '35+', '40+', '50+', '年轻群体', '成熟读者', '全年龄']
+const UPDATE_PRESETS = ['日更', '双更', '多更', '爆发', '三日一更', '周更', '周双更', '月更', '季更', '不定期', '停更']
+const PACE_PRESETS = ['快节奏', '稳节奏', '慢热', '慢节奏', '适中', '张弛有度', '紧凑']
+const RATING_PRESETS = ['全年龄', '12+', '16+', '18+', '青少年', '无限制']
 
 const SELECT_FIELDS: Array<{ key: string; label: string; placeholder: string; presets: string[] }> = [
   { key: 'tone', label: '基调', placeholder: '如 热血 / 黑暗 / 治愈', presets: TONE_PRESETS },
@@ -614,6 +665,33 @@ const SELECT_FIELDS: Array<{ key: string; label: string; placeholder: string; pr
     presets: RATING_PRESETS,
   },
 ]
+
+const { presetValues } = usePresets([
+  'info_theme',
+  'info_person',
+  'info_voice',
+  'info_platform',
+  'info_tone',
+  'info_age',
+  'info_update',
+  'info_pace',
+  'info_rating',
+  'info_selling_point',
+])
+const SELECT_PRESET_TYPES: Record<string, string> = {
+  tone: 'info_tone',
+  target_reader_age: 'info_age',
+  update_frequency: 'info_update',
+  serialization_pace: 'info_pace',
+  content_rating: 'info_rating',
+}
+const selectFields = computed(() =>
+  SELECT_FIELDS.map((f) => ({
+    ...f,
+    presets: presetValues(SELECT_PRESET_TYPES[f.key] || '', f.presets),
+    presetType: SELECT_PRESET_TYPES[f.key] || undefined,
+  })),
+)
 
 const MAX_COVER_MB = 10
 
@@ -811,18 +889,15 @@ function splitList(value: string): string[] {
     .filter(Boolean)
 }
 
-function toggleTextPreset(field: string, value: string): void {
-  form[field] = String(form[field] || '').trim() === value ? '' : value
-}
-
 async function ensureGenres(): Promise<void> {
   if (genresLoaded.value) return
   try {
     const data = await fetchGenres()
-    genres.value = data.items.slice()
+    genres.value = mergeGenres(data.items, Boolean(data.degraded))
     customAllowed.value = data.custom_allowed
   } catch {
-    genres.value = []
+    // 接口不可用时用内置题材库兜底（拷贝一份，避免后续 push 污染常量）
+    genres.value = GENRE_PRESETS.map((item) => ({ ...item }))
     customAllowed.value = true
   } finally {
     if (form.genre.name && !genres.value.some((item) => item.name === form.genre.name)) {
@@ -1492,6 +1567,7 @@ onBeforeUnmount(() => {
   display: grid;
   place-items: center;
   padding: 0;
+  padding-top: 6px;
   border: none;
   border-radius: 0;
   background: transparent;

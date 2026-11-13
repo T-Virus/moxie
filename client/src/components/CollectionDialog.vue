@@ -16,55 +16,35 @@
             <i v-if="field.required">*</i>
           </span>
 
-          <TagInput
+          <!-- 多选：标签类字段（角色/势力/道具/章节的关联项）统一用可搜索、可自定义、支持虚拟滚动的下拉 -->
+          <Combobox
             v-if="field.type === 'tags'"
             v-model="form[field.key]"
-            :presets="field.presets || []"
-            :placeholder="field.placeholder || '输入后回车添加'"
+            :options="tagsOptions(field)"
+            :multiple="true"
+            :placeholder="field.placeholder || '搜索选择或输入，回车添加'"
+            :allow-create="field.allowCreate ?? true"
+            :preset-type="field.presetType"
+          />
+          <!-- 单选：标签类字段（大类/类型/立场/阵营/归属卷等）同样可搜索、可自定义、可清空 -->
+          <Combobox
+            v-else-if="field.type === 'select'"
+            v-model="form[field.key]"
+            :options="selectOptions(field)"
+            :multiple="false"
+            :clearable="true"
+            :placeholder="field.placeholder || '请选择或输入'"
+            :allow-create="field.allowCreate ?? true"
+            :preset-type="field.presetType"
           />
           <textarea
             v-else-if="field.type === 'textarea'"
             v-model="form[field.key]"
-            class="input"
+            class="input collect-form__area"
             :rows="field.rows || 3"
             :maxlength="field.maxlength || undefined"
             :placeholder="field.placeholder || ''"
           />
-          <template v-else-if="field.type === 'select'">
-            <select
-              v-if="field.options?.length"
-              v-model="form[field.key]"
-              class="input"
-            >
-              <option value="">— 不指定 —</option>
-              <option
-                v-for="opt in field.options"
-                :key="opt.value"
-                :value="opt.value"
-              >
-                {{ opt.label }}
-              </option>
-            </select>
-            <template v-else>
-              <input
-                v-model="form[field.key]"
-                class="input"
-                :placeholder="field.placeholder || ''"
-              />
-              <div v-if="field.presets?.length" class="collect-form__presets">
-                <button
-                  v-for="preset in field.presets"
-                  :key="preset"
-                  type="button"
-                  class="collect-form__pill"
-                  :class="{ 'is-active': form[field.key] === preset }"
-                  @click="form[field.key] = form[field.key] === preset ? '' : preset"
-                >
-                  {{ preset }}
-                </button>
-              </div>
-            </template>
-          </template>
           <input
             v-else-if="field.type === 'number'"
             v-model.number="form[field.key]"
@@ -102,7 +82,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
-import TagInput from '@/components/TagInput.vue'
+import Combobox from '@/components/Combobox.vue'
 import type { CollectionField } from '@/types'
 
 const props = withDefaults(
@@ -122,6 +102,17 @@ const emit = defineEmits<{
   (event: 'save', value: Record<string, any>): void
 }>()
 
+/** select 字段的备选项：优先 options（带真实值），否则用 presets 文本构造 */
+function selectOptions(field: CollectionField): Array<string | { value: string; label: string }> {
+  if (field.options?.length) return field.options
+  return (field.presets || []).map((p) => ({ value: String(p), label: String(p) }))
+}
+
+/** tags 字段的备选项：presets 文本作为可选项，同时允许自由输入新值 */
+function tagsOptions(field: CollectionField): Array<string | { value: string; label: string }> {
+  return (field.presets || []).map((p) => ({ value: String(p), label: String(p) }))
+}
+
 const form = reactive<Record<string, any>>({})
 const errors = reactive<Record<string, string>>({})
 const localError = ref('')
@@ -133,7 +124,7 @@ watch(
     for (const field of props.fields) {
       const raw = props.value?.[field.key]
       if (field.type === 'tags') {
-        form[field.key] = Array.isArray(raw) ? raw.map((item) => String(item)) : []
+        form[field.key] = Array.isArray(raw) ? raw.map((item: any) => String(item)) : []
       } else if (field.type === 'number') {
         form[field.key] = typeof raw === 'number' && Number.isFinite(raw) ? raw : ''
       } else {
@@ -191,7 +182,7 @@ function submit(): void {
     const value = form[field.key]
     if (field.type === 'tags') {
       payload[field.key] = (Array.isArray(value) ? value : [])
-        .map((item) => String(item).trim())
+        .map((item: any) => String(item).trim())
         .filter(Boolean)
     } else if (field.type === 'number') {
       payload[field.key] = typeof value === 'number' ? value : undefined
@@ -207,19 +198,19 @@ function submit(): void {
 .collect-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .collect-form__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 14px;
+  gap: 14px 16px;
 }
 
 .collect-form__field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
 }
 
@@ -231,49 +222,55 @@ function submit(): void {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-2);
+  letter-spacing: 0.01em;
 }
 
 .collect-form__label i {
-  margin-left: 2px;
+  margin-left: 3px;
   font-style: normal;
   color: var(--color-danger);
 }
 
-.collect-form__presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+/* 原生文本/数字输入与 Combobox 外观对齐：统一圆角、聚焦高亮 */
+.collect-form .input {
+  width: 100%;
+  height: 36px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md, 8px);
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.collect-form__pill {
-  height: 26px;
-  padding: 0 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-soft);
-  color: var(--color-text-2);
-  font-size: 13px;
-  font-family: inherit;
-  white-space: nowrap;
+.collect-form .input::placeholder {
+  color: var(--color-text-3);
 }
 
-.collect-form__pill:hover {
-  color: var(--color-brand);
+.collect-form .input:hover {
+  border-color: var(--color-line-strong, #c7ced6);
 }
 
-.collect-form__pill.is-active {
-  border-color: var(--color-brand);
-  background: rgba(13, 148, 136, 0.1);
-  color: var(--color-brand);
-  font-weight: 600;
+.collect-form .input:focus {
+  border-color: var(--color-brand, #0d9488);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+}
+
+.collect-form__area {
+  height: auto;
+  padding: 9px 11px;
+  line-height: 1.6;
+  resize: vertical;
+  min-height: 64px;
 }
 
 .collect-form__hint {
   font-size: 12px;
   color: var(--color-text-3);
+  line-height: 1.5;
 }
 
 .collect-form__error {

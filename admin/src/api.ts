@@ -61,6 +61,32 @@ export function isMissingEndpoint(error: unknown): boolean {
   return error instanceof ApiError && error.endpointMissing
 }
 
+/** 提交前统一去掉字符串首尾空白；口令/令牌/密钥/正文等敏感字段保留原样。 */
+const NO_TRIM_KEYS = new Set([
+  'password', 'refresh_token', 'token', 'signature', 'api_key', 'secret', 'content',
+])
+
+function trimPayload(value: unknown, key = ''): unknown {
+  if (typeof value === 'string') return NO_TRIM_KEYS.has(key) ? value : value.trim()
+  if (Array.isArray(value)) return value.map((item) => trimPayload(item, key))
+  if (value && typeof value === 'object') {
+    const result: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      result[k] = trimPayload(v, k)
+    }
+    return result
+  }
+  return value
+}
+
+function trimFormData(form: FormData): FormData {
+  const result = new FormData()
+  for (const [key, value] of form.entries()) {
+    result.append(key, typeof value === 'string' && !NO_TRIM_KEYS.has(key) ? value.trim() : value)
+  }
+  return result
+}
+
 function buildQuery(query?: Record<string, unknown>): string {
   if (!query) return ''
   const params = new URLSearchParams()
@@ -185,10 +211,10 @@ async function rawRequest(path: string, options: RequestOptions = {}): Promise<R
   let body: BodyInit | undefined
   if (options.body !== undefined && method !== 'GET') {
     if (options.body instanceof FormData) {
-      body = options.body
+      body = trimFormData(options.body)
     } else {
       headers['Content-Type'] = 'application/json'
-      body = JSON.stringify(options.body)
+      body = JSON.stringify(trimPayload(options.body))
     }
   }
 
@@ -390,6 +416,21 @@ export const api = {
   },
   deleteUser(id: number) {
     return request<any>(`/v1/admin/users/${id}`, { method: 'DELETE' })
+  },
+  presets(query: Record<string, unknown>) {
+    return request<any>('/v1/admin/presets', { query })
+  },
+  createPreset(payload: Record<string, unknown>) {
+    return request<any>('/v1/admin/presets', { method: 'POST', body: payload })
+  },
+  updatePreset(id: number, payload: Record<string, unknown>) {
+    return request<any>(`/v1/admin/presets/${id}`, { method: 'PUT', body: payload })
+  },
+  deletePreset(id: number) {
+    return request<any>(`/v1/admin/presets/${id}`, { method: 'DELETE' })
+  },
+  syncPresetSeeds() {
+    return request<any>('/v1/admin/presets/sync-seeds', { method: 'POST', body: {} })
   },
   modelConfigs() {
     return request<any>('/v1/admin/model-configs')

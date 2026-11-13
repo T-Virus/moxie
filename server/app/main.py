@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
+from urllib.parse import quote_plus, unquote_plus
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import func, select
 
 from .api import (
@@ -28,20 +30,22 @@ from .api import (
     license,
     notifications,
     payments,
+    presets,
     rankings,
     tasks,
     uploads,
 )
 from .config import Settings
 from .db import Database
+from .deps import client_ip
 from .errors import install_exception_handlers
 from .logging_setup import configure_logging, new_request_id, request_id_ctx, set_trace_id
-from .metrics import render as render_metrics
+from .metrics import increment, render as render_metrics
 from .models import AgentRun, Task
 from .payload_middleware import PayloadCryptoMiddleware
 from .redis_client import RateLimiter, build_redis
 from .security import LicenseSigner
-from .seed import ensure_credit_packs, ensure_plans
+from .seed import ensure_credit_packs, ensure_plans, ensure_presets
 from .services.payload_crypto import PayloadCrypto
 from .services.sentry import init_sentry
 
@@ -121,6 +125,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with db.session() as session:
             ensure_plans(session)
             ensure_credit_packs(session, settings.credit_pack_validity_days)
+            ensure_presets(session)
 
         redis_client, backend = build_redis(settings)
         if backend != "redis":
@@ -215,6 +220,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     install_exception_handlers(app)
 
+    # 全局请求体大小限制：防止超大 body 写入造成资源耗尽 / 非法参数注入。
+    # 仅按 Content-Length 头判断（流式分块无该头时交由后续校验），默认 4MB。
+    MAX_REQUEST_BODY_BYTES = int(os.environ.get("MOXIE_MAX_BODY_BYTES", 4 * 1024 * 1024))
+
+    @app.middleware("http")
+    async def limit_body_size(request: Request, call_next):
+        raw = request.headers.get("content-length")
+        if raw and raw.isdigit() and int(raw) > MAX_REQUEST_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"error": "payload_too_large", "message": "请求体超过大小限制"},
+            )
+        # 无 Content-Length（如 Transfer-Encoding: chunked）时 Starlette 不会预读，
+        # 攻击者可借此绕过上面的长度判断、持续发送超大 body 耗尽内存。这里包装 receive，
+        # 累计读取字节，超过上限立即中断。
+        if raw and raw.isdigit():
+            return await call_next(request)
+        max_bytes = MAX_REQUEST_BODY_BYTES
+        received = 0
+        original = request._receive
+
+        async def receive_limited():
+            nonlocal received
+            message = await original()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > max_bytes:
+                    raise HTTPException(status_code=413, detail="payload_too_large")
+            return message
+
+        request._receive = receive_limited
+        return await call_next(request)
+
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         request_id = new_request_id(request.headers.get("x-request-id"))
@@ -242,6 +280,100 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request_id_ctx.reset(token)
             set_trace_id("-")
 
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        resp = await call_next(request)
+        # 传输 / UI 边界：统一安全响应头（同源托管前端时同样生效）
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        resp.headers.setdefault(
+            "Content-Security-Policy",
+            "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        )
+        resp.headers.setdefault(
+            "Permissions-Policy",
+            "geolocation=(), camera=(), microphone=(), payment=()",
+        )
+        # HSTS 仅在真实 HTTPS 下下发，避免本地 HTTP 开发被浏览器缓存导致无法访问
+        if request.url.scheme == "https":
+            resp.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return resp
+
+    # —— 统一 Query 参数 trim：在 URL 编码层裁剪首尾空白，覆盖所有 handler 的 Query(...)。
+    # 签名 / token 类参数不参与裁剪（其值可能是 Base64，以 '+' 或空格编码结尾时裁剪会破坏签名）。
+    _NO_TRIM_QUERY_KEYS = {b"sig", b"signature", b"token", b"key", b"code", b"expires"}
+
+    def _trim_query_value(value: bytes) -> bytes:
+        """解码后 strip 首尾空白（兼容 %20 与 + 两种空格编码）。
+
+        没有首尾空白时原样返回原始字节，避免无谓地改变编码形式而破坏
+        基于原始 query string 的校验逻辑。
+        """
+        try:
+            decoded = unquote_plus(value.decode("ascii"))
+        except UnicodeDecodeError:
+            return value
+        stripped = decoded.strip()
+        if stripped == decoded:
+            return value
+        return quote_plus(stripped, safe="").encode("ascii")
+
+    @app.middleware("http")
+    async def trim_query_params(request: Request, call_next):
+        raw = request.scope.get("query_string", b"")
+        if raw:
+            parts = []
+            for pair in raw.split(b"&"):
+                name, sep, value = pair.partition(b"=")
+                if sep and name not in _NO_TRIM_QUERY_KEYS:
+                    parts.append(name + b"=" + _trim_query_value(value))
+                else:
+                    parts.append(pair)
+            cleaned = b"&".join(parts)
+            if cleaned != raw:
+                request.scope["query_string"] = cleaned
+                if hasattr(request, "_query_params"):
+                    del request._query_params
+        return await call_next(request)
+
+    # —— 全局限流兜底：防止单 IP 高频刷接口耗尽资源（DoS）。
+    # 认证类接口用更严格阈值；handler 内的业务级限流（登录/注册/上传/网关）仍然保留。
+    # 生产环境应由反向代理覆盖 X-Forwarded-For，客户端自带的该头不可信。
+    _RL_EXEMPT_PATHS = {
+        "/healthz", "/readyz", "/metrics", "/", "/docs", "/openapi.json", "/redoc", "/favicon.ico",
+    }
+
+    @app.middleware("http")
+    async def global_rate_limit(request: Request, call_next):
+        cfg = request.app.state.settings
+        if not cfg.rate_limit_enabled:
+            return await call_next(request)
+        path = request.url.path
+        if path in _RL_EXEMPT_PATHS or path.startswith("/docs") or path.startswith("/static"):
+            return await call_next(request)
+        strict = path.startswith(f"{cfg.api_prefix}/auth/")
+        limit = cfg.auth_rate_limit_per_minute if strict else cfg.global_rate_limit_per_minute
+        scope = "auth_global" if strict else "global"
+        limiter: RateLimiter = request.app.state.limiter
+        allowed, retry_after = limiter.check(f"{scope}:{client_ip(request) or '-'}", limit, 60)
+        if not allowed:
+            increment("moxie_rate_limited_total", scope=scope)
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": {
+                        "code": "rate_limited",
+                        "message": "请求过于频繁，请稍后再试",
+                        "request_id": getattr(request.state, "request_id", "") or "-",
+                    }
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
+        return await call_next(request)
+
     prefix = settings.api_prefix
     app.include_router(admin.health_router)
     app.include_router(crypto.router, prefix=prefix)
@@ -250,6 +382,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(license.router, prefix=prefix)
     app.include_router(tasks.router, prefix=prefix)
     app.include_router(agent_runs.router, prefix=prefix)
+    app.include_router(presets.router, prefix=prefix)
     app.include_router(rankings.router, prefix=prefix)
     app.include_router(uploads.router, prefix=prefix)
     app.include_router(artifacts.router, prefix=prefix)

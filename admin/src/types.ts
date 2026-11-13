@@ -174,6 +174,9 @@ export interface TaskRow {
   id: string
   account_id?: number | null
   type?: string
+  /** 任务来源：task=拆解/改编任务，agent_run=用户在创作页触发的写作运行 */
+  source?: 'task' | 'agent_run'
+  title?: string | null
   status: string
   progress?: number
   book?: string | null

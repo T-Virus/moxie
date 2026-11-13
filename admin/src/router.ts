@@ -73,6 +73,11 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '离线安装包', permission: 'offline_package:read' },
       },
       {
+        path: 'presets',
+        component: () => import('./views/Presets.vue'),
+        meta: { title: '预设值维护', permission: 'presets:read' },
+      },
+      {
         path: 'forbidden',
         component: () => import('./views/Forbidden.vue'),
         meta: { title: '权限不足', public: true },

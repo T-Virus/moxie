@@ -256,6 +256,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { usePresets } from '@/composables/usePresets'
 import AppDialog from '@/components/AppDialog.vue'
 import CollectionDialog from '@/components/CollectionDialog.vue'
 import type { CharacterContent, CollectionField, RunDetail } from '@/types'
@@ -272,20 +273,63 @@ const CHARACTER_FIELDS: CollectionField[] = [
     key: 'gender',
     label: '性别',
     type: 'select',
-    presets: ['男', '女', '其他'],
+    presetType: 'character_gender',
+    presets: ['男', '女', '双性', '无性别', '非二元', '变性', '其他', '未知'],
     placeholder: '选择或输入',
   },
   { key: 'age', label: '年龄', type: 'number', min: 0 },
-  { key: 'race', label: '种族', placeholder: '如 人族 / 妖族' },
+  {
+    key: 'race',
+    label: '种族',
+    type: 'select',
+    presetType: 'character_race',
+    presets: [
+      '人族',
+      '妖族',
+      '魔族',
+      '灵族',
+      '神族',
+      '仙族',
+      '兽族',
+      '鬼族',
+      '龙族',
+      '巫族',
+      '机械族',
+      '异族',
+      '混血',
+      '半妖',
+      '半人',
+      '精灵',
+      '矮人',
+      '血族',
+      '鲛人',
+      '巨人',
+      '树人',
+      '翼族',
+      '修罗',
+      '佛门',
+      '天族',
+      '未知',
+    ],
+    placeholder: '选择或输入，如 人族 / 妖族',
+  },
   { key: 'identity', label: '身份背景', placeholder: '如 照夜司巡夜人' },
   {
     key: 'type',
     label: '剧情功能',
     type: 'select',
-    presets: ['主角', '配角', '反派', '群像', '工具人'],
+    presetType: 'character_role',
+    presets: ['主角', '男主', '女主', '配角', '男配', '女配', '反派', '正派', '群像', '工具人', '导师', '挚友', '宿敌', '卧底', '旁观者', '路人'],
     placeholder: '角色在剧情中的功能',
   },
-  { key: 'camp', label: '阵营', placeholder: '如 正道 / 中立' },
+  {
+    key: 'camp',
+    label: '阵营',
+    type: 'select',
+    presetType: 'character_camp',
+    presets: ['正道', '魔道', '邪道', '正派', '反派', '中立', '亦正亦邪', '隐世', '散修', '朝廷', '江湖', '妖界', '仙门', '佛门', '混沌', '蛮族', '外域', '未知'],
+    placeholder: '选择或输入，如 正道 / 中立',
+  },
   { key: 'faction', label: '所属势力', placeholder: '势力名称' },
   { key: 'first_chapter', label: '首次登场章号', type: 'number', min: 1 },
   { key: 'personality', label: '性格', type: 'textarea', rows: 2 },
@@ -312,12 +356,22 @@ const canEdit = computed(
 const factionOptions = computed(() =>
   (props.run.factions || []).map((item) => item.name).filter(Boolean),
 )
+const { presetValues } = usePresets(['character_gender', 'character_race', 'character_role', 'character_camp'])
+const characterPresetTypes: Record<string, string> = {
+  gender: 'character_gender',
+  race: 'character_race',
+  type: 'character_role',
+  camp: 'character_camp',
+}
 const characterFields = computed<CollectionField[]>(() =>
-  CHARACTER_FIELDS.map((field) =>
-    field.key === 'faction'
-      ? { ...field, type: 'select', presets: factionOptions.value }
-      : field,
-  ),
+  CHARACTER_FIELDS.map((field) => {
+    if (field.key === 'faction') {
+      return { ...field, type: 'select', presets: factionOptions.value, allowCreate: false, placeholder: '只能从已有势力中选择' }
+    }
+    const t = characterPresetTypes[field.key]
+    if (t) return { ...field, presets: presetValues(t, (field.presets as string[]) || []) }
+    return field
+  }),
 )
 const dialogOpen = ref(false)
 const editingIndex = ref(-1)

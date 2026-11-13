@@ -52,11 +52,11 @@ export function isNetworkError(err: unknown): boolean {
 }
 
 export function getAccessToken(): string {
-  return localStorage.getItem(ACCESS_KEY) || ''
+  return sessionStorage.getItem(ACCESS_KEY) || ''
 }
 
 export function getRefreshToken(): string {
-  return localStorage.getItem(REFRESH_KEY) || ''
+  return sessionStorage.getItem(REFRESH_KEY) || ''
 }
 
 export function hasSession(): boolean {
@@ -64,19 +64,19 @@ export function hasSession(): boolean {
 }
 
 export function saveSession(auth: AuthResponse): void {
-  localStorage.setItem(ACCESS_KEY, auth.access_token)
-  localStorage.setItem(REFRESH_KEY, auth.refresh_token)
-  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(auth.account))
+  sessionStorage.setItem(ACCESS_KEY, auth.access_token)
+  sessionStorage.setItem(REFRESH_KEY, auth.refresh_token)
+  sessionStorage.setItem(ACCOUNT_KEY, JSON.stringify(auth.account))
 }
 
 export function clearSession(): void {
-  localStorage.removeItem(ACCESS_KEY)
-  localStorage.removeItem(REFRESH_KEY)
-  localStorage.removeItem(ACCOUNT_KEY)
+  sessionStorage.removeItem(ACCESS_KEY)
+  sessionStorage.removeItem(REFRESH_KEY)
+  sessionStorage.removeItem(ACCOUNT_KEY)
 }
 
 export function readAccount() {
-  const raw = localStorage.getItem(ACCOUNT_KEY)
+  const raw = sessionStorage.getItem(ACCOUNT_KEY)
   if (!raw) return null
   try {
     return JSON.parse(raw) as AuthResponse['account']
@@ -195,6 +195,33 @@ export interface RequestOptions {
   noRetry?: boolean
 }
 
+/** 提交前统一去掉字符串首尾空白；口令/令牌/密钥/正文等敏感字段保留原样。 */
+const NO_TRIM_KEYS = new Set([
+  'password', 'refresh_token', 'token', 'signature', 'api_key', 'secret', 'content',
+])
+
+function trimPayload(value: unknown, key = ''): unknown {
+  if (typeof value === 'string') return NO_TRIM_KEYS.has(key) ? value : value.trim()
+  if (Array.isArray(value)) return value.map((item) => trimPayload(item, key))
+  if (value && typeof value === 'object') {
+    const result: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      result[k] = trimPayload(v, k)
+    }
+    return result
+  }
+  return value
+}
+
+function trimJsonBody(body: BodyInit | null | undefined): BodyInit | null | undefined {
+  if (typeof body !== 'string') return body
+  try {
+    return JSON.stringify(trimPayload(JSON.parse(body)))
+  } catch {
+    return body
+  }
+}
+
 export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`
   const method = (opts.method || 'GET').toUpperCase()
@@ -205,7 +232,7 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
     headers.set('Content-Type', 'application/json')
   }
 
-  let body: BodyInit | null | undefined = opts.body
+  let body: BodyInit | null | undefined = trimJsonBody(opts.body)
   let session: PayloadSession | null = null
   const pathQuery = pathWithQuery(url)
   if (payloadEncryptionApplies(url, body)) {

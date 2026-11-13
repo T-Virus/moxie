@@ -92,10 +92,11 @@ async def chat_completions(
 ):
     settings = request.app.state.settings
     limiter = request.app.state.limiter
-    if not limiter.allow(
+    allowed, retry_after = limiter.check(
         f"gateway:{auth.account.id}", settings.gateway_rate_limit_per_minute, 60
-    ):
-        raise ApiError(429, "rate_limited", "模型调用过于频繁，请稍后再试")
+    )
+    if not allowed:
+        raise ApiError(429, "rate_limited", "模型调用过于频繁，请稍后再试", headers={"Retry-After": str(retry_after)})
 
     byok_key = (request.headers.get("x-byok-key") or "").strip()
 

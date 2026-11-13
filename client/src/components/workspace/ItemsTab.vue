@@ -98,7 +98,6 @@
             <span v-if="item.grade" class="item-card__grade">{{ item.grade }}</span>
             <span v-if="item.category" class="item-card__cat">{{ item.category }}</span>
           </div>
-          <span v-if="chapterText(item.first_chapter)" class="item-card__chapter">{{ chapterText(item.first_chapter) }}</span>
           <div class="item-card__actions">
             <button
               type="button"
@@ -217,6 +216,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { usePresets } from '@/composables/usePresets'
 import AppDialog from '@/components/AppDialog.vue'
 import CollectionDialog from '@/components/CollectionDialog.vue'
 import type { CollectionField, ItemContent, RunDetail } from '@/types'
@@ -232,14 +232,16 @@ const ITEM_FIELDS: CollectionField[] = [
     key: 'category',
     label: '类别',
     type: 'select',
-    presets: ['法宝', '功法', '丹药', '材料', '信物', '其他'],
+    presetType: 'item_category',
+    presets: ['法宝', '法器', '功法', '丹药', '材料', '信物', '武器', '防具', '符箓', '阵法', '灵宠', '宝物', '秘籍', '灵草', '矿石', '机关', '毒药', '药方', '神兵', '其他'],
     placeholder: '选择或输入',
   },
   {
     key: 'grade',
     label: '品阶',
     type: 'select',
-    presets: ['凡品', '灵品', '玄品', '地品', '天品', '仙品'],
+    presetType: 'item_grade',
+    presets: ['凡品', '黄阶', '玄阶', '地阶', '天阶', '灵品', '玄品', '地品', '天品', '仙品', '神品', '圣品', '道器', '王品', '帝品', '超品', '禁忌', '未知'],
     placeholder: '选择或输入',
   },
   { key: 'holder', label: '持有者', placeholder: '当前持有者' },
@@ -264,14 +266,21 @@ const characterOptions = computed(() =>
 const factionOptions = computed(() =>
   (props.run.factions || []).map((item) => item.name).filter(Boolean),
 )
+const { presetValues } = usePresets(['item_category', 'item_grade'])
+const itemPresetTypes: Record<string, string> = {
+  category: 'item_category',
+  grade: 'item_grade',
+}
 const itemFields = computed<CollectionField[]>(() =>
   ITEM_FIELDS.map((field) => {
     if (field.key === 'holder') {
-      return { ...field, type: 'select', presets: characterOptions.value }
+      return { ...field, type: 'select', presets: characterOptions.value, allowCreate: false, placeholder: '只能从已有角色中选择' }
     }
     if (field.key === 'faction') {
-      return { ...field, type: 'select', presets: factionOptions.value }
+      return { ...field, type: 'select', presets: factionOptions.value, allowCreate: false, placeholder: '只能从已有势力中选择' }
     }
+    const t = itemPresetTypes[field.key]
+    if (t) return { ...field, presets: presetValues(t, (field.presets as string[]) || []) }
     return field
   }),
 )

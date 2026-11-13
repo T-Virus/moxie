@@ -155,3 +155,30 @@ class LicenseSigner:
             format=serialization.PublicFormat.Raw,
         )
         return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+# —— 自由 JSON 落库前的清洗：防止超大字符串 / 嵌套结构写入 Text/JSON 列 ——
+FREE_TEXT_MAX = 20000
+FREE_LIST_MAX = 2000
+_FREE_MAX_DEPTH = 8
+
+
+def sanitize_free_json(value: object, _depth: int = 0) -> object:
+    """递归截断自由 JSON 中的字符串与列表，限制嵌套深度，避免非法/超大参数写入。
+
+    仅做长度与结构约束，不做语义校验；返回的新对象用于落库前清洗。
+    """
+    if _depth > _FREE_MAX_DEPTH:
+        return None
+    if isinstance(value, str):
+        return value[:FREE_TEXT_MAX]
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    if isinstance(value, list):
+        return [sanitize_free_json(v, _depth + 1) for v in value[:FREE_LIST_MAX]]
+    if isinstance(value, dict):
+        return {
+            str(k)[:256]: sanitize_free_json(v, _depth + 1)
+            for k, v in list(value.items())[:FREE_LIST_MAX]
+        }
+    return value

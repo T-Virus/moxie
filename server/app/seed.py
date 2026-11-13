@@ -6,7 +6,8 @@ from __future__ import annotations
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from .models import CreditPack, Entitlement, Plan
+from .models import CreditPack, Entitlement, Plan, Preset
+from .preset_data import PRESET_DATA
 
 # Postgres 多进程（uvicorn --workers / 多副本）初始化时用事务级 advisory lock，
 # 避免 check-then-insert 竞态触发 plans_code_key 唯一约束冲突。
@@ -165,7 +166,59 @@ def ensure_plans(session: Session) -> None:
         for stale in current.values():
             session.delete(stale)
 
-    seeded_codes = {spec["code"] for spec in PLAN_SEEDS}
-    for plan in session.scalars(select(Plan).where(Plan.code.notin_(seeded_codes))).all():
-        plan.active = False
+        seeded_codes = {spec["code"] for spec in PLAN_SEEDS}
+        for plan in session.scalars(select(Plan).where(Plan.code.notin_(seeded_codes))).all():
+            plan.active = False
+        session.commit()
+
+
+def seed_presets(session: Session, *, only_if_empty: bool = False) -> dict:
+    """把 ``preset_data.PRESET_DATA`` 的系统预设写入 presets 表。
+
+    ``only_if_empty=True``：仅在尚无任何系统级预设时灌入（启动首次初始化）。
+    之后预设完全由管理端维护，避免管理员的增删改在下一次重启时被种子
+    覆盖或"复活"。
+
+    默认 ``False``：按 ``(type, value)`` 只补缺失项，绝不覆盖已有项、也不删除，
+    供管理端「同步内置预设」手动调用（例如程序升级后新增了预设类型）。
+
+    用户私有自定义预设（account_id 非 NULL）不参与同步，始终保留。
+    """
+    _acquire_seed_lock(session)
+    system_rows = session.scalars(
+        select(Preset).where(Preset.account_id.is_(None))
+    ).all()
+    existing = {(row.type, row.value) for row in system_rows}
+
+    total = sum(len(items) for items in PRESET_DATA.values())
+    if only_if_empty and existing:
+        return {"inserted": 0, "skipped": total}
+
+    inserted = 0
+    skipped = 0
+    for ptype, items in PRESET_DATA.items():
+        for idx, spec in enumerate(items):
+            value = spec["value"]
+            if (ptype, value) in existing:
+                skipped += 1
+                continue
+            session.add(
+                Preset(
+                    type=ptype,
+                    value=value,
+                    label=spec.get("label", value),
+                    audience=spec.get("audience", "all") or "all",
+                    sort=idx,
+                    builtin=True,
+                    account_id=None,
+                )
+            )
+            existing.add((ptype, value))
+            inserted += 1
     session.commit()
+    return {"inserted": inserted, "skipped": skipped}
+
+
+def ensure_presets(session: Session) -> None:
+    """启动钩子：仅在预设表为空时初始化，此后交由后台管理端维护。"""
+    seed_presets(session, only_if_empty=True)

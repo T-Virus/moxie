@@ -32,11 +32,12 @@ def upload_source(
 ):
     settings = request.app.state.settings
     limiter = request.app.state.limiter
-    if not limiter.allow(
+    allowed, retry_after = limiter.check(
         f"upload:{auth.account.id}", settings.upload_rate_limit_per_minute, 60
-    ):
+    )
+    if not allowed:
         increment("moxie_upload_rejected_total", reason="rate_limited")
-        raise ApiError(429, "rate_limited", "上传过于频繁，请稍后再试")
+        raise ApiError(429, "rate_limited", "上传过于频繁，请稍后再试", headers={"Retry-After": str(retry_after)})
 
     if not file.filename:
         increment("moxie_upload_rejected_total", reason="missing_filename")

@@ -631,6 +631,10 @@ export interface CollectionField {
   presets?: string[]
   /** select 类型的备选项（带真实值与展示文案），优于 presets 文本 */
   options?: { value: string; label: string }[]
+  /** select 是否允许输入列表外的值（默认 true；设为 false 则只能从已有选项选择） */
+  allowCreate?: boolean
+  /** 预设类型名：传入后，用户自定义输入会自动持久化为本人私有预设（POST /v1/presets） */
+  presetType?: string
   full?: boolean
   rows?: number
   min?: number

@@ -351,6 +351,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { usePresets } from '@/composables/usePresets'
 import AppDialog from '@/components/AppDialog.vue'
 import CollectionDialog from '@/components/CollectionDialog.vue'
 import type {
@@ -431,11 +432,16 @@ const volumeOptions = computed<{ value: string; label: string }[]>(() => {
 })
 
 /** 章节里的角色/势力/道具从已有资料中选择，减少手输不一致 */
+const { presetValues } = usePresets(['chapter_status', 'chapter_hook_type'])
 const chapterFields = computed<CollectionField[]>(() => {
   const base = CHAPTER_FIELDS.map((field) => {
-    if (field.key === 'roles') return { ...field, presets: characterOptions.value }
-    if (field.key === 'factions') return { ...field, presets: factionOptions.value }
-    if (field.key === 'items') return { ...field, presets: itemOptions.value }
+    if (field.key === 'roles') return { ...field, presets: characterOptions.value, allowCreate: false }
+    if (field.key === 'factions') return { ...field, presets: factionOptions.value, allowCreate: false }
+    if (field.key === 'items') return { ...field, presets: itemOptions.value, allowCreate: false }
+    if (field.key === 'chapter_status' || field.key === 'hook_type') {
+      const t = field.key === 'chapter_status' ? 'chapter_status' : 'chapter_hook_type'
+      return { ...field, type: 'select', presets: presetValues(t, (field.presets as string[]) || []) } as CollectionField
+    }
     return field
   })
   const volumeField: CollectionField = {
@@ -443,6 +449,7 @@ const chapterFields = computed<CollectionField[]>(() => {
     label: '归属卷',
     type: 'select',
     options: volumeOptions.value,
+    allowCreate: false,
     hint: '保存时按连续章号区间调整该章所属卷',
   }
   return [...base, volumeField]

@@ -56,20 +56,68 @@ def build_redis(settings: Settings):
 
 
 class RateLimiter:
+    """固定窗口计数器，用于接口限流与登录失败锁定。
+
+    key 由调用方给出（如 ``login:1.2.3.4``），内部统一加 ``rl:`` 前缀。
+    TTL 只在首次计数时设置：若每次请求都刷新 EXPIRE，持续请求会让窗口
+    无限延长、计数永不归零，反而造成"永久封禁"。缓存故障时 fail-open，
+    避免 Redis 故障被放大成全站不可用。
+    """
+
     def __init__(self, client):
         self.client = client
 
-    def allow(self, key: str, limit: int, window_seconds: int) -> bool:
-        if limit <= 0:
-            return True
+    def _incr(self, key: str, window_seconds: int) -> int:
         redis_key = f"rl:{key}"
+        pipe = self.client.pipeline()
+        pipe.incr(redis_key)
+        pipe.ttl(redis_key)
+        raw_count, raw_ttl = pipe.execute()
+        count = int(raw_count)
+        if int(raw_ttl if raw_ttl is not None else -1) < 0:
+            self.client.expire(redis_key, window_seconds)
+        return count
+
+    def _ttl(self, key: str) -> int:
+        try:
+            return max(int(self.client.ttl(f"rl:{key}") or 0), 0)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def check(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
+        """计数一次，返回 ``(是否允许, 超限时建议重试秒数)``。
+
+        ``limit <= 0`` 表示关闭该维度限流；Redis 异常时默认放行。
+        """
+        if limit <= 0:
+            return True, 0
+        try:
+            count = self._incr(key, window_seconds)
+            if count <= limit:
+                return True, 0
+            return False, max(self._ttl(key), 1)
+        except Exception:  # noqa: BLE001
+            logger.warning("rate limiter unavailable, allow by default")
+            return True, 0
+
+    def allow(self, key: str, limit: int, window_seconds: int) -> bool:
+        """兼容既有调用点：只关心是否允许。"""
+        return self.check(key, limit, window_seconds)[0]
+
+    def status(self, key: str) -> tuple[int, int]:
+        """只读查看 ``(当前计数, 剩余秒数)``，不增加计数。用于登录失败锁定判断。"""
         try:
             pipe = self.client.pipeline()
-            pipe.incr(redis_key)
-            pipe.expire(redis_key, window_seconds)
-            count, _ = pipe.execute()
-            return int(count) <= limit
+            pipe.get(f"rl:{key}")
+            pipe.ttl(f"rl:{key}")
+            raw_count, raw_ttl = pipe.execute()
+            return int(raw_count or 0), max(int(raw_ttl or 0), 0)
         except Exception:  # noqa: BLE001
-            # 缓存故障不阻断主流程，但会在指标上体现日志
-            logger.warning("rate limiter unavailable, allow by default")
-            return True
+            return 0, 0
+
+    def reset(self, key: str) -> None:
+        """清除计数（登录成功等场景）。"""
+        try:
+            self.client.delete(f"rl:{key}")
+        except Exception:  # noqa: BLE001
+            logger.warning("rate limiter reset failed")

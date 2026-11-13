@@ -129,6 +129,7 @@ import type {
   CreateRunPayload,
 } from '@/types'
 import { fetchGenres, createRun, uploadSource } from '@/services/agentApi'
+import { GENRE_PRESETS, mergeGenres } from '@/utils/genrePresets'
 import { ApiError } from '@/services/http'
 import { session } from '@/stores/session'
 
@@ -336,7 +337,7 @@ onMounted(async () => {
   }
   try {
     const data = await fetchGenres()
-    const items = data.items.slice()
+    const items = mergeGenres(data.items, Boolean(data.degraded))
     if (!items.some((item) => item.name === DEFAULT_GENRE_NAME)) {
       items.push({
         id: DEFAULT_GENRE_ID,
@@ -351,7 +352,8 @@ onMounted(async () => {
     customAllowed.value = data.custom_allowed
     if (data.degraded) showToast(data.degraded)
   } catch (err) {
-    genres.value = []
+    // 接口不可用时用内置题材库兜底（拷贝一份，避免后续 push 污染常量）
+    genres.value = GENRE_PRESETS.map((item) => ({ ...item }))
     showToast(err instanceof ApiError ? err.message : '题材列表加载失败')
   }
 })

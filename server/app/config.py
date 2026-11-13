@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     app_name: str = "moxie-server"
     env: str = "dev"
     api_prefix: str = "/v1"
+    # 是否信任反向代理注入的 X-Forwarded-For 作为客户端真实 IP。
+    # 默认 False：直接取直连对端 IP，防止客户端伪造 XFF 绕过基于 IP 的限流/失败锁定。
+    # 仅在确有可信反向代理（且代理会重写/丢弃客户端原始 XFF）时显式设为 True。
+    trust_proxy: bool = False
 
     # 管理端跨域白名单（逗号分隔）；不允许 "*"，credentials 仅在明确来源时开启
     cors_allow_origins: str = "http://127.0.0.1:5180,http://localhost:5180"
@@ -129,6 +133,14 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     register_rate_limit_per_minute: int = 10
     login_rate_limit_per_minute: int = 20
+    # 全局限流兜底：每 IP 每分钟请求数上限，防止刷接口耗尽资源（DoS）
+    rate_limit_enabled: bool = True
+    global_rate_limit_per_minute: int = 600
+    # 认证类接口（注册/登录/刷新/验证等）单独用更严格的阈值
+    auth_rate_limit_per_minute: int = 60
+    # 登录失败锁定：窗口内连续失败达到上限后拒绝，防止密码暴力破解
+    login_failure_limit: int = 5
+    login_failure_window_seconds: int = 900
     usage_alert_multiplier: float = 3.0
 
 

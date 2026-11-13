@@ -180,23 +180,22 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
   align-items: center;
   gap: 6px;
   height: 36px;
-  padding: 0 14px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--panel-line);
-  background: var(--panel-chip);
-  color: #cfd8e3;
-  font-size: var(--text-sm);
-  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  padding: 0 12px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-line, #e2e6ec);
+  background: #fff;
+  color: var(--color-text-2, #2b313a);
+  font-size: 14px;
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 
 .genre__trigger:hover {
-  background: var(--panel-chip-hover);
+  border-color: var(--color-line-strong, #c7ced6);
 }
 
 .genre__trigger.is-active {
-  background: #fff;
-  border-color: #fff;
-  color: #0b1220;
+  border-color: var(--color-brand, #0d9488);
+  color: var(--color-text, #2b313a);
 }
 
 .genre__label {
@@ -254,9 +253,10 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
 
 .genre__caption {
   flex: none;
+  display: inline-block;
   font-size: var(--text-xs);
   color: var(--color-text-3);
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
 
 .genre__list {
@@ -327,7 +327,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
 .genre__custom {
   flex: none;
   border-top: 1px solid var(--color-line);
-  padding-top: 10px;
+  padding: 5px 0 10px 0;
 }
 
 .genre__custom-row {
