@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
@@ -6,14 +6,28 @@ import { fileURLToPath, URL } from 'node:url'
 // 生产环境若与管理端不同域，请把 VITE_API_BASE 指向服务端，并由服务端配置 CORS。
 const target = process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000'
 const proxy = {
-  '/v1': { target, changeOrigin: true },
+  // timeout/proxyTimeout 置 0：离线安装包可达数百 MB，不能按默认空闲超时掐断
+  '/v1': { target, changeOrigin: true, timeout: 0, proxyTimeout: 0 },
   '/healthz': { target, changeOrigin: true },
   '/readyz': { target, changeOrigin: true },
   '/metrics': { target, changeOrigin: true },
 }
 
+/** Node 18+ 默认 requestTimeout 5 分钟，大安装包上传到一半会被服务端直接关连接 */
+function longUpload(): Plugin {
+  return {
+    name: 'moxie-long-upload',
+    configureServer(server) {
+      if (server.httpServer) server.httpServer.requestTimeout = 0
+    },
+    configurePreviewServer(server) {
+      if (server.httpServer) server.httpServer.requestTimeout = 0
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), longUpload()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

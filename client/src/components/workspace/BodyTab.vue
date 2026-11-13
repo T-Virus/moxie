@@ -105,7 +105,7 @@
           >
             ‹ 上一章
           </button>
-          <span class="reader__stat">总字数：{{ totalWords.toLocaleString('zh-CN') }} 字</span>
+          <span class="reader__stat">本章字数：{{ currentWords.toLocaleString('zh-CN') }} 字</span>
           <button
             type="button"
             class="reader__nav"
@@ -263,11 +263,9 @@ const nextChapter = computed(() =>
     : null,
 )
 
-const totalWords = computed(() =>
-  chapters.value.reduce(
-    (sum, chapter) => sum + (chapter.words || chapter.content?.length || 0),
-    0,
-  ),
+/** 当前章的正文字数（与目录/信息页同口径：概括字数优先，其次正文字符数） */
+const currentWords = computed(
+  () => current.value?.words || current.value?.content?.length || 0,
 )
 
 const fontSize = computed(

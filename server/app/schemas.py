@@ -236,6 +236,37 @@ class AdminUserStatusRequest(BaseModel):
     reason: str = Field(min_length=2, max_length=200)
 
 
+class AdminDeleteByEmailRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+
+
+class AdminModelConfigUpsert(BaseModel):
+    """后台配置某工序模型。api_key 为 None 表示不改动已存 Key；空串表示清空。"""
+    label: str | None = None
+    provider: str = "edgeone"
+    model: str = Field(min_length=1, max_length=128)
+    base_url: str | None = None
+    api_key: str | None = None
+    enabled: bool = True
+
+
+class AdminModelConfigView(BaseModel):
+    step_key: str
+    label: str
+    configured: bool
+    provider: str
+    model: str
+    base_url: str
+    enabled: bool
+    key_set: bool
+    source: str
+    updated_at: str | None = None
+    # 按工序给出的推荐模型（首选/备选/理由），前端据此提示与一键套用
+    recommendation: dict | None = None
+    # 当前生效模型是否已命中推荐
+    recommended_match: bool = False
+
+
 class AdminReasonRequest(BaseModel):
     reason: str = Field(min_length=2, max_length=200)
 

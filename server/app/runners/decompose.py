@@ -18,6 +18,7 @@ from ..db import utcnow
 from ..errors import ApiError
 from ..models import Task, UsageEvent
 from ..prompts import get_prompt_service
+from ..services.model_config import resolve_step_model
 from ..services.model_gateway import complete_sync, parse_json_text
 from ..services.storage import book_slug, task_prefix
 from ..services.tasks import DefaultRunner, RunContext, TaskReschedule
@@ -225,13 +226,15 @@ class DecomposeRunner:
                 if system:
                     messages.append({"role": "system", "content": system})
                 messages.append({"role": "user", "content": rendered})
+                resolved = resolve_step_model(ctx.session, "decompose", settings, api_key=ctx.byok_key or None)
                 result = complete_sync(
                     settings,
                     messages,
-                    model=str(params.get("model") or settings.llm_model),
-                    api_key=ctx.byok_key or settings.llm_api_key,
+                    model=resolved.model,
+                    api_key=resolved.api_key,
                     byok=bool(ctx.byok_key),
                     expect_json=True,
+                    base_url=resolved.base_url or None,
                 )
                 try:
                     part = parse_json_text(result.text)
@@ -356,13 +359,15 @@ class DecomposeRunner:
         ctx.check_cancel()
         try:
             rendered = prompt.build_merge_prompt(parts, summaries, cast)
+            resolved = resolve_step_model(ctx.session, "decompose", settings, api_key=ctx.byok_key or None)
             result = complete_sync(
                 settings,
                 [{"role": "user", "content": rendered}],
-                model=str(params.get("model") or settings.llm_model),
-                api_key=ctx.byok_key or settings.llm_api_key,
+                model=resolved.model,
+                api_key=resolved.api_key,
                 byok=bool(ctx.byok_key),
                 expect_json=True,
+                base_url=resolved.base_url or None,
             )
             merged_model = parse_json_text(result.text)
             merged = dict(local_merged)

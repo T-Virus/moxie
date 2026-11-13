@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..config import Settings
 from ..errors import ApiError
+from .model_config import _get_row, decrypt_key
 
 STYLE_KEYS = ("gold", "white", "ink")
 LAYOUT_KEYS = ("top", "middle", "bottom")
@@ -90,6 +91,23 @@ def _author_of(outline: dict) -> str:
     return _text(outline.get("author") or bible.get("author"))
 
 
+def _resolve_cover_model(session, settings: Settings) -> tuple[str, str, str]:
+    """返回 (model, base_url, api_key) 用于封面 AI 出图。
+
+    优先取后台「封面生成」工序配置，未配置时回退到传统 image_* 环境变量；
+    不套用 default（文本模型）兜底，因为封面是图片模型、网关不同。
+    """
+    if session is not None:
+        row = _get_row(session, "cover")
+        if row is not None and row.enabled:
+            return (
+                row.model or settings.image_model,
+                row.base_url or settings.image_api_base,
+                decrypt_key(row.api_key, settings) or settings.image_api_key,
+            )
+    return (settings.image_model, settings.image_api_base, settings.image_api_key)
+
+
 def _sniff_ext(data: bytes) -> str:
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return "png"
@@ -124,6 +142,7 @@ def generate_cover(
     layout: str = "top",
     width: int | None = None,
     height: int | None = None,
+    session=None,
 ) -> dict:
     """生成封面并写入存储，返回可直接回给前端的元信息。"""
     cover = _cover_module(settings)
@@ -149,19 +168,23 @@ def generate_cover(
     notice = ""
     fallback = False
 
-    if settings.image_api_key and settings.image_model:
+    if session is not None:
+        img_model, img_base, img_key = _resolve_cover_model(session, settings)
+    else:
+        img_model, img_base, img_key = settings.image_model, settings.image_api_base, settings.image_api_key
+    if img_key and img_model:
         try:
             base = cover.fetch_ai_base(
                 en,
                 rw,
                 rh,
-                settings.image_api_key,
-                settings.image_api_base,
-                settings.image_model,
+                img_key,
+                img_base,
+                img_model,
                 timeout=settings.cover_timeout_seconds,
             )
             source = "ai"
-            model_used = settings.image_model
+            model_used = img_model
         except cover.CoverError as exc:
             notice = _text(exc)[:120]
 

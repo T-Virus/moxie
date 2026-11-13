@@ -53,6 +53,10 @@ def encryption_exempt(path: str, method: str) -> bool:
         return True
     if any(pattern.match(path) for pattern in _EXEMPT_PATTERNS):
         return True
+    # 离线安装包上传是 multipart 文件流，无法用 JSON 加密体承载，单独豁免；
+    # 不豁免列表/删除/download 等 JSON 接口，它们仍按常规加解密。
+    if path == "/v1/admin/offline-packages" and method == "POST":
+        return True
     return False
 
 

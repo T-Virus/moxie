@@ -63,6 +63,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '审计日志', permission: 'audit:read' },
       },
       {
+        path: 'model-configs',
+        component: () => import('./views/ModelConfig.vue'),
+        meta: { title: '模型配置', permission: 'model_config:read' },
+      },
+      {
+        path: 'offline-packages',
+        component: () => import('./views/OfflinePackages.vue'),
+        meta: { title: '离线安装包', permission: 'offline_package:read' },
+      },
+      {
         path: 'forbidden',
         component: () => import('./views/Forbidden.vue'),
         meta: { title: '权限不足', public: true },

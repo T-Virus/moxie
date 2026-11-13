@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from typing import Callable
 
 from ..prompts.adapt import PROMPT_VERSION, get_adapt_prompt_service
+from ..services.model_config import resolve_step_model
 from ..services.model_gateway import complete_sync, parse_json_text
 from ..services.storage import task_prefix
 
@@ -110,16 +111,18 @@ def _load_source(ctx, params: dict) -> dict:
 
 class AdaptRunner:
     def _call(self, ctx, service, model: str, prompt: str, usage: list) -> str:
+        resolved = resolve_step_model(ctx.session, "adapt", ctx.settings, api_key=ctx.byok_key or None)
         system = service.system_prompt()
         messages = [{"role": "system", "content": system}] if system else []
         messages.append({"role": "user", "content": prompt})
         result = complete_sync(
             ctx.settings,
             messages,
-            model=model,
-            api_key=ctx.byok_key or ctx.settings.llm_api_key,
+            model=resolved.model,
+            api_key=resolved.api_key,
             byok=bool(ctx.byok_key),
             expect_json=True,
+            base_url=resolved.base_url or None,
         )
         usage.append(result)
         return result.text
@@ -160,7 +163,8 @@ class AdaptRunner:
         prefix = task_prefix(book_slug, ctx.task.id)
         ctx.storage.put_json(f"{prefix}/source.json", data)
 
-        model = str(params.get("model") or settings.llm_model)
+        resolved = resolve_step_model(ctx.session, "adapt", settings, api_key=ctx.byok_key or None)
+        model = resolved.model
         local_mode = bool(params.get("local")) or not (ctx.byok_key or settings.llm_api_key)
         if local_mode:
             return self._run_local(

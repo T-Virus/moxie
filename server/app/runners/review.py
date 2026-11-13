@@ -18,6 +18,7 @@ import logging
 import re
 
 from ..prompts.review import PROMPT_VERSION, get_review_prompt_service
+from ..services.model_config import resolve_step_model
 from ..services.storage import task_prefix
 from .adapt import _record_usage
 
@@ -61,8 +62,9 @@ class ReviewRunner:
             raise ValueError("checks 必须是字符串数组")
         top_n = int(params.get("top_n") or 5)
         advice_scope = str(params.get("advice_scope") or "ai")
-        model = str(params.get("model") or settings.llm_model)
-        api_key = ctx.byok_key or settings.llm_api_key
+        resolved = resolve_step_model(ctx.session, "review_run", settings, api_key=ctx.byok_key or None)
+        model = resolved.model
+        api_key = resolved.api_key
         if not api_key:
             raise ValueError("审查需要模型 Key：请配置服务端 Key 或使用 X-BYOK-Key")
 
@@ -89,6 +91,7 @@ class ReviewRunner:
                 model=model,
                 api_key=api_key,
                 byok=bool(ctx.byok_key),
+                base_url=resolved.base_url or None,
                 on_result=on_result,
                 chapters_doc=chapters_doc,
                 decomposed_doc=decomposed_doc,

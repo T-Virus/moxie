@@ -141,8 +141,8 @@ const tabs: SegmentedTab[] = [
 ]
 
 const MODE_DESC: Record<RunMode, string> = {
-  hot: '参考同题材热门写法，生成前三章并自动换名换设定。',
-  reference: '上传大纲或小说，全量改编为新书，自动换名换设定。',
+  hot: '参考同题材热门写法，生成前三章初稿，自动换名换设定。',
+  reference: '上传大纲或小说，全量改编为新书大纲，自动换名换设定。',
   custom: '从书名开始，世界观、角色与章节全部由你定义。',
 }
 

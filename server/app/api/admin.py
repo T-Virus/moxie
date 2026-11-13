@@ -8,23 +8,28 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, text
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy import delete as sa_delete, func, or_, select, text, update
 from sqlalchemy.orm import Session
 
-from ..db import get_db, utcnow
+from ..db import Base, get_db, utcnow
 from ..deps import require_admin, require_staff
 from ..errors import ApiError
 from ..models import (
     Account,
     AuditLog,
     Device,
+    ModelProviderConfig,
     Notification,
     NotificationDelivery,
+    OfflinePackage,
     Order,
     Plan,
     ReconcileReport,
@@ -37,15 +42,22 @@ from ..models import (
     UsageEvent,
 )
 from ..schemas import (
+    AdminDeleteByEmailRequest,
+    AdminModelConfigUpsert,
+    AdminModelConfigView,
     AdminNotificationRequest,
     AdminQuotaAdjustRequest,
     AdminReasonRequest,
     AdminSubscriptionPatchRequest,
     AdminUserStatusRequest,
 )
+from ..services import model_config as model_config_svc
 from ..services import notifications as nsvc
 from ..services import subscription as subsvc
 from ..services.audit import write_audit
+from ..services.model_config import describe_configs, encrypt_key, resolve_step_model
+from ..services.model_gateway import complete_sync
+from ..services.uploads import safe_filename as safe_upload_name
 from ..services.quota import QuotaService, period_of
 
 health_router = APIRouter(tags=["ops"])
@@ -388,6 +400,123 @@ def set_user_status(
     _set_user_status(db, account, payload.status, payload.reason, request, admin)
     db.commit()
     return {"user": _account_view(db, account)}
+
+
+def _delete_account(db: Session, account: Account, request: Request, admin: Account) -> None:
+    """硬删除账号并级联清理其子表。
+
+    PostgreSQL 外键约束生效且无 ON DELETE CASCADE，因此需按依赖拓扑序
+    （引用者先删、被引用者后删）手动清理所有可达子表。
+    """
+    if account.role == "admin":
+        raise ApiError(409, "cannot_delete_admin", "不允许删除管理员账号")
+    if account.id == admin.id:
+        raise ApiError(409, "cannot_delete_self", "不能删除当前登录的账号")
+    account_id = account.id
+    email = account.email
+
+    tables = Base.metadata.tables
+
+    # 1) 收集需清理的表：从 accounts 出发沿「被引用」方向可达的所有表（含传递表）
+    relevant = {}
+    frontier = ["accounts"]
+    while frontier:
+        current = frontier.pop()
+        for table in tables.values():
+            if table.name == "accounts" or table.name in relevant:
+                continue
+            if any(fk.column.table.name == current for fk in table.foreign_keys):
+                relevant[table.name] = table
+                frontier.append(table.name)
+
+    def account_fk(table):
+        return next(
+            (
+                f for f in table.foreign_keys
+                if f.column.table.name == "accounts" and f.column.name == "id"
+            ),
+            None,
+        )
+
+    def scope_of(table):
+        """该表中属于此账号的行：直接子表按 account_id；传递表按父表范围 in_ 子查询。"""
+        fk = account_fk(table)
+        if fk is not None:
+            return fk.parent == account_id
+        conds = []
+        for f in table.foreign_keys:
+            parent = f.column.table
+            if parent.name == "accounts" or parent.name not in relevant:
+                continue
+            # 父表尚未删除（拓扑序保证），可用子查询圈定账号范围内的父行
+            conds.append(f.parent.in_(select(f.column).where(scope_of(parent))))
+        return or_(*conds) if conds else None
+
+    # 2) 拓扑排序：A 引用 B ⇒ A 先删。如 orders(subscription_id) 先于 subscriptions
+    indegree = {name: 0 for name in relevant}
+    dependents = {name: [] for name in relevant}
+    for name, table in relevant.items():
+        for fk in table.foreign_keys:
+            ref = fk.column.table.name
+            if ref != name and ref in relevant:
+                dependents[name].append(ref)
+                indegree[ref] += 1
+    queue = [name for name, deg in indegree.items() if deg == 0]
+    order = []
+    while queue:
+        name = queue.pop()
+        order.append(name)
+        for ref in dependents[name]:
+            indegree[ref] -= 1
+            if indegree[ref] == 0:
+                queue.append(ref)
+    order.extend(name for name in relevant if name not in order)  # 兜底：异常成环不遗漏
+
+    # 3) 按拓扑序清理子表，最后删除账号本体
+    for name in order:
+        condition = scope_of(relevant[name])
+        if condition is not None:
+            db.execute(sa_delete(relevant[name]).where(condition))
+
+    db.delete(account)
+    write_audit(
+        db, actor_id=admin.id, action="user.delete", request=request,
+        target_type="account", target_id=str(account_id),
+        meta={"email": email, "role": account.role},
+    )
+
+
+@admin_router.delete("/users/{account_id}")
+def delete_user(
+    account_id: int,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """硬删除指定账号（含其全部子数据），仅管理员可用。"""
+    account = db.get(Account, account_id)
+    if account is None:
+        raise _user_not_found()
+    _delete_account(db, account, request, admin)
+    db.commit()
+    return {"deleted": True, "id": account_id}
+
+
+@admin_router.delete("/users/by-email")
+def delete_user_by_email(
+    payload: AdminDeleteByEmailRequest,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """按邮箱删除账号，便于调试邮箱注册产生的测试账号。"""
+    email = payload.email.strip()
+    account = db.scalars(select(Account).where(Account.email.ilike(email))).first()
+    if account is None:
+        raise _user_not_found()
+    _delete_account(db, account, request, admin)
+    db.commit()
+    return {"deleted": True, "id": account.id, "email": account.email}
 
 
 # ---- 订阅与额度 -------------------------------------------------------------
@@ -962,3 +1091,314 @@ def dashboard(
             )
         ),
     }
+
+
+# ---- 工序模型配置（后台纳管） ----------------------------------------------------
+@admin_router.get("/model-configs")
+def list_model_configs(
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[AdminModelConfigView]:
+    """列出所有工序模块的当前生效模型配置（DB 覆盖 / default 兜底 / 环境变量）。"""
+    settings = request.app.state.settings
+    return [AdminModelConfigView(**row) for row in describe_configs(db, settings)]
+
+
+@admin_router.put("/model-configs/{step_key}")
+def upsert_model_config(
+    step_key: str,
+    payload: AdminModelConfigUpsert,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> AdminModelConfigView:
+    """新增或更新某工序的模型配置；api_key 留空(null)表示不改动已存 Key，空串表示清空。"""
+    settings = request.app.state.settings
+    if step_key == "default" and not payload.model:
+        raise ApiError(422, "model_required", "default 兜底配置必须填写模型")
+    if step_key not in model_config_svc.STEP_REGISTRY:
+        raise ApiError(404, "unknown_step", f"未知工序：{step_key}")
+    row = db.scalars(select(ModelProviderConfig).where(ModelProviderConfig.step_key == step_key)).one_or_none()
+    if row is None:
+        row = ModelProviderConfig(step_key=step_key)
+        db.add(row)
+    row.label = payload.label or model_config_svc.STEP_REGISTRY.get(step_key, step_key)
+    row.provider = payload.provider
+    row.model = payload.model
+    row.base_url = payload.base_url or (
+        "https://ai-gateway.edgeone.link/v1" if payload.provider == "edgeone" else settings.llm_base_url
+    )
+    if payload.api_key is not None:
+        row.api_key = encrypt_key(payload.api_key, settings) if payload.api_key else None
+    row.enabled = payload.enabled
+    row.updated_at = utcnow()
+    row.updated_by = _admin.id
+    db.commit()
+    db.refresh(row)
+    eff = resolve_step_model(db, step_key, settings)
+    write_audit(
+        db, actor_id=_admin.id, action="model_config.update", request=request,
+        target_type="model_provider", target_id=step_key,
+        meta={"provider": row.provider, "model": row.model, "enabled": row.enabled, "key_set": bool(row.api_key)},
+    )
+    return AdminModelConfigView(
+        step_key=row.step_key, label=row.label, configured=True,
+        provider=row.provider, model=row.model, base_url=row.base_url,
+        enabled=row.enabled, key_set=bool(row.api_key), source=eff.source,
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        recommendation=model_config_svc.recommendation_for(step_key),
+        recommended_match=model_config_svc.recommended_match(
+            step_key,
+            eff.model,
+            provider=eff.provider,
+            configured=bool(row.enabled) and bool(eff.model),
+        ),
+    )
+
+
+@admin_router.delete("/model-configs/{step_key}")
+def delete_model_config(
+    step_key: str,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """删除某工序的模型配置（重置为 default/环境变量兜底）。default 不可删。"""
+    if step_key == "default":
+        raise ApiError(409, "cannot_delete_default", "default 兜底配置不可删除（可清空 Key 并停用）")
+    row = db.scalars(select(ModelProviderConfig).where(ModelProviderConfig.step_key == step_key)).one_or_none()
+    if row is None:
+        raise ApiError(404, "not_found", "该工序未配置覆盖")
+    label = row.label
+    db.delete(row)
+    write_audit(
+        db, actor_id=_admin.id, action="model_config.delete", request=request,
+        target_type="model_provider", target_id=step_key, meta={"label": label},
+    )
+    db.commit()
+    return {"deleted": True, "step_key": step_key}
+
+
+@admin_router.post("/model-configs/{step_key}/test")
+def test_model_config(
+    step_key: str,
+    payload: AdminModelConfigUpsert,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """用提交（或已存）的配置做一次最小调用，验证模型/Key/base_url 是否可用。"""
+    settings = request.app.state.settings
+    if step_key not in model_config_svc.STEP_REGISTRY:
+        raise ApiError(404, "unknown_step", f"未知工序：{step_key}")
+    base_url = payload.base_url or (
+        "https://ai-gateway.edgeone.link/v1" if payload.provider == "edgeone" else settings.llm_base_url
+    )
+    api_key = payload.api_key or ""
+    if not api_key:
+        stored = db.scalars(select(ModelProviderConfig).where(ModelProviderConfig.step_key == step_key)).one_or_none()
+        if stored and stored.api_key:
+            api_key = decrypt_key(stored.api_key, settings) or ""
+    if not api_key:
+        api_key = settings.llm_api_key
+    try:
+        result = complete_sync(
+            settings, [{"role": "user", "content": "ping"}],
+            model=payload.model, api_key=api_key, base_url=base_url or None,
+        )
+    except Exception as exc:  # noqa: BLE001 - 明确返回上游错误给后台
+        raise ApiError(502, "model_test_failed", f"调用失败：{exc}")
+    return {"ok": True, "model": result.model, "tokens": result.total_tokens}
+
+
+# ---- 离线版安装包（后台上传纳管） -------------------------------------------------
+OFFLINE_PLATFORMS = {"windows", "android"}
+OFFLINE_SUFFIX = {"windows": ".exe", "android": ".apk"}
+OFFLINE_MEDIA = {
+    "windows": "application/vnd.microsoft.portable-executable",
+    "android": "application/vnd.android.package-archive",
+}
+VERSION_RE = re.compile(r"v(\d+(?:\.\d+)*)", re.IGNORECASE)
+
+
+def _version_of(name: str) -> str:
+    matched = VERSION_RE.search(name)
+    return matched.group(1) if matched else ""
+
+
+def _offline_view(pkg: OfflinePackage, settings) -> dict:
+    return {
+        "id": pkg.id,
+        "platform": pkg.platform,
+        "version": pkg.version,
+        "filename": pkg.filename,
+        "size": pkg.size,
+        "content_type": pkg.content_type,
+        "is_active": pkg.is_active,
+        "release_notes": pkg.release_notes,
+        "uploaded_by": pkg.uploaded_by,
+        "created_at": pkg.created_at.isoformat() if pkg.created_at else None,
+        "updated_at": pkg.updated_at.isoformat() if pkg.updated_at else None,
+        "download_url": f"{settings.api_prefix}/admin/offline-packages/{pkg.id}/download",
+    }
+
+
+class _CountingReader:
+    """边读边计数并限大小，避免把超大安装包整段读入内存。"""
+
+    def __init__(self, src, max_bytes: int):
+        self.src = src
+        self.max = max_bytes
+        self.n = 0
+
+    def read(self, size: int = -1):
+        chunk = self.src.read(size if size and size > 0 else 1024 * 1024)
+        if not chunk:
+            return chunk
+        self.n += len(chunk)
+        if self.n > self.max:
+            raise ApiError(413, "package_too_large", f"安装包超过大小限制（{self.max} 字节）")
+        return chunk
+
+
+@admin_router.get("/offline-packages")
+def list_offline_packages(
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """列出所有后台上传的离线安装包（含历史版本），按平台+时间倒序。"""
+    rows = db.scalars(
+        select(OfflinePackage).order_by(OfflinePackage.platform, OfflinePackage.created_at.desc())
+    ).all()
+    return [_offline_view(r, request.app.state.settings) for r in rows]
+
+
+@admin_router.get("/offline-packages/limits")
+def offline_package_limits(
+    request: Request,
+    _admin: Account = Depends(require_admin),
+) -> dict:
+    """上传前的前置校验信息：单文件大小上限与各平台要求的扩展名。
+
+    前端拿到上限后可提前拦住超大文件，避免整包传完才被 413 打断。
+    """
+    settings = request.app.state.settings
+    return {
+        "max_bytes": settings.offline_package_max_bytes,
+        "suffix": dict(OFFLINE_SUFFIX),
+    }
+
+
+@admin_router.post("/offline-packages")
+async def upload_offline_package(
+    request: Request,
+    platform: str = Form(...),
+    version: str = Form(""),
+    release_notes: str = Form(""),
+    file: UploadFile = File(...),
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """上传并提交一个离线安装包（multipart）。上传后自动成为该平台的当前版本。"""
+    settings = request.app.state.settings
+    if platform not in OFFLINE_PLATFORMS:
+        raise ApiError(422, "bad_platform", "platform 必须为 windows 或 android")
+    if not file.filename:
+        raise ApiError(422, "invalid_filename", "缺少文件名")
+    suffix = Path(file.filename).suffix.lower()
+    if suffix != OFFLINE_SUFFIX[platform]:
+        raise ApiError(415, "bad_file_type", f"{platform} 安装包扩展名需为 {OFFLINE_SUFFIX[platform]}")
+    max_bytes = settings.offline_package_max_bytes
+    declared = getattr(file, "size", None)
+    if declared is not None and declared > max_bytes:
+        raise ApiError(413, "package_too_large", f"安装包超过大小限制（{max_bytes} 字节）")
+    version_val = (version or "").strip() or _version_of(file.filename) or "0.0.0"
+    safe = safe_upload_name(file.filename)
+    key = f"offline/{platform}/{uuid.uuid4().hex}-{safe}"
+    reader = _CountingReader(file.file, max_bytes)
+    try:
+        request.app.state.storage.put_stream(key, reader, content_type=OFFLINE_MEDIA[platform])
+    except ApiError:
+        request.app.state.storage.delete(key)
+        raise
+    pkg = OfflinePackage(
+        platform=platform,
+        version=version_val,
+        filename=safe,
+        source_key=key,
+        content_type=OFFLINE_MEDIA[platform],
+        size=reader.n,
+        is_active=True,
+        release_notes=(release_notes or None),
+        uploaded_by=_admin.id,
+    )
+    db.add(pkg)
+    # 同平台历史版本置为非当前
+    db.execute(
+        update(OfflinePackage)
+        .where(OfflinePackage.platform == platform, OfflinePackage.id != pkg.id)
+        .values(is_active=False)
+    )
+    db.commit()
+    db.refresh(pkg)
+    write_audit(
+        db, actor_id=_admin.id, action="offline_package.upload", request=request,
+        target_type="offline_package", target_id=str(pkg.id),
+        meta={"platform": platform, "version": version_val, "size": reader.n, "filename": safe},
+    )
+    return _offline_view(pkg, settings)
+
+
+@admin_router.delete("/offline-packages/{pkg_id}")
+def delete_offline_package(
+    pkg_id: int,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """删除某条安装包记录；若删的是当前版本，则把该平台最新剩余记录提升为当前。"""
+    pkg = db.get(OfflinePackage, pkg_id)
+    if pkg is None:
+        raise ApiError(404, "not_found", "安装包不存在")
+    was_active = pkg.is_active
+    request.app.state.storage.delete(pkg.source_key)
+    db.delete(pkg)
+    if was_active:
+        nxt = db.scalars(
+            select(OfflinePackage)
+            .where(OfflinePackage.platform == pkg.platform)
+            .order_by(OfflinePackage.created_at.desc())
+        ).first()
+        if nxt is not None:
+            nxt.is_active = True
+    write_audit(
+        db, actor_id=_admin.id, action="offline_package.delete", request=request,
+        target_type="offline_package", target_id=str(pkg_id),
+        meta={"platform": pkg.platform, "version": pkg.version},
+    )
+    db.commit()
+    return {"deleted": True, "id": pkg_id}
+
+
+@admin_router.get("/offline-packages/{pkg_id}/download")
+def download_offline_package(
+    pkg_id: int,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """后台直接下载某条安装包（便于管理员校验），鉴权复用 require_admin。"""
+    pkg = db.get(OfflinePackage, pkg_id)
+    if pkg is None:
+        raise ApiError(404, "not_found", "安装包不存在")
+    data = request.app.state.storage.get_bytes(pkg.source_key)
+    name = pkg.filename
+    ascii_name = name.encode("ascii", "ignore").decode() or "package"
+    disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+    return Response(
+        content=data,
+        media_type=pkg.content_type or "application/octet-stream",
+        headers={"Content-Disposition": disposition},
+    )

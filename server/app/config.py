@@ -176,6 +176,9 @@ class Settings(BaseSettings):
     model_price_cents_per_1k_tokens: float = 0.8
     # 无真实 key / 测试时使用确定性假模型（不会访问外网）
     model_stub: bool = False
+    # 工序模型配置里 api_key 的加密口令；留空则不加密（仅建议本地开发）。
+    # 优先与环境变量 MODEL_KEY_SECRET 配合，回退到 artifact_signing_secret。
+    model_key_secret: str = ""
 
     # 拆解链路
     src_path: str = str(ROOT_DIR / "src")
@@ -222,9 +225,11 @@ class Settings(BaseSettings):
     # 例如 compose 里 S3_ENDPOINT_URL=http://minio:9000，公开地址为 http://127.0.0.1:9000
     s3_public_endpoint_url: str = ""
 
-    # 离线安装包下载：接口按扩展名在各目录中取最新构建产物
+    # 离线安装包下载：接口按扩展名在各目录中取最新构建产物（后台未上传时的回退）
     offline_windows_dir: str = str(ROOT_DIR / "dist")
     offline_android_dir: str = str(ROOT_DIR / "mobile" / "dist")
+    # 后台上传安装包的单文件大小上限（字节），默认 2GiB
+    offline_package_max_bytes: int = 2 * 1024 * 1024 * 1024
 
     # AI 封面：优先 OpenAI 兼容的 /images/generations，失败回退 Pollinations，
     # 再失败用本地代码绘制底图；不配置 image_api_key 时直接走免费兜底。

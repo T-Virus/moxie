@@ -388,6 +388,35 @@ export const api = {
   unbanUser(id: number, reason: string) {
     return request<any>(`/v1/admin/users/${id}/unban`, { method: 'POST', body: { reason } })
   },
+  deleteUser(id: number) {
+    return request<any>(`/v1/admin/users/${id}`, { method: 'DELETE' })
+  },
+  modelConfigs() {
+    return request<any>('/v1/admin/model-configs')
+  },
+  putModelConfig(stepKey: string, payload: Record<string, unknown>) {
+    return request<any>(`/v1/admin/model-configs/${stepKey}`, { method: 'PUT', body: payload })
+  },
+  deleteModelConfig(stepKey: string) {
+    return request<any>(`/v1/admin/model-configs/${stepKey}`, { method: 'DELETE' })
+  },
+  testModelConfig(stepKey: string, payload: Record<string, unknown>) {
+    return request<any>(`/v1/admin/model-configs/${stepKey}/test`, { method: 'POST', body: payload })
+  },
+  offlinePackages() {
+    return request<any>('/v1/admin/offline-packages')
+  },
+  offlinePackageLimits() {
+    return request<{ max_bytes: number; suffix: Record<string, string> }>(
+      '/v1/admin/offline-packages/limits',
+    )
+  },
+  uploadOfflinePackage(formData: FormData) {
+    return request<any>('/v1/admin/offline-packages', { method: 'POST', body: formData })
+  },
+  deleteOfflinePackage(id: number) {
+    return request<any>(`/v1/admin/offline-packages/${id}`, { method: 'DELETE' })
+  },
 
   subscriptions(query: Record<string, unknown>) {
     return request<any>('/v1/admin/subscriptions', { query })

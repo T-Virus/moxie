@@ -60,8 +60,12 @@ async def complete(
     byok: bool = False,
     expect_json: bool = False,
     client: httpx.AsyncClient | None = None,
+    base_url: str | None = None,
 ) -> ModelResult:
-    """调用上游 OpenAI 兼容接口；`model_stub=true` 时不访问外网。"""
+    """调用上游 OpenAI 兼容接口；`model_stub=true` 时不访问外网。
+
+    base_url 可覆盖默认网关（按工序切换供应商时使用），缺省用 settings.llm_base_url。
+    """
     chosen = model or settings.llm_model
     if settings.model_stub:
         data, usage = stub_completion(messages, chosen, expect_json)
@@ -82,7 +86,7 @@ async def complete(
         raise ApiError(503, "model_not_configured", "服务端未配置模型 Key，请使用 BYOK 模式")
 
     body = {"model": chosen, "messages": messages, "stream": False}
-    url = settings.llm_base_url.rstrip("/") + "/chat/completions"
+    url = (base_url or settings.llm_base_url).rstrip("/") + "/chat/completions"
     headers = {"content-type": "application/json", "authorization": f"Bearer {api_key}"}
     attempts = max(1, settings.gateway_max_retries + 1)
     own_client = client is None

@@ -9,7 +9,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from app.db import utcnow
-from app.models import Account, AuditLog, InvoiceRequest, Order, Subscription
+from app.models import Account, AuditLog, Device, InvoiceRequest, Order, Subscription
 from app.services.quota import QuotaService
 
 from .helpers import subscribe
@@ -50,6 +50,40 @@ def test_ban_user_and_reject_token(client, headers, app, account):
             select(AuditLog).where(AuditLog.action.in_(("user.ban", "user.status")))
         )
         assert audit is not None and audit.meta["reason"] == "异常登录"
+
+
+def test_delete_user_by_id_and_email(client, headers, app, account):
+    _promote(app, account["account"]["id"], "admin")
+
+    # 按 id 删除：账号与子表一并清理
+    victim = _new_account(client)
+    victim_id = victim["account"]["id"]
+    response = client.delete(f"/v1/admin/users/{victim_id}", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["deleted"] is True
+    with app.state.db.session() as session:
+        assert session.get(Account, victim_id) is None
+        # 子表（设备/审计等）应随账号级联清理，且不残留孤儿行
+        assert session.scalar(select(Device).where(Device.account_id == victim_id)) is None
+
+    # 按邮箱删除（调试邮箱注册测试账号）
+    victim2 = _new_account(client)
+    email2 = victim2["account"]["email"]
+    response = client.delete(
+        "/v1/admin/users/by-email", headers=headers, json={"email": email2}
+    )
+    assert response.status_code == 200, response.text
+    with app.state.db.session() as session:
+        assert session.get(Account, victim2["account"]["id"]) is None
+
+    # 删除不存在返回 404
+    assert client.delete("/v1/admin/users/999999", headers=headers).status_code == 404
+
+    # 不允许删除当前登录账号（自身）
+    assert (
+        client.delete(f"/v1/admin/users/{account['account']['id']}", headers=headers).status_code
+        == 409
+    )
 
 
 def test_subscription_adjust_extend_and_quota_adjust(client, headers, app, account):

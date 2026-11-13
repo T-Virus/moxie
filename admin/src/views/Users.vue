@@ -104,6 +104,36 @@ function openBan(row: UserRow, mode: 'ban' | 'unban') {
   banOpen.value = true
 }
 
+const deleteOpen = ref(false)
+const deleteTarget = ref<UserRow | null>(null)
+const deleteError = ref('')
+const deleteSubmitting = ref(false)
+
+function openDelete(row: UserRow) {
+  deleteTarget.value = row
+  deleteError.value = ''
+  deleteOpen.value = true
+}
+
+async function submitDelete() {
+  if (!deleteTarget.value) return
+  deleteSubmitting.value = true
+  deleteError.value = ''
+  try {
+    await api.deleteUser(deleteTarget.value.id)
+    pushToast('用户已删除，相关数据已清理并写入审计日志')
+    deleteOpen.value = false
+    await load()
+    if (detailOpen.value && detailRow.value?.id === deleteTarget.value.id) {
+      detailOpen.value = false
+    }
+  } catch (e) {
+    deleteError.value = errorMessage(e)
+  } finally {
+    deleteSubmitting.value = false
+  }
+}
+
 async function submitBan() {
   if (!banTarget.value) return
   if (banReason.value.trim().length < 2) {
@@ -205,6 +235,7 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
                   <button class="btn ghost sm" @click="openDetail(row)">详情</button>
                   <button v-if="canWrite && row.status === 'active'" class="btn danger-ghost sm" @click="openBan(row, 'ban')">封禁</button>
                   <button v-else-if="canWrite && row.status === 'banned'" class="btn ghost sm" @click="openBan(row, 'unban')">解封</button>
+                  <button v-if="canWrite && row.role !== 'admin'" class="btn danger-ghost sm" @click="openDelete(row)">删除</button>
                 </div>
               </td>
             </tr>
@@ -300,6 +331,22 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
         @click="detailRow && openBan(detailRow, 'ban'); detailOpen = false">封禁用户</button>
       <button v-else-if="canWrite && detailAccount && detailAccount.status === 'banned'" class="btn ghost sm"
         @click="detailRow && openBan(detailRow, 'unban'); detailOpen = false">解封用户</button>
+      <button v-if="canWrite && detailAccount && detailAccount.role !== 'admin'" class="btn danger sm"
+        @click="detailRow && openDelete(detailRow); detailOpen = false">删除用户</button>
+    </template>
+  </Modal>
+
+  <Modal v-if="deleteOpen" title="删除用户"
+    :subtitle="deleteTarget ? `#${deleteTarget.id} · ${accountLabel(deleteTarget)}` : ''" size="narrow" @close="deleteOpen = false">
+    <div class="notice error" style="margin-bottom: 14px">
+      此操作将<strong>永久删除该账号及其全部子数据</strong>（邮箱验证、设备、订阅、用量、订单、通知、任务等），且不可恢复。操作会写入审计日志。
+    </div>
+    <div v-if="deleteError" class="notice error" style="margin: 12px 0 0">{{ deleteError }}</div>
+    <template #footer>
+      <button class="btn ghost sm" :disabled="deleteSubmitting" @click="deleteOpen = false">取消</button>
+      <button class="btn danger" :disabled="deleteSubmitting" @click="submitDelete">
+        {{ deleteSubmitting ? '提交中…' : '确认删除' }}
+      </button>
     </template>
   </Modal>
 

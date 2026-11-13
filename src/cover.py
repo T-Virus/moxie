@@ -509,10 +509,13 @@ def _ai_endpoint(base_url):
 
 
 def _ai_size(width, height):
-    """按要求宽高比挑一档常见出图尺寸：多数 OpenAI 兼容服务只认这几档，
-    底图拿回来后会 LANCZOS 缩放到封面目标尺寸。"""
+    """按要求宽高比挑一档尺寸。
+
+    国内图片模型（智谱 CogView、火山 Seedream 等）普遍只认 1024x1024 /
+    864x1152 / 1152x864 这几档，传 1024x1536 会直接 400；比例偏差由
+    compose 的 ImageOps.fit 裁切吸收，不影响成图。"""
     ratio = float(width) / max(1.0, float(height))
-    best = min(((1024, 1536), (1536, 1024), (1024, 1024)),
+    best = min(((1024, 1024), (864, 1152), (1152, 864)),
                key=lambda s: abs(s[0] / s[1] - ratio))
     return "%dx%d" % best
 

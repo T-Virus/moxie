@@ -30,6 +30,7 @@ class SkillContext:
     model: str = ""
     api_key: str = ""
     byok: bool = False
+    base_url: str = ""
     # 本节点内的模型调用结果（线程内独占，引擎汇总结算）
     usage: list[ModelResult] = field(default_factory=list)
     logs: list[tuple[str, str]] = field(default_factory=list)
@@ -49,6 +50,7 @@ def call_json(ctx: SkillContext, *, system: str, user: str) -> dict[str, Any]:
         api_key=ctx.api_key or ctx.settings.llm_api_key,
         byok=ctx.byok,
         expect_json=True,
+        base_url=ctx.base_url or None,
     )
     ctx.usage.append(result)
     try:

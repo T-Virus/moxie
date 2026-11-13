@@ -20,6 +20,7 @@ from ..db import utcnow
 from ..errors import ApiError
 from ..metrics import increment
 from ..models import AgentRun, AgentRunStep, AuditLog, UsageEvent
+from ..services.model_config import resolve_step_model
 from ..services.model_gateway import ModelResult
 from ..services.quota import QuotaService
 from .artifacts import prefix_of, write_artifacts
@@ -65,6 +66,7 @@ def _run_node(
     skill,
     settings: Settings,
     *,
+    session: Session,
     api_key: str,
     byok: bool,
 ) -> NodeOutcome:
@@ -74,12 +76,14 @@ def _run_node(
     error: str | None = None
     error_code: str | None = None
     started = time.perf_counter()
+    resolved = resolve_step_model(session, node.skill, settings, api_key=api_key or None)
     for attempt in range(1, attempts + 1):
         ctx = SkillContext(
             settings=settings,
-            model=settings.llm_model,
-            api_key=api_key,
+            model=resolved.model,
+            api_key=resolved.api_key,
             byok=byok,
+            base_url=resolved.base_url,
         )
         try:
             payload = node.builder(view, state, extra)
@@ -238,11 +242,13 @@ def _run_segmented_node(
         for attempt in range(1, attempts + 1):
             attempts_used = max(attempts_used, attempt)
             used_attempt = attempt
+            resolved = resolve_step_model(session, node.skill, settings, api_key=api_key or None)
             ctx = SkillContext(
                 settings=settings,
-                model=settings.llm_model,
-                api_key=api_key,
+                model=resolved.model,
+                api_key=resolved.api_key,
                 byok=byok,
+                base_url=resolved.base_url,
             )
             try:
                 payload = {
@@ -407,6 +413,7 @@ def _run_chaptered_node(
     api_key: str,
     byok: bool,
 ) -> NodeOutcome:
+    resolved = resolve_step_model(session, node.skill, settings, api_key=api_key or None)
     """逐章执行：章级 checkpoint、单章失败只重试该章、章级 SSE 与章级记账。
 
     仅 `chapter_write` 消耗 `adapt_chapters` 与 `managed_chars`；概括节点只读正文。
@@ -514,7 +521,7 @@ def _run_chaptered_node(
         used_attempt = 1
         for attempt in range(1, attempts + 1):
             used_attempt = attempt
-            ctx = SkillContext(settings=settings, model=settings.llm_model, api_key=api_key, byok=byok)
+            ctx = SkillContext(settings=settings, model=resolved.model, api_key=resolved.api_key, byok=byok, base_url=resolved.base_url)
             try:
                 chapter_payload = {**payload, "chapters": [chapter]}
                 validated = skill.input_model(**chapter_payload) if skill.input_model else chapter_payload
@@ -804,6 +811,7 @@ def execute_agent_run(
                 extra,
                 skill,
                 settings,
+                session=session,
                 api_key=api_key,
                 byok=byok,
             )
@@ -826,6 +834,7 @@ def execute_agent_run(
                         skill,
                         settings,
                         storage=storage,
+                        session=session,
                         api_key=api_key,
                         byok=byok,
                     )
@@ -841,6 +850,7 @@ def execute_agent_run(
                         extra,
                         skill,
                         settings,
+                        session=session,
                         api_key=api_key,
                         byok=byok,
                     )

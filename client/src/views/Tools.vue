@@ -69,7 +69,7 @@
           <span class="badge tool__badge">{{ session.account ? '已登录' : '需登录' }}</span>
         </header>
 
-        <p class="tool__desc">{{ card.desc }}</p>
+        <!-- <p class="tool__desc">{{ card.desc }}</p> -->
 
         <dl class="tool__meta">
           <div class="tool__meta-item">

@@ -642,10 +642,57 @@ class StoredObject(Base):
     )
 
 
+class ModelProviderConfig(Base):
+    """工序级模型配置：每个工序模块可独立选择模型/供应商/Key，入库纳管。
+
+    缺省回退顺序：专用 step_key → default 兜底行 → 环境变量 settings.llm_*。
+    api_key 落库前加密（见 app.services.model_config），密钥口令来自 settings.model_key_secret。
+    """
+
+    __tablename__ = "model_provider_configs"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    step_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), default="edgeone", nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(512), default="https://ai-gateway.edgeone.link/v1", nullable=False)
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    extra: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    updated_by: Mapped[int | None] = mapped_column(BIGINT, nullable=True)
+
+
+class OfflinePackage(Base):
+    """离线版安装包（后台上传纳管）：每个平台可保留历史版本，仅一个为当前生效。
+
+    实际文件存对象存储（key 见 source_key），本表只存元信息；
+    /downloads 优先取 is_active 的版本，未上传时回退到目录式最新构建。
+    """
+
+    __tablename__ = "offline_packages"
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    filename: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream", nullable=False)
+    size: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    release_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_by: Mapped[int | None] = mapped_column(BIGINT, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
 __all__ = [
     "Base",
     "Account",
     "Device",
+    "OfflinePackage",
+    "ModelProviderConfig",
     "License",
     "Plan",
     "Entitlement",

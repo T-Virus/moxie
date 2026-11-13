@@ -24,6 +24,7 @@ from ..deps import AuthContext, get_auth
 from ..errors import ApiError
 from ..metrics import increment
 from ..models import UsageEvent
+from ..services.model_config import resolve_step_model
 from ..services.usage_stream import StreamUsageCollector
 
 logger = logging.getLogger("moxie.gateway")
@@ -99,7 +100,15 @@ async def chat_completions(
     byok_key = (request.headers.get("x-byok-key") or "").strip()
 
     body = dict(payload)
-    body.setdefault("model", settings.llm_model)
+    # 按工序解析：后台「模型配置」可对具体 step_key 指定模型/网关/Key；
+    # 请求体里的 model 优先，BYOK key 优先于后台配置的 Key。
+    step_key = str(body.get("step_key") or request.headers.get("x-step-key") or "").strip()
+    body.pop("step_key", None)
+    resolved = resolve_step_model(db, step_key, settings) if step_key else None
+    model = str(body.get("model") or (resolved.model if resolved else None) or settings.llm_model)
+    body["model"] = model
+    api_key = byok_key or (resolved.api_key if resolved else None) or settings.llm_api_key
+    base_url = (resolved.base_url if resolved else None) or settings.llm_base_url
 
     if settings.model_stub:
         from ..services.model_gateway import complete
@@ -107,8 +116,8 @@ async def chat_completions(
         result = await complete(
             settings,
             body.get("messages") or [],
-            model=body.get("model"),
-            api_key=byok_key or settings.llm_api_key,
+            model=model,
+            api_key=api_key,
             byok=bool(byok_key),
             expect_json=False,
             client=request.app.state.http_client,
@@ -129,13 +138,12 @@ async def chat_completions(
         )
         return JSONResponse(content=result.data, headers={"x-request-id": getattr(request.state, "request_id", "")})
 
-    api_key = byok_key or settings.llm_api_key
     if not api_key:
         raise ApiError(503, "model_not_configured", "服务端未配置模型 Key，请使用 BYOK 模式")
 
     stream = bool(body.get("stream"))
 
-    url = settings.llm_base_url.rstrip("/") + "/chat/completions"
+    url = base_url.rstrip("/") + "/chat/completions"
     headers = {"content-type": "application/json", "authorization": f"Bearer {api_key}"}
     client: httpx.AsyncClient = request.app.state.http_client
 
@@ -172,7 +180,7 @@ async def chat_completions(
         collector = StreamUsageCollector(prompt_text)
         db_factory = request.app.state.db
         account_id = auth.account.id
-        chosen_model = body.get("model") or settings.llm_model
+        chosen_model = model
         route = "byok" if byok_key else "managed"
 
         async def iterator():

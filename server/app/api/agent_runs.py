@@ -406,6 +406,7 @@ def generate_agent_run_cover(
         layout=payload.layout,
         width=payload.width,
         height=payload.height,
+        session=db,
     )
     write_audit(
         db,

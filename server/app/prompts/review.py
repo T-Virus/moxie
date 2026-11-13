@@ -101,7 +101,7 @@ class ReviewPromptService:
         return self.module.render_html(result)
 
     def make_model_call(
-        self, settings: Settings, model: str, api_key: str, byok: bool = False, on_result=None
+        self, settings: Settings, model: str, api_key: str, byok: bool = False, base_url: str | None = None, on_result=None
     ):
         """构造替换 src `_call` 的函数：走统一网关，失败抛 StepError 让单个检查项降级。"""
         from ..services.model_gateway import complete_sync, parse_json_text
@@ -123,6 +123,7 @@ class ReviewPromptService:
                     api_key=api_key,
                     byok=byok,
                     expect_json=True,
+                    base_url=base_url or None,
                 )
             except Exception as exc:  # noqa: BLE001
                 raise step_error(f"模型调用失败：{exc}") from exc
@@ -159,7 +160,7 @@ class ReviewPromptService:
             old_top = getattr(module, "DEFAULT_TOP_N", 5)
             old_scope = getattr(module, "DEFAULT_ADVICE_SCOPE", "ai")
             module._call = self.make_model_call(
-                self.settings, model, api_key, byok=byok, on_result=on_result
+                self.settings, model, api_key, byok=byok, base_url=base_url, on_result=on_result
             )
             try:
                 with _baseline_files(module, chapters_doc, decomposed_doc):

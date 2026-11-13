@@ -94,7 +94,9 @@ def run_agent_job(run_id: str) -> str:
                 settings=settings,
                 storage=storage,
                 byok=bool(byok),
-                api_key=byok or settings.llm_api_key,
+                # 仅传真实 BYOK；平台 Key 由 resolve_step_model 内部按「工序 Key → 环境变量」兜底，
+                # 否则会把环境变量 Key 当成 BYOK，压过工序级配置的 Key。
+                api_key=byok or "",
             )
             session.commit()
             return status
@@ -131,7 +133,9 @@ def run_once() -> int:
                 settings=settings,
                 storage=storage,
                 byok=bool(byok),
-                api_key=byok or settings.llm_api_key,
+                # 仅传真实 BYOK；平台 Key 由 resolve_step_model 内部按「工序 Key → 环境变量」兜底，
+                # 否则会把环境变量 Key 当成 BYOK，压过工序级配置的 Key。
+                api_key=byok or "",
             )
             session.commit()
             processed = 1
