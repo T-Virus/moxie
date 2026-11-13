@@ -116,6 +116,9 @@ def test_verify_email_invalid_token(client):
 
 def test_resend_verification_returns_link_for_pending(client):
     client.app.state.settings.email_verification_required = True
+    # 注册时已发送过一封验证邮件；本用例验证「链接回显」而非冷却逻辑，
+    # 关闭冷却以免被防邮件轰炸的 429 拦截（冷却本身另有安全测试覆盖）。
+    client.app.state.settings.email_resend_cooldown_seconds = 0
     reg = client.post(
         "/v1/auth/register",
         json={"email": "resend@example.com", "password": "password123"},

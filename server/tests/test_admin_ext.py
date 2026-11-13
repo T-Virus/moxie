@@ -69,8 +69,8 @@ def test_delete_user_by_id_and_email(client, headers, app, account):
     # 按邮箱删除（调试邮箱注册测试账号）
     victim2 = _new_account(client)
     email2 = victim2["account"]["email"]
-    response = client.delete(
-        "/v1/admin/users/by-email", headers=headers, json={"email": email2}
+    response = client.request(
+        "DELETE", "/v1/admin/users/by-email", headers=headers, json={"email": email2}
     )
     assert response.status_code == 200, response.text
     with app.state.db.session() as session:
@@ -107,7 +107,8 @@ def test_subscription_adjust_extend_and_quota_adjust(client, headers, app, accou
     assert response.json()["subscription"]["current_end_at"] > before_end.isoformat()
 
     key = f"adj-{uuid.uuid4()}"
-    body = {"metric": "books_month", "quantity": 2, "reason": "客服补偿", "idempotency_key": key}
+    # 负数 = 扣减可用额度（used +2）；正数 = 返还额度。与后台表单文案一致。
+    body = {"metric": "books_month", "quantity": -2, "reason": "客服补偿", "idempotency_key": key}
     response = client.post(
         f"/v1/admin/accounts/{account_id}/quota-adjustments", headers=headers, json=body
     )

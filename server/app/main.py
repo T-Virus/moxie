@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus, unquote_plus
@@ -70,6 +71,11 @@ def validate_production_settings(settings: Settings) -> None:
     elif "*" in origins:
         problems.append("CORS_ALLOW_ORIGINS 禁止使用通配符 *")
 
+    if not (settings.artifact_signing_secret or "").strip():
+        problems.append("ARTIFACT_SIGNING_SECRET 必须显式配置（产物下载签名不可复用 JWT_SECRET）")
+    if not (settings.model_key_secret or "").strip():
+        problems.append("MODEL_KEY_SECRET 必须显式配置（工序模型 Key 必须加密落库）")
+
     database_url = (settings.database_url or "").strip()
     default_database_url = Settings.model_fields["database_url"].default
     if database_url == str(default_database_url).strip() or "change-me" in database_url.lower():
@@ -93,8 +99,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(settings.log_level)
     init_sentry(settings)
 
-    # 生产闸门：mock/fake 渠道一律禁止；License 私钥必须显式配置
-    if settings.env in ("prod", "production"):
+    # 生产闸门：mock/fake 渠道一律禁止；License / 载荷私钥必须显式配置。
+    # 用 is_production 白名单判定，避免 ENV 写成 prod/staging 时闸门被跳过。
+    if settings.is_production:
         if settings.payments_mock_enabled or settings.payments_fake_enabled:
             raise RuntimeError("生产环境禁止启用 PAYMENTS_MOCK_ENABLED / PAYMENTS_FAKE_ENABLED")
         if not settings.license_private_key_pem:
@@ -105,10 +112,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     payload_crypto = PayloadCrypto(
         settings.payload_crypto_private_key_pem or None,
-        allow_ephemeral=(
-            settings.env not in ("prod", "production")
-            or not settings.payload_encryption_enabled
-        ),
+            allow_ephemeral=(
+                not settings.is_production
+                or not settings.payload_encryption_enabled
+            ),
     )
 
     signer = LicenseSigner(
@@ -171,6 +178,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 pass
             db.dispose()
 
+    expose_docs = (
+        settings.docs_enabled
+        if settings.docs_enabled is not None
+        else not settings.is_production
+    )
     app = FastAPI(
         title="墨写服务端 API",
         version="0.1.0",
@@ -179,9 +191,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "提示词与规则库只在内网 Worker 使用，本 API 不返回任何提示词明文。"
         ),
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if expose_docs else None,
+        redoc_url="/redoc" if expose_docs else None,
+        openapi_url="/openapi.json" if expose_docs else None,
     )
     app.state.settings = settings
     app.state.license_signer = signer
@@ -399,6 +411,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def metrics(request: Request):
         if not settings.metrics_enabled:
             return PlainTextResponse("metrics disabled\n", status_code=404)
+        # 队列/业务指标不对外公开：配置了 token 就必须匹配；生产未配置则拒绝。
+        token = (settings.metrics_token or "").strip()
+        if token:
+            provided = request.headers.get("x-metrics-token") or request.query_params.get("token") or ""
+            if not secrets.compare_digest(provided, token):
+                return PlainTextResponse("forbidden\n", status_code=403)
+        elif settings.is_production:
+            return PlainTextResponse("metrics token not configured\n", status_code=403)
         db: Database = request.app.state.db
         with db.session() as session:
             queue_depth = session.scalar(

@@ -96,7 +96,7 @@ sudo chown -R $USER:$USER /opt/moxie   # 让当前用户能改文件
 
 ```bash
 cd /opt/moxie
-./preflight.sh --gen-secrets     # 自动生成 JWT / License / 载荷加密 三套密钥
+./preflight.sh --gen-secrets     # 自动生成 JWT / License / 载荷加密 / 产物签名 / 模型 Key 五套密钥
 ```
 
 然后编辑 `server/.env`（用 `nano server/.env` 或 `vim`）：
@@ -174,6 +174,7 @@ openssl rand -base64 24
 | 优先级 | 项目 | 怎么做 |
 |--------|------|--------|
 | 🔴 最高 | 改掉所有默认口令 | `JWT_SECRET`、`DATABASE_URL` 密码、`MINIO_ROOT_PASSWORD`/`S3_SECRET_KEY` 全部换掉；默认 `change-me` 会被启动拒绝 |
+| 🔴 最高 | 配置独立签名密钥 | `ARTIFACT_SIGNING_SECRET`（产物下载签名，不可复用 JWT）、`MODEL_KEY_SECRET`（工序模型 Key 加密）；缺失会被生产启动拒绝，可用 `--gen-secrets` 生成 |
 | 🔴 最高 | 开启 HTTPS | 见第 8 节，否则令牌明文 |
 | 🟠 高 | `.env` 文件权限 | 脚本已自动 `chmod 600 server/.env`（仅属主可读）；**备份出来的 `env.env` 同样含全部密钥，存到加密盘或异地** |
 | 🟠 高 | 端口不暴露内网服务 | 安全组/防火墙**只开 80/443**；`5432/6379/9000/8000` 绝不对外 |

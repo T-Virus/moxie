@@ -15,7 +15,7 @@ export interface PresetsResponse {
 /** 从服务端统一预设接口拉取选项（按 type 分组）。失败时由调用方回退到本地常量。 */
 export function fetchPresets(types: string[]): Promise<PresetsResponse> {
   const q = types.length ? `?types=${encodeURIComponent(types.join(','))}` : ''
-  return apiFetch<PresetsResponse>(`/v1/presets${q}`)
+  return apiFetch<PresetsResponse>(`/presets${q}`)
 }
 
 export interface PresetCreatePayload {
@@ -37,7 +37,7 @@ export interface PresetCreateResult {
 export async function createPreset(
   payload: PresetCreatePayload,
 ): Promise<PresetCreateResult> {
-  return apiFetch<PresetCreateResult>('/v1/presets', {
+  return apiFetch<PresetCreateResult>('/presets', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
@@ -45,5 +45,5 @@ export async function createPreset(
 
 /** 删除当前用户自己的自定义预设。 */
 export async function deletePreset(id: number): Promise<{ deleted: boolean; id: number }> {
-  return apiFetch<{ deleted: boolean; id: number }>(`/v1/presets/${id}`, { method: 'DELETE' })
+  return apiFetch<{ deleted: boolean; id: number }>(`/presets/${id}`, { method: 'DELETE' })
 }

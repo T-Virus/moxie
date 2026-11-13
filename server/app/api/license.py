@@ -50,9 +50,15 @@ def public_key(request: Request):
 
 
 @router.post("/verify")
-def verify(payload: LicenseVerifyRequest, request: Request):
+def verify(
+    payload: LicenseVerifyRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    # 联网校验需带 DB 会话：签名有效但设备已被解绑/吊销时返回 revoked。
     return verify_license(
         payload.payload,
         payload.signature,
         signer=request.app.state.license_signer,
+        session=db,
     )

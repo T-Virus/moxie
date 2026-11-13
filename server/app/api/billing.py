@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db, utcnow
-from ..deps import AuthContext, get_auth, require_admin
+from ..deps import AuthContext, get_auth, require_admin, require_staff
 from ..errors import ApiError
 from ..metrics import increment
 from ..models import Order, Plan, Subscription, UsageEvent
@@ -432,7 +432,7 @@ async def webhook(provider: str, request: Request, db: Session = Depends(get_db)
 @router.get("/admin/renewal-reminders")
 def renewal_reminders(
     request: Request,
-    _admin=Depends(require_admin),
+    _staff=Depends(require_staff),
     db: Session = Depends(get_db),
 ):
     return {"reminders": subsvc.reminders(db, request.app.state.settings)}

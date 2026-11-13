@@ -89,6 +89,7 @@ def encrypted_app(tmp_path):
         license_private_key_pem="",
         license_allow_ephemeral_key=True,
         legal_gate_enabled=False,
+        email_verification_required=False,  # 本用例验证载荷加解密，注册需直接返回 token
         storage_backend="local",
         storage_local_dir=str(tmp_path / "artifacts"),
         task_source_dirs=str(tmp_path),

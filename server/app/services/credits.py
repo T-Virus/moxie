@@ -109,21 +109,28 @@ def grant_for_order(
 
 
 def active_grants(
-    session: Session, account_id: int, metric: str, now: datetime | None = None
+    session: Session,
+    account_id: int,
+    metric: str,
+    now: datetime | None = None,
+    *,
+    for_update: bool = False,
 ) -> list[CreditGrant]:
     now = now or utcnow()
-    return list(
-        session.scalars(
-            select(CreditGrant)
-            .where(
-                CreditGrant.account_id == account_id,
-                CreditGrant.metric == metric,
-                CreditGrant.status == "active",
-                CreditGrant.expires_at > now,
-            )
-            .order_by(CreditGrant.expires_at.asc(), CreditGrant.id.asc())
-        ).all()
+    stmt = (
+        select(CreditGrant)
+        .where(
+            CreditGrant.account_id == account_id,
+            CreditGrant.metric == metric,
+            CreditGrant.status == "active",
+            CreditGrant.expires_at > now,
+        )
+        .order_by(CreditGrant.expires_at.asc(), CreditGrant.id.asc())
     )
+    if for_update:
+        # 预占需要行锁：并发请求若读到同一个 free，各自 += take 会超额消耗额度包。
+        stmt = stmt.with_for_update()
+    return list(session.scalars(stmt).all())
 
 
 def available(session: Session, account_id: int, metric: str, now: datetime | None = None) -> int:
@@ -144,7 +151,7 @@ def reserve_pack(
     now = now or utcnow()
     remaining = quantity
     items: list[dict] = []
-    for grant in active_grants(session, account_id, metric, now):
+    for grant in active_grants(session, account_id, metric, now, for_update=True):
         free = max(grant.quantity_granted - grant.quantity_used - grant.quantity_reserved, 0)
         if free <= 0:
             continue
@@ -167,7 +174,7 @@ def commit_pack(session: Session, items: tuple[dict, ...] | list[dict], now: dat
     """把预占转成已用；已用完的包标记 depleted。"""
     now = now or utcnow()
     for item in items or ():
-        grant = session.get(CreditGrant, int(item["grant_id"]))
+        grant = session.get(CreditGrant, int(item["grant_id"]), with_for_update=True)
         if grant is None:
             continue
         qty = int(item["quantity"])
@@ -180,7 +187,7 @@ def commit_pack(session: Session, items: tuple[dict, ...] | list[dict], now: dat
 
 def release_pack(session: Session, items: tuple[dict, ...] | list[dict]) -> None:
     for item in items or ():
-        grant = session.get(CreditGrant, int(item["grant_id"]))
+        grant = session.get(CreditGrant, int(item["grant_id"]), with_for_update=True)
         if grant is None:
             continue
         grant.quantity_reserved = max(grant.quantity_reserved - int(item["quantity"]), 0)

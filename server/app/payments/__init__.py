@@ -63,7 +63,7 @@ def get_provider(name: str, settings, http_client=None) -> PaymentProvider:
         raise ApiError(404, "unknown_provider", f"未知支付渠道：{name}")
     # mock/fake 只能用于测试环境；生产/预发必须禁止注册与调用
     if name in ("mock", "fake"):
-        if settings.env not in ("test", "dev"):
+        if settings.is_production:
             raise ApiError(403, "provider_not_allowed_in_env", f"{name} 渠道仅限测试环境")
         if name == "mock" and not settings.payments_mock_enabled:
             raise ApiError(403, "mock_payment_disabled", "mock 支付渠道未启用")

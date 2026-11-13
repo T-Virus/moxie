@@ -834,7 +834,6 @@ def execute_agent_run(
                         skill,
                         settings,
                         storage=storage,
-                        session=session,
                         api_key=api_key,
                         byok=byok,
                     )
@@ -850,7 +849,6 @@ def execute_agent_run(
                         extra,
                         skill,
                         settings,
-                        session=session,
                         api_key=api_key,
                         byok=byok,
                     )

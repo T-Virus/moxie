@@ -146,6 +146,7 @@ class ReviewPromptService:
         model: str,
         api_key: str,
         byok: bool = False,
+        base_url: str | None = None,
         on_result=None,
         chapters_doc: dict | None = None,
         decomposed_doc: dict | None = None,

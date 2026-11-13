@@ -150,3 +150,65 @@ def test_user_custom_preset_flows_to_client_presets(client, headers):
     listed = client.get("/v1/presets?type=outline_ending", headers=headers).json()
     values = {item["value"] for item in listed["groups"]["outline_ending"]}
     assert "闭环结局测试值" in values
+
+
+def test_admin_quota_adjustment_visible_to_client_entitlements(client, headers, app, account):
+    """后台手工调额 → C 端 /v1/entitlements 立即读到新额度（三端同源，不缓存旧值）。"""
+    subscribe(client, headers)
+    account_id = account["account"]["id"]
+    _promote(app, account_id)
+
+    def limit_of(metric: str) -> int:
+        body = client.get("/v1/entitlements", headers=headers).json()
+        row = next(item for item in body["metrics"] if item["metric"] == metric)
+        return int(row["limit"])
+
+    def used_of(metric: str) -> int:
+        body = client.get("/v1/entitlements", headers=headers).json()
+        row = next(item for item in body["metrics"] if item["metric"] == metric)
+        return int(row["used"])
+
+    limit = limit_of("books_month")
+    assert used_of("books_month") == 0
+
+    # quantity=-2 = 扣减可用额度 2（used +2）；quantity 为正数时表示返还额度。
+    resp = client.post(
+        f"/v1/admin/accounts/{account_id}/quota-adjustments",
+        headers=headers,
+        json={
+            "metric": "books_month",
+            "quantity": -2,
+            "reason": "三端联动回归",
+            "idempotency_key": f"sync-quota-{uuid.uuid4()}",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["before"] == 0
+    assert resp.json()["after"] == 2
+    # C 端读到的已用额度同步为 2，剩余额度相应减少 2
+    assert used_of("books_month") == 2
+    body = client.get("/v1/entitlements", headers=headers).json()
+    row = next(item for item in body["metrics"] if item["metric"] == "books_month")
+    assert row["remaining"] == limit - 2
+
+
+def test_admin_subscription_extend_visible_to_client_current(client, headers, app, account):
+    """后台延长订阅 → C 端 /v1/subscriptions/current 的到期时间同步变化。"""
+    subscribe(client, headers)
+    account_id = account["account"]["id"]
+    _promote(app, account_id)
+
+    current = client.get("/v1/subscriptions/current", headers=headers).json()
+    before = current["current_end_at"]
+    sub_id = current["id"]
+
+    resp = client.patch(
+        f"/v1/admin/subscriptions/{sub_id}",
+        headers=headers,
+        json={"extend_days": 10, "note": "三端联动回归"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    after = client.get("/v1/subscriptions/current", headers=headers).json()
+    assert after["current_end_at"] > before
+

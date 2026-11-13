@@ -150,7 +150,7 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
             "message": "验证邮件已发送，请前往邮箱点击链接完成验证后再登录。",
         }
         # 未真正发出（SMTP 未配置等）且非生产：把链接直接返回，方便本地验证
-        if not sent and settings.env != "production":
+        if not sent and not settings.is_production:
             result["verify_url"] = verify_url
         return result
     result = _issue_tokens(db, request, account)
@@ -243,7 +243,7 @@ def resend_verification(payload: ResendVerificationRequest, request: Request, db
             raise ApiError(429, "too_frequent", "验证邮件发送过于频繁，请稍后再试")
         token, verify_url, sent = _create_verification(db, account, settings, request)
         db.commit()
-        if not sent and settings.env != "production":
+        if not sent and not settings.is_production:
             return {
                 "status": "pending_verification",
                 "email": email,

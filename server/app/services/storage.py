@@ -416,6 +416,20 @@ class S3Storage(Storage):
         )
 
 
+def _artifact_signing_secret(settings: Settings) -> str:
+    """产物下载签名密钥：优先独立配置，否则从 JWT 密钥单向派生。
+
+    禁止把 JWT_SECRET 直接当作 HMAC 密钥复用（跨用途复用会让 JWT 伪造
+    与下载签名伪造互相放大）。生产由闸门强制要求 ARTIFACT_SIGNING_SECRET。
+    """
+    configured = (settings.artifact_signing_secret or "").strip()
+    if configured:
+        return configured
+    return hashlib.sha256(
+        b"moxie-artifact-signing-v1:" + (settings.jwt_secret or "").encode("utf-8")
+    ).hexdigest()
+
+
 def build_storage(
     settings: Settings,
     session_factory: sessionmaker | None = None,
@@ -424,6 +438,7 @@ def build_storage(
 ) -> Storage:
     """按 STORAGE_BACKEND 选择后端；db 需要数据库会话（工厂或当前事务会话）。"""
     backend = (settings.storage_backend or "db").lower()
+    signing_secret = _artifact_signing_secret(settings)
     if backend in {"s3", "minio", "oss"}:
         return S3Storage(settings)
     if backend in {"db", "database"}:
@@ -431,7 +446,7 @@ def build_storage(
             session_factory,
             session=session,
             public_base_url=settings.storage_public_base_url,
-            signing_secret=settings.artifact_signing_secret or settings.jwt_secret,
+            signing_secret=signing_secret,
         )
     return LocalStorage(
         Path(settings.storage_local_dir),

@@ -19,31 +19,25 @@ const canWrite = computed(() => can(role, 'invoices:write'))
 const status = ref('')
 const page = ref(1)
 const pageSize = 20
-const allRows = ref<InvoiceRow[]>([])
+const rows = ref<InvoiceRow[]>([])
+const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 
-const filteredRows = computed(() => {
-  if (!status.value) return allRows.value
-  if (status.value === 'voided') {
-    return allRows.value.filter(row => row.status === 'voided' || row.status === 'rejected')
-  }
-  return allRows.value.filter(row => row.status === status.value)
-})
-
-const visibleRows = computed(() => {
-  const start = (page.value - 1) * pageSize
-  return filteredRows.value.slice(start, start + pageSize)
-})
-
+/** 分页与状态筛选交给服务端：后端默认只返回 50 条，本地切片会漏掉后续数据。 */
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await api.invoices({})
-    allRows.value = normalizeList<InvoiceRow>(data).items
+    const query: Record<string, unknown> = { page: page.value, page_size: pageSize }
+    if (status.value) query.status = status.value
+    const data = await api.invoices(query)
+    const list = normalizeList<InvoiceRow>(data)
+    rows.value = list.items
+    total.value = list.total ?? list.items.length
   } catch (e) {
-    allRows.value = []
+    rows.value = []
+    total.value = 0
     error.value = errorMessage(e)
   } finally {
     loading.value = false
@@ -52,10 +46,12 @@ async function load() {
 
 function changeStatus() {
   page.value = 1
+  void load()
 }
 
 function setPage(next: number) {
   page.value = next
+  void load()
 }
 
 onMounted(load)
@@ -84,8 +80,12 @@ async function submitAction() {
   submitting.value = true
   actionError.value = ''
   try {
-    await api.updateInvoice(target.value.id, actionMode.value === 'issue' ? 'issued' : 'voided', note.value.trim())
-    pushToast(actionMode.value === 'issue' ? '发票已开具' : '发票已作废')
+    if (actionMode.value === 'issue') {
+      await api.issueInvoice(target.value.id, note.value.trim())
+    } else {
+      await api.voidInvoice(target.value.id, note.value.trim())
+    }
+    pushToast(actionMode.value === 'issue' ? '发票已提交开具' : '发票已作废')
     actionOpen.value = false
     await load()
   } catch (e) {
@@ -120,16 +120,16 @@ async function submitAction() {
         <option value="voided">已作废</option>
       </select>
       <div class="spacer"></div>
-      <span class="muted" style="font-size: 12px">共 {{ formatNumber(filteredRows.length) }} 条开票记录</span>
+      <span class="muted" style="font-size: 12px">共 {{ formatNumber(total) }} 条开票记录</span>
     </div>
 
-    <div v-if="loading && !allRows.length">
+    <div v-if="loading && !rows.length">
       <StateBlock kind="loading" title="正在加载开票记录…" />
     </div>
     <div v-else-if="error">
       <StateBlock kind="error" title="开票记录加载失败" :message="error" retry-label="重试" @retry="load" />
     </div>
-    <div v-else-if="!filteredRows.length">
+    <div v-else-if="!rows.length">
       <StateBlock kind="empty" title="暂无开票记录" message="当前筛选条件下没有发票申请。" />
     </div>
     <template v-else>
@@ -150,7 +150,7 @@ async function submitAction() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in visibleRows" :key="row.id">
+            <tr v-for="row in rows" :key="row.id">
               <td class="mono">#{{ row.id }}</td>
               <td class="mono">#{{ row.order_id }}</td>
               <td>
@@ -177,7 +177,7 @@ async function submitAction() {
           </tbody>
         </table>
       </div>
-      <Pager :page="page" :page-size="pageSize" :total="filteredRows.length" :loading="loading" @update:page="setPage" />
+      <Pager :page="page" :page-size="pageSize" :total="total" :loading="loading" @update:page="setPage" />
     </template>
   </div>
 

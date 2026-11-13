@@ -70,6 +70,8 @@ PAYMOCK="$(get_env PAYMENTS_MOCK_ENABLED)"
 PAYFAKE="$(get_env PAYMENTS_FAKE_ENABLED)"
 LICEPI="$(get_env LICENSE_ALLOW_EPHEMERAL_KEY)"
 PENC="$(get_env PAYLOAD_ENCRYPTION_ENABLED)"
+ARTSEC="$(get_env ARTIFACT_SIGNING_SECRET)"
+MODSEC="$(get_env MODEL_KEY_SECRET)"
 
 # --- 逐项检查 ---
 if [ -n "$JWT" ] && [ "${#JWT}" -ge 32 ] && [[ "$JWT" != *change-me* ]]; then ok "JWT_SECRET 已设置且长度>=32"
@@ -82,6 +84,12 @@ if [[ "$PENC" == "true" ]]; then
   if [ -n "$PAY" ] && [[ "$PAY" == *BEGIN* ]]; then ok "PAYLOAD_CRYPTO_PRIVATE_KEY_PEM 已设置(P-256)"
   else bad "PAYLOAD_ENCRYPTION_ENABLED=true，但 PAYLOAD_CRYPTO_PRIVATE_KEY_PEM 缺失"; fi
 fi
+
+if [ -n "$ARTSEC" ] && [ "${#ARTSEC}" -ge 32 ]; then ok "ARTIFACT_SIGNING_SECRET 已设置"
+else bad "ARTIFACT_SIGNING_SECRET 必须设置且>=32 字符（产物下载签名不可复用 JWT_SECRET）"; fi
+
+if [ -n "$MODSEC" ] && [ "${#MODSEC}" -ge 32 ]; then ok "MODEL_KEY_SECRET 已设置"
+else bad "MODEL_KEY_SECRET 必须设置且>=32 字符（工序模型 Key 需加密落库）"; fi
 
 if [ -n "$CORS" ] && [ "$CORS" != "*" ]; then ok "CORS_ALLOW_ORIGINS 已设置且非通配"
 else bad "CORS_ALLOW_ORIGINS 必须设置具体来源（禁止 *，生产启动会校验）"; fi
@@ -121,6 +129,12 @@ if [ "$GEN_SECRETS" -eq 1 ]; then
       openssl ecparam -name prime256v1 -genkey -noout -out "$TMP/pay.pem" 2>/dev/null
       set_env PAYLOAD_CRYPTO_PRIVATE_KEY_PEM "$(pem_to_oneline "$TMP/pay.pem")"; echo "  + 已生成 PAYLOAD_CRYPTO_PRIVATE_KEY_PEM (P-256)"
     fi
+    if [ -z "$ARTSEC" ] || [ "${#ARTSEC}" -lt 32 ]; then
+      set_env ARTIFACT_SIGNING_SECRET "$(openssl rand -hex 32)"; echo "  + 已生成 ARTIFACT_SIGNING_SECRET"
+    fi
+    if [ -z "$MODSEC" ] || [ "${#MODSEC}" -lt 32 ]; then
+      set_env MODEL_KEY_SECRET "$(openssl rand -hex 32)"; echo "  + 已生成 MODEL_KEY_SECRET"
+    fi
     # 数据库口令（DATABASE_URL 中的占位口令）—— 启动闸门要求非 change-me
     if [[ "$DB" == *change-me* ]]; then
       DBPW="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 24)"
@@ -143,7 +157,7 @@ fi
 echo
 if [ "$ERR" -ne 0 ]; then
   echo "✗ 校验未通过，请按上面提示补全 server/.env 后再运行 ./start.sh"
-  [ "$GEN_SECRETS" -eq 0 ] && echo "  提示：可加 --gen-secrets 自动生成缺失密钥（JWT/License/Payload）"
+  [ "$GEN_SECRETS" -eq 0 ] && echo "  提示：可加 --gen-secrets 自动生成缺失密钥（JWT/License/Payload/产物签名/模型Key）"
   exit 1
 fi
 echo "✓ 配置校验通过，可运行 ./start.sh 启动。"

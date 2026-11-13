@@ -462,7 +462,7 @@ def get_reconcile(
 
 @router.get("/admin/payments/reconcile/export")
 def export_reconcile(
-    provider: str = Query(default="wechat"),
+    provider: str = Query(default="wechat", pattern="^(wechat|alipay|stripe|mock|fake)$"),
     biz_date: str = Query(...),
     _staff=Depends(require_staff),
     db: Session = Depends(get_db),
@@ -478,17 +478,24 @@ def export_reconcile(
     )
     if row is None:
         raise ApiError(404, "reconcile_not_found", "该日对账报告不存在")
+
+    def cell(value) -> str:
+        """CSV 公式注入防护：对账数据含渠道外部单号，Excel 打开时会执行
+        以 = + - @ 或控制字符开头的单元格，统一前置单引号转义。"""
+        text = "" if value is None else str(value)
+        return "'" + text if text and text[0] in "=+-@\t\r" else text
+
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(["type", "external_order_no", "order_id", "amount_cents", "channel_amount_cents", "count"])
     for item in row.items:
         writer.writerow([
-            item.get("type", ""),
-            item.get("external_order_no", ""),
-            item.get("order_id", ""),
-            item.get("amount_cents", item.get("local_amount_cents", "")),
-            item.get("channel_amount_cents", ""),
-            item.get("count", ""),
+            cell(item.get("type", "")),
+            cell(item.get("external_order_no", "")),
+            cell(item.get("order_id", "")),
+            cell(item.get("amount_cents", item.get("local_amount_cents", ""))),
+            cell(item.get("channel_amount_cents", "")),
+            cell(item.get("count", "")),
         ])
     return PlainTextResponse(
         buffer.getvalue(),
@@ -549,6 +556,8 @@ def admin_issue_invoice(
     row = db.get(InvoiceRequest, invoice_id)
     if row is None:
         raise ApiError(404, "invoice_not_found", "发票申请不存在")
+    if payload and (payload.note or "").strip():
+        row.note = payload.note.strip()[:200]
     _, extra = invoicesvc.apply_invoice(
         db, row, request.app.state.settings, actor_id=admin.id, request=request,
         provider_name=payload.provider if payload else None,

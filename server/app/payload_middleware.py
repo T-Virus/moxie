@@ -31,7 +31,9 @@ _EXEMPT_PREFIXES = (
     "/v1/webhooks",
     "/v1/payments/invoices/callback",
     "/v1/payments/stripe",
-    "/v1/gateway",
+    # 网关实际路由是 /v1/chat/completions（gateway.router 无 prefix，
+    # 由 main.py 以 /v1 挂载），走正常加解密；流式响应 content-type 非 JSON，
+    # 在 _wrap_send 里逐帧透传，不参与缓冲加密。这里不要写不存在的 /v1/gateway。
     "/v1/admin/payments/reconcile/export",
 )
 _EXEMPT_PATTERNS = (
@@ -77,6 +79,10 @@ class PayloadCryptoMiddleware:
             return await self.app(scope, receive, send)
         method = scope.get("method", "GET").upper()
         path = scope.get("path", "")
+        # 固化 AAD 用的原始 path?query：内层 trim_query_params 会改写
+        # scope["query_string"]，若响应阶段重新读取 scope 会导致前后 AAD
+        # 不一致，客户端解密响应时报 payload_decrypt_failed。
+        path_query = _path_with_query(scope)
         if encryption_exempt(path, method):
             return await self.app(scope, receive, send)
 
@@ -122,7 +128,7 @@ class PayloadCryptoMiddleware:
                         key,
                         nonce,
                         body,
-                        request_aad(method, _path_with_query(scope), key_id),
+                        request_aad(method, path_query, key_id),
                     )
                 except Exception:  # noqa: BLE001
                     return await self._error(
@@ -160,7 +166,7 @@ class PayloadCryptoMiddleware:
         await self.app(
             scope,
             replay_receive,
-            self._wrap_send(send, key, key_id, scope),
+            self._wrap_send(send, key, key_id, scope, path_query),
         )
 
     @staticmethod
@@ -174,7 +180,7 @@ class PayloadCryptoMiddleware:
             if not message.get("more_body", False):
                 return b"".join(chunks), False
 
-    def _wrap_send(self, send, key: bytes, key_id: str, scope: dict):
+    def _wrap_send(self, send, key: bytes, key_id: str, scope: dict, path_query: str):
         start_message: dict | None = None
         buffer: list[bytes] = []
         encrypt_response = False
@@ -208,11 +214,11 @@ class PayloadCryptoMiddleware:
                     nonce, ciphertext = self.crypto.encrypt(
                         key,
                         body,
-                        response_aad(
-                            scope.get("method", "GET"),
-                            _path_with_query(scope),
-                            key_id,
-                        ),
+                    response_aad(
+                        scope.get("method", "GET"),
+                        path_query,
+                        key_id,
+                    ),
                     )
                 except Exception:  # noqa: BLE001
                     logger.exception("payload response encryption failed")

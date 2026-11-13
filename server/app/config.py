@@ -17,8 +17,21 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    @property
+    def is_production(self) -> bool:
+        """安全闸门的唯一判定口径：除显式开发/测试环境外一律按生产处理。
+
+        原来各处散落 `env in ("prod","production")` / `env != "production"` /
+        `env not in ("test","dev")`，写法不一致（例如 ENV=prod 时验证链接仍会
+        回显、ENV=staging 时弱密钥校验被跳过）。统一为白名单后，任何非
+        dev/test 的环境都会强制执行生产校验。
+        """
+        return self.env.strip().lower() not in {"dev", "test", "testing", "local"}
+
     app_name: str = "moxie-server"
     env: str = "dev"
+    # 是否暴露 /docs /redoc /openapi.json；留空时仅非生产环境开启。
+    docs_enabled: bool | None = None
     api_prefix: str = "/v1"
     # 是否信任反向代理注入的 X-Forwarded-For 作为客户端真实 IP。
     # 默认 False：直接取直连对端 IP，防止客户端伪造 XFF 绕过基于 IP 的限流/失败锁定。
@@ -130,6 +143,9 @@ class Settings(BaseSettings):
     scheduler_interval_seconds: int = 60
     task_lease_seconds: int = 1800
     metrics_enabled: bool = True
+    # /metrics 访问令牌：配置后需带 X-Metrics-Token 头（或 ?token=）；
+    # 生产环境未配置时 /metrics 直接拒绝，避免队列/业务指标公开暴露。
+    metrics_token: str = ""
     sentry_dsn: str = ""
     register_rate_limit_per_minute: int = 10
     login_rate_limit_per_minute: int = 20
@@ -180,6 +196,9 @@ class Settings(BaseSettings):
     # 模型网关
     llm_base_url: str = "https://api.deepseek.com"
     llm_api_key: str = ""  # 留空，运行时从环境变量 LLM_API_KEY 读取；请勿在此硬编码密钥
+    # 后台自定义模型网关地址的 SSRF 防护：默认禁止指向内网 / 回环 / 云元数据地址。
+    # 自托管 Ollama 等确实需要内网地址时，显式设为 true 并自行承担出站风险。
+    model_gateway_allow_private_networks: bool = False
     llm_model: str = "deepseek-v4-flash"
     gateway_timeout_seconds: float = 120.0
     gateway_max_retries: int = 2

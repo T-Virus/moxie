@@ -54,6 +54,8 @@ def _prod_settings(tmp_path, **overrides) -> Settings:
         payload_encryption_enabled=False,
         payments_mock_enabled=False,
         payments_fake_enabled=False,
+        artifact_signing_secret="test-artifact-signing-secret",
+        model_key_secret="test-model-key-secret",
         redis_enabled=False,
         log_level="WARNING",
     )
@@ -187,6 +189,9 @@ def test_production_mock_checkout_returns_4xx_and_no_subscription(tmp_path):
         notifications_enabled=False,
         log_level="WARNING",
         payload_encryption_enabled=False,
+        email_verification_required=False,  # 本用例验证 mock 渠道闸门，不走邮箱验证流程
+        artifact_signing_secret="test-artifact-signing-secret",
+        model_key_secret="test-model-key-secret",
     )
     with TestClient(create_app(settings)) as client:
         registered = client.post(

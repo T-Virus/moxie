@@ -166,6 +166,10 @@ def apply_refund_result(
     now = now or utcnow()
     if refund.status == "succeeded":
         return
+    # 渠道异步退款通知用 "refunded"/"refund_failed"，服务端主动退款用
+    # "succeeded"/"failed"。曾因未归一导致成功回调被当作 pending 丢弃：
+    # 不累加 refunded_cents、不回收权益、订单状态不推进。
+    status = {"refunded": "succeeded", "refund_failed": "failed"}.get(status, status)
     if status != "succeeded":
         refund.status = "failed" if status == "failed" else "pending"
         refund.meta = {**(refund.meta or {}), "callback_status": status}
@@ -246,6 +250,10 @@ def create_upgrade_order(
         raise ApiError(409, "downgrade_not_supported", "暂不支持降级，请先取消后重新购买")
     if plan.currency != current.currency:
         raise ApiError(422, "currency_mismatch", "套餐币种不一致")
+    # 已过期订阅 remaining=0 → 补差也为 0，曾被直接置为 paid 并免费升级到更贵套餐。
+    # 升级必须以「仍在有效期内的订阅」为前提。
+    if sub.current_end_at <= now or sub.status not in subsvc.SERVICE_STATUSES:
+        raise ApiError(409, "subscription_not_active", "当前订阅不在有效期内，无法升级，请先续费")
 
     total = max((sub.current_end_at - sub.current_start_at).total_seconds(), 1)
     remaining = max((sub.current_end_at - now).total_seconds(), 0)

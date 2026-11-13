@@ -494,8 +494,23 @@ export const api = {
   invoices(query: Record<string, unknown>) {
     return request<any>('/v1/admin/invoices', { query })
   },
+  /** 仅用于历史数据修正：直接改 DB 状态，不触发渠道开票/作废。 */
   updateInvoice(id: number, status: 'issued' | 'voided', note: string) {
     return request<any>(`/v1/admin/invoices/${id}`, { method: 'POST', body: { status, note } })
+  },
+  /** 走渠道端点申请开票（requested/failed → issuing → issued/failed）。 */
+  issueInvoice(id: number, note: string) {
+    return request<any>(`/v1/admin/invoices/${id}/issue`, {
+      method: 'POST',
+      body: { note: note || undefined },
+    })
+  },
+  /** 走渠道端点作废发票，reason 写入审计日志。 */
+  voidInvoice(id: number, reason: string) {
+    return request<any>(`/v1/admin/invoices/${id}/void`, {
+      method: 'POST',
+      body: { reason },
+    })
   },
 
   reconcile(provider: string, bizDate: string) {

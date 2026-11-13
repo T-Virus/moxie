@@ -57,7 +57,7 @@ from ..services import notifications as nsvc
 from ..services import subscription as subsvc
 from ..services.audit import write_audit
 from ..services.model_config import describe_configs, encrypt_key, resolve_step_model
-from ..services.model_gateway import complete_sync
+from ..services.model_gateway import complete_sync, validate_upstream_base_url
 from ..services.uploads import safe_filename as safe_upload_name
 from ..services.quota import QuotaService, period_of
 
@@ -676,7 +676,10 @@ def adjust_quota(
         db.add(agg)
         db.flush()
     before = agg.used
-    agg.used = max(agg.used + payload.quantity, 0)
+    # 与后台表单「正数增加，负数扣减」保持一致：quantity 是**可用额度**的增减量，
+    # 而 used 是已消耗量。此前写成 used += quantity，导致管理员补偿 +20 反而
+    # 把用户可用额度扣掉 20（跨端语义相反）。
+    agg.used = max(agg.used - payload.quantity, 0)
     agg.updated_at = now
     event = UsageEvent(
         account_id=account_id,
@@ -687,14 +690,16 @@ def adjust_quota(
         idempotency_key=key,
         occurred_at=now,
         meta={"manual": True, "reason": payload.reason, "actor_id": admin.id,
-              "before": before, "after": agg.used},
+              "before": before, "after": agg.used,
+              "direction": "grant" if payload.quantity >= 0 else "deduct"},
     )
     db.add(event)
     audit = write_audit(
         db, actor_id=admin.id, action="quota.adjust", request=request,
         target_type="account", target_id=str(account_id),
         meta={"metric": payload.metric, "quantity": payload.quantity,
-              "reason": payload.reason, "before": before, "after": agg.used},
+              "reason": payload.reason, "before": before, "after": agg.used,
+              "direction": "grant" if payload.quantity >= 0 else "deduct"},
     )
     db.commit()
     db.refresh(event)
@@ -1234,9 +1239,17 @@ def upsert_model_config(
     row.label = payload.label or model_config_svc.STEP_REGISTRY.get(step_key, step_key)
     row.provider = payload.provider
     row.model = payload.model
-    row.base_url = payload.base_url or (
-        "https://ai-gateway.edgeone.link/v1" if payload.provider == "edgeone" else settings.llm_base_url
-    )
+    if payload.base_url:
+        row.base_url = validate_upstream_base_url(
+            payload.base_url,
+            allow_private=settings.model_gateway_allow_private_networks,
+        )
+    else:
+        row.base_url = (
+            "https://ai-gateway.edgeone.link/v1"
+            if payload.provider == "edgeone"
+            else settings.llm_base_url
+        )
     if payload.api_key is not None:
         row.api_key = encrypt_key(payload.api_key, settings) if payload.api_key else None
     row.enabled = payload.enabled
@@ -1300,16 +1313,35 @@ def test_model_config(
     settings = request.app.state.settings
     if step_key not in model_config_svc.STEP_REGISTRY:
         raise ApiError(404, "unknown_step", f"未知工序：{step_key}")
-    base_url = payload.base_url or (
-        "https://ai-gateway.edgeone.link/v1" if payload.provider == "edgeone" else settings.llm_base_url
-    )
+    if payload.base_url:
+        base_url = validate_upstream_base_url(
+            payload.base_url,
+            allow_private=settings.model_gateway_allow_private_networks,
+        )
+    else:
+        base_url = (
+            "https://ai-gateway.edgeone.link/v1"
+            if payload.provider == "edgeone"
+            else settings.llm_base_url
+        )
     api_key = payload.api_key or ""
     if not api_key:
         stored = db.scalars(select(ModelProviderConfig).where(ModelProviderConfig.step_key == step_key)).one_or_none()
         if stored and stored.api_key:
             api_key = decrypt_key(stored.api_key, settings) or ""
+    using_server_key = False
     if not api_key:
         api_key = settings.llm_api_key
+        using_server_key = True
+    # 服务端全局 Key 只允许发往服务端自己配置的地址：否则管理员可把真实 Key
+    # 引流到任意外部域名（即便地址通过了 SSRF 校验）。
+    if using_server_key and payload.base_url:
+        if base_url.rstrip("/") != (settings.llm_base_url or "").rstrip("/"):
+            raise ApiError(
+                422,
+                "server_key_base_url_mismatch",
+                "使用服务端 Key 时不允许自定义 base_url，请显式提供 api_key",
+            )
     try:
         result = complete_sync(
             settings, [{"role": "user", "content": "ping"}],
@@ -1446,19 +1478,22 @@ async def upload_offline_package(
         uploaded_by=_admin.id,
     )
     db.add(pkg)
+    # 先 flush 取得自增主键：否则下面的 `id != pkg.id` 与审计 target_id
+    # 拿到的都是 None（`IS NOT NULL` 会把刚上传的包也置为非当前）。
+    db.flush()
     # 同平台历史版本置为非当前
     db.execute(
         update(OfflinePackage)
         .where(OfflinePackage.platform == platform, OfflinePackage.id != pkg.id)
         .values(is_active=False)
     )
-    db.commit()
-    db.refresh(pkg)
     write_audit(
         db, actor_id=_admin.id, action="offline_package.upload", request=request,
         target_type="offline_package", target_id=str(pkg.id),
         meta={"platform": platform, "version": version_val, "size": reader.n, "filename": safe},
     )
+    db.commit()
+    db.refresh(pkg)
     return _offline_view(pkg, settings)
 
 

@@ -77,6 +77,12 @@ export async function logout(): Promise<void> {
 
 /** 401 时给出就近提示，避免用户只看到「请求失败」 */
 export function authErrorMessage(status: number, code: string, message: string): string {
+  // 先按后端语义码精确匹配：already_verified(409) / token_expired(410) 曾与
+  // 400/409 的状态码分支错配，导致提示文案与后端语义不符。
+  if (code === 'account_exists') return '该邮箱已注册，可直接登录'
+  if (code === 'already_verified') return '该邮箱已验证，请直接登录'
+  if (code === 'token_expired') return '验证链接已过期，请重新获取验证邮件'
+  if (code === 'invalid_token') return '验证链接无效或已使用，请重新获取验证邮件'
   if (status === 401) {
     if (code === 'invalid_credentials') return '账号或密码错误，请检查后重试'
     return '登录状态已失效，请重新登录'
@@ -85,12 +91,9 @@ export function authErrorMessage(status: number, code: string, message: string):
     if (code === 'email_not_verified') return '账号邮箱尚未验证，请先查收验证邮件完成验证'
     return '该账号已被停用，请联系客服'
   }
-  if (status === 400) {
-    if (code === 'invalid_token') return '验证链接无效或已使用，请重新获取验证邮件'
-    if (code === 'token_expired') return '验证链接已过期，请重新获取验证邮件'
-    if (code === 'already_verified') return '该邮箱已验证，请直接登录'
-  }
-  if (status === 409 || code === 'account_exists') return '该邮箱已注册，可直接登录'
+  if (status === 409) return '该邮箱已注册，可直接登录'
+  if (status === 400) return message || '请求参数不合法，请检查后重试'
+  if (status === 410) return message || '验证链接已过期，请重新获取验证邮件'
   if (status === 429) return '操作过于频繁，请稍后再试'
   if (status === 422) return message || '提交内容不合法，请检查邮箱与密码'
   if (status === 0) return '无法连接服务端，请检查网络后重试'

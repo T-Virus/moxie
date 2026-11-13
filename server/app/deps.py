@@ -11,7 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .db import get_db
+from .db import get_db, utcnow
 from .errors import ApiError
 from .models import Account, RefreshSession
 from .security import decode_token
@@ -51,8 +51,19 @@ def get_auth(
         raise ApiError(401, "account_disabled", "账号不存在或已停用")
 
     session_id = payload.get("sid") or ""
-    session = db.scalar(select(RefreshSession).where(RefreshSession.session_id == session_id))
-    if session is None or session.revoked_at is not None:
+    session = db.scalar(
+        select(RefreshSession).where(
+            RefreshSession.session_id == session_id,
+            # 会话必须属于 token 中的账号：否则在 JWT 密钥泄露/为弱值时，
+            # 攻击者可用自己合法登录的 sid 伪造他人 sub 的 access token。
+            RefreshSession.account_id == account_id,
+        )
+    )
+    if (
+        session is None
+        or session.revoked_at is not None
+        or session.expires_at <= utcnow()
+    ):
         raise ApiError(401, "session_revoked", "登录会话已失效，请重新登录")
 
     return AuthContext(account=account, session_id=session_id, device_id=payload.get("dev"))

@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import socket
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 
@@ -14,6 +17,43 @@ from ..errors import ApiError
 from .model_stub import stub_completion
 
 logger = logging.getLogger("moxie.model")
+
+
+def validate_upstream_base_url(raw: str, *, allow_private: bool = False) -> str:
+    """校验后台可提交的模型网关地址，阻断 SSRF（内网 / 回环 / 云元数据 / 非 HTTPS）。
+
+    仅用于「用户可提交」的 base_url 入口（后台模型配置、连通性测试）；
+    服务端自身配置的 llm_base_url 属于运维输入，不在此校验范围内。
+    """
+    value = (raw or "").strip().rstrip("/")
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    allowed_schemes = ("http", "https") if allow_private else ("https",)
+    if parsed.scheme.lower() not in allowed_schemes:
+        raise ApiError(422, "unsafe_base_url", "模型网关地址必须使用 HTTPS")
+    if parsed.username or parsed.password:
+        raise ApiError(422, "unsafe_base_url", "模型网关地址不得携带账号密码")
+    if parsed.query or parsed.fragment:
+        raise ApiError(422, "unsafe_base_url", "模型网关地址不得包含查询参数或锚点")
+    host = parsed.hostname
+    if not host:
+        raise ApiError(422, "unsafe_base_url", "模型网关地址缺少主机名")
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError:
+        raise ApiError(422, "unsafe_base_url", "模型网关域名无法解析")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        # 云元数据（169.254.169.254）属于链路本地，任何模式下都拒绝
+        if ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+            raise ApiError(422, "unsafe_base_url", "模型网关地址禁止指向链路本地 / 云元数据地址")
+        if not allow_private and (
+            ip.is_private or ip.is_loopback or ip.is_reserved
+        ):
+            raise ApiError(422, "unsafe_base_url", "模型网关地址禁止指向内网 / 回环地址")
+    return value
 
 
 @dataclass

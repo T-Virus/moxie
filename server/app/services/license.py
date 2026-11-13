@@ -108,10 +108,28 @@ def verify_license(
     *,
     signer: LicenseSigner,
     now: datetime | None = None,
+    session: Session | None = None,
 ) -> dict:
     now = now or utcnow()
     if payload.get("key_id") != signer.key_id or not signer.verify(payload, signature):
         return {"valid": False, "status": "invalid", "reason": "签名校验失败"}
+
+    # 离线端可只做本地验签（不传 session）；联网校验时必须核对吊销状态，
+    # 否则设备解绑/封禁后旧 License 会一直返回 valid=True。
+    if session is not None:
+        try:
+            account_id = int(payload.get("account_id"))
+            device_id = int(payload.get("device_id"))
+        except (TypeError, ValueError):
+            return {"valid": False, "status": "invalid", "reason": "License 缺少账号/设备标识"}
+        row = session.scalars(
+            select(License)
+            .where(License.account_id == account_id, License.device_id == device_id)
+            .order_by(License.id.desc())
+            .limit(1)
+        ).first()
+        if row is None or row.revoked_at is not None:
+            return {"valid": False, "status": "revoked", "reason": "License 已吊销或不存在"}
 
     try:
         expires_at = datetime.fromisoformat(payload["expires_at"])

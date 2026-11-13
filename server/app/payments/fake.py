@@ -16,7 +16,9 @@ class FakeProvider(MockProvider):
     needs_credentials = False
 
     def configured(self) -> bool:
-        return self.settings.payments_fake_enabled or self.settings.env != "production"
+        # 与 mock 一致：仅由显式开关控制，不能因为 ENV 不是字面量 "production"
+        # 就在 prod/staging 环境被判定为已配置（get_provider 另有环境闸门）。
+        return self.settings.payments_fake_enabled
 
     def create_payment(self, order: Order, context: dict | None = None) -> PaymentIntent:
         self.require_configured()
