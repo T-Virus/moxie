@@ -141,11 +141,11 @@ def _hot_settings(run: RunView, state: dict, extra: dict) -> dict:
 
 
 def _hot_publish(run: RunView, state: dict, extra: dict) -> dict:
-    """阶段6 发布包：质检通过后产出标签/简介/封面提示词/续写入口。"""
+    """发布包：三种模式都只基于全书章纲与卷章概览，不产出正文。"""
     return {
         "title": run.title,
         "genre_name": run.genre_name,
-        "chapters": _state(state, "chapter_expand").get("chapters") or [],
+        "chapters": [],
         "outline": _state(state, "outline").get("chapters") or [],
         "positioning": _state(state, "positioning"),
         "settings": _state(state, "settings"),
@@ -391,21 +391,11 @@ HOT = Graph(
         NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),
         # 阶段4 大纲拆解：总纲 → 分卷 → 章纲（冲突/反转/伏笔/结尾钩子）
         NodeSpec("outline", "outline", "大纲拆解", ("settings",), _hot_outline, serial=True),
-        # 阶段5 黄金三章：主角在场 + 当下危机 + 未知悬念，去AI化润色
-        NodeSpec(
-            "chapter_expand",
-            "chapter_write",
-            "黄金三章",
-            ("outline",),
-            _expand,
-            chaptered=True,
-        ),
-        NodeSpec("hot_preview", "hot_preview", "前三章概览与节奏诊断", ("chapter_expand", "outline"), _hot_preview),
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
             "章节概括",
-            ("chapter_expand", "outline"),
+            ("outline",),
             _summarize,
             serial=True,
         ),
@@ -413,22 +403,22 @@ HOT = Graph(
             "character_graph",
             "lore_extract",
             "角色/势力/道具功法抽取",
-            ("outline", "chapter_expand", "chapter_summarize", "settings"),
+            ("outline", "chapter_summarize", "settings"),
             _lore,
         ),
-        # 阶段6 质检发布：一致性检查 + 平台合规检查，然后产出发布包
+        # 阶段5 质检发布：一致性检查 + 平台合规检查，然后产出发布包
         NodeSpec(
             "review",
             "review",
             "内容体检",
-            ("chapter_expand", "outline", "hot_preview", "chapter_summarize", "character_graph"),
-            _review_from_expand,
+            ("outline", "chapter_summarize", "character_graph"),
+            _review_outline_only,
         ),
         NodeSpec(
             "publish",
             "publish_pack",
             "发布包",
-            ("review", "chapter_expand", "outline", "positioning", "settings"),
+            ("review", "outline", "positioning", "settings"),
             _hot_publish,
         ),
     ),

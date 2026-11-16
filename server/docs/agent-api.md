@@ -70,13 +70,12 @@ server/app/agents/
 `hot`
 ```
 genre_research → positioning → settings → outline(全书章纲)
-  → chapter_expand(chapter_write，仅前三章正文)
-  → hot_preview / chapter_summarize(全量章节概括)
+  → chapter_summarize(全量卷章概括)
   → character_graph(lore_extract) → review → publish
 ```
 > `review` 只记录风险与建议，任何模式都不会 `paused` 等待人工确认，运行直接 `succeeded`。
-> `hot` 按篇幅产出全书大纲与全部章节概括（短篇至少 200 章、长篇至少 2000 章，可用 `target_chapters` 覆盖，上限 5000），
-> 正文与前三章概览只覆盖黄金三章，`summary.chapters_count=3`，大纲/概括数量等于目标章数。
+> `hot` 按篇幅产出全书大纲与全部卷章概括（短篇至少 200 章、长篇至少 2000 章，可用 `target_chapters` 覆盖，上限 5000），
+> 与 `reference` / `custom` 一样不生成正文，`summary.chapters_count=0`，大纲/概括数量等于目标章数。
 
 `reference`
 ```
@@ -314,7 +313,7 @@ curl -s "http://127.0.0.1:8010/v1/agent-runs/$RUN_ID/artifacts/outline.md" -H "A
   `chapter_summaries.json`、`characters.json`、`factions.json`、`items.json`、`story_bible.json`、
   `hot_research.json`、`hot_preview.md`、`decomposed.json`。
 - `reference` 的 `decomposed.json` 是全书拆解结果（含 `segmentation`/`segments`），不写 `chapters.json` / `manuscript.md`；`chapter_summaries.json` 覆盖全卷全章概览。
-- `hot` 的 `outline.md` / `chapter_summaries.json` 覆盖全书目标章数，`chapters.json` / `manuscript.md` / `hot_preview.md` 只含前三章；`custom` 与 `reference` 一样只产出 `outline.md` / `chapter_summaries.json`，不写 `chapters.json` / `manuscript.md`。
+- 三种模式都只产出 `outline.md` / `chapter_summaries.json`（热门另含调研/定位/设定/发布包），不写 `chapters.json` / `manuscript.md` / `chapters_full.json` / `hot_preview.md`。
 - 新增产物字段：
   - `chapters_full.json`：`{book_title, chapters:[{no,title,content}]}`
   - `manuscript.md`：`# 第N章 标题` 分节，逐章正文连贯

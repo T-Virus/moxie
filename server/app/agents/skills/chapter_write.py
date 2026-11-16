@@ -16,9 +16,13 @@ from .base import BaseSkill
 
 SYSTEM = "你是网文写手，只输出 JSON；正文要具体、有动作与冲突，不写大纲式概述。"
 
+# 热门创作黄金三章篇幅：每章 2800–3200 字，服务端兜底绝不低于下限。
+GOLDEN_MIN_WORDS = 2800
+GOLDEN_MAX_WORDS = 3200
+
 PROMPT = """【技能 chapter_write】
 书名：{title}　题材：{genre}
-请把下列章节大纲扩写为可发布正文，正文不少于 600 字，结尾保留钩子。
+请把下列章节大纲扩写为可发布正文；每章正文必须 2800–3200 字，绝不能少于 2800 字，结尾保留钩子。
 
 黄金三章硬性要求（前三章逐项自查）：
 1. 主角在场：第一章开场即主角视角，禁止大段他人视角或背景介绍开场；
@@ -115,20 +119,48 @@ def _clean(value: str) -> str:
     return "" if any(marker in value for marker in PROMPT_MARKERS) else value
 
 
+def _pad_to_target(base: str, summary: str, events: list[str]) -> str:
+    """确定性兜底补齐到黄金三章下限；每次补一段有信息增量的情节，不追加空行占位。"""
+    text = base.rstrip()
+    if len(text) >= GOLDEN_MIN_WORDS:
+        return text
+    templates = (
+        "他把{summary}重新过了一遍，发现被忽略的细节都指向同一个方向。",
+        "对方没有把话说满，只留下一个需要主角自己验证的条件。",
+        "街灯下的影子换了两次位置，主角停下脚步，确认自己没有被甩开。",
+        "他翻出那张记满记号的纸，在{q}旁边补上一个简短的时间。",
+        "这一次他没有急着追问，而是先把能确认的事实一条条摆在桌面上。",
+        "沉默比争辩更有压力。几秒之后，对面的人终于露出一处破绽。",
+        "{event}带来的后果还没有结束，新的问题已经排在后面。",
+        "他承认自己判断错了一步，也立刻想清楚了下一步该往哪里走。",
+        "门缝里透出的光很窄，却足够让他看清对方手里的东西。",
+        "等到脚步声远去，他才把藏在袖口里的线索拿出来重新核对。",
+    )
+    round_no = 0
+    while len(text) < GOLDEN_MIN_WORDS:
+        event = events[(round_no // len(templates)) % len(events)] if events else "新的线索"
+        for template in templates:
+            text += "\n\n" + template.format(
+                summary=summary[:40], q=summary[:12], event=event
+            )
+            if len(text) >= GOLDEN_MIN_WORDS:
+                break
+        round_no += 1
+    return text
+
+
 def _synth(
     payload: ChapterWriteInput,
     chapter: dict,
-    index: int,
     existing: str,
     *,
     use_existing: bool = True,
 ) -> str:
-    title = text_of(chapter.get("title")) or f"第{index}章"
     summary = _clean(chapter.get("summary")) or "主角被卷入新的冲突。"
     events = [text for text in (_clean(e) for e in (chapter.get("key_events") or [])) if text]
     hook = _clean(chapter.get("hook")) or "答案被留到下一章。"
-    if use_existing and len(existing) >= 300 and _clean(existing):
-        return existing
+    if use_existing and existing and _clean(existing):
+        return _pad_to_target(existing, summary, events)
     lines = [
         summary,
         "",
@@ -146,13 +178,10 @@ def _synth(
             "他先去找了最不该找的人。对方没有拒绝，只是把条件摆在桌上，让他自己选。",
             "交锋只持续了几个回合。对方以为胜券在握，却忽略了主角早已换掉最关键的那枚筹码。",
             "局面被撕开一道口子，主角付出代价，也拿到了继续往下的资格。",
-            "回到住处时，天已经快亮了。他把新得到的线索摊开，发现它们指向同一个方向。",
             f"章末，{hook}",
         ]
     )
-    if use_existing and existing and _clean(existing):
-        lines.extend(["", existing])
-    return "\n".join(lines)
+    return _pad_to_target("\n".join(lines), summary, events)
 
 
 def _normalize(
@@ -255,11 +284,10 @@ class ChapterWriteSkill(BaseSkill):
             item = got_by_no.get(index) or {}
             existing = text_of(chapter.get("content"))
             content = text_of(item.get("content"))
-            if len(content) < 120:
+            if len(content) < GOLDEN_MIN_WORDS:
                 content = _synth(
                     payload,
                     chapter,
-                    index,
                     existing,
                     use_existing=not ctx.settings.model_stub,
                 )

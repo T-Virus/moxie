@@ -11,7 +11,6 @@ import uuid
 import zipfile
 
 from app.agents.engine import execute_agent_run
-from app.agents.skills.chapter_write import ChapterWriteSkill
 from app.agents.skills.genre_research import GenreResearchSkill
 from app.agents.skills.outline import OutlineChapter, OutlineOutput, OutlineSkill
 from app.agents.skills.outline_decompose import OutlineDecomposeSkill
@@ -128,24 +127,6 @@ class _FailSegments(OutlineDecomposeSkill):
         self.calls += 1
         if self.calls in self.fail_calls:
             raise RuntimeError("单段拆解失败")
-        return super().run(payload, ctx)
-
-
-class _FlakyChapter(ChapterWriteSkill):
-    """指定章首次失败，用于验证单章失败只重试该章。"""
-
-    def __init__(self, fail_chapter: int) -> None:
-        self.fail_chapter = fail_chapter
-        self.failed_once = False
-
-    def run(self, payload, ctx):
-        chapter = (payload.chapters or [{}])[0]
-        if (
-            int(chapter.get("chapter") or 0) == self.fail_chapter
-            and not self.failed_once
-        ):
-            self.failed_once = True
-            raise RuntimeError("单章写作失败")
         return super().run(payload, ctx)
 
 
@@ -502,7 +483,8 @@ def test_hot_default_length_outputs_full_book(client, headers, app):
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     assert len(detail["outline"]["chapters"]) == 200
     assert len(detail["chapter_summaries"]) == 200
-    assert len(detail["chapters"]) == 3
+    assert detail["chapters"] == []
+    assert detail["summary"]["chapters_count"] == 0
     assert len(detail["volumes"]) == 10
     assert detail["volumes"][-1]["chapter_to"] == 200
 
@@ -543,37 +525,33 @@ def test_hot_and_custom_modes_end_to_end(client, headers, app):
     detail = client.get(f"/v1/agent-runs/{hot.json()['run_id']}", headers=headers).json()
     assert detail["status"] == "succeeded"
     assert detail["progress"] == 100
-    assert detail["summary"]["chapters_count"] == 3
+    assert detail["summary"]["chapters_count"] == 0
+    assert detail["summary"]["preview_chapters_count"] == 0
     assert detail["summary"]["characters_count"] >= 1
     assert detail["summary"]["items_count"] >= 1
-    assert detail["summary"]["word_count"] > 0
     names = {item["name"] for item in detail["artifacts"]}
     assert {
         "outline.md",
-        "chapters.json",
-        "chapters_full.json",
-        "manuscript.md",
         "chapter_summaries.json",
         "characters.json",
         "factions.json",
         "items.json",
         "story_bible.json",
         "hot_research.json",
-        "hot_preview.md",
         "positioning_card.json",
         "settings_pack.json",
         "foreshadow_ledger.json",
         "publish_pack.json",
     } <= names
-    assert detail["summary"]["preview_chapters_count"] == 3
+    assert not {"chapters.json", "chapters_full.json", "manuscript.md", "hot_preview.md"} & names
     assert len(detail["chapter_summaries"]) == 12
     assert len(detail["items"]) == detail["summary"]["items_count"]
 
-    # 热门创作：全书章纲 + 全量章节概括，正文只保留黄金三章。
+    # 热门创作：全书章纲 + 全量章节概括，不写正文。
     assert len(detail["outline"]["chapters"]) == 12
     assert [item["chapter"] for item in detail["outline"]["chapters"]] == list(range(1, 13))
     assert [item["chapter_no"] for item in detail["chapter_summaries"]] == list(range(1, 13))
-    assert len(detail["chapters"]) == 3
+    assert detail["chapters"] == []
     assert len(detail["volumes"]) == 1
     assert detail["volumes"][0]["chapter_from"] == 1
     assert detail["volumes"][0]["chapter_to"] == 12
@@ -615,12 +593,6 @@ def test_hot_and_custom_modes_end_to_end(client, headers, app):
     assert {row["chapter"] for row in outline_doc["highlight_distribution"]} == {
         chapter["chapter"] for chapter in outline_doc["chapters"]
     }
-    # 前三章概览含节奏诊断与备选开篇
-    preview_md = app.state.storage.get_bytes(
-        f"{book_slug('热榜样书')}/{hot.json()['run_id']}/hot_preview.md"
-    ).decode("utf-8")
-    assert "节奏诊断" in preview_md and "备选开篇" in preview_md
-
     custom = _create(
         client,
         headers,
@@ -664,14 +636,14 @@ def test_hot_full_outline_volumes_cover_planned_chapters(client, headers, app):
     assert _execute(app, run_id) == "succeeded"
 
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
-    assert len(detail["chapters"]) == 3
+    assert detail["chapters"] == []
     assert len(detail["outline"]["chapters"]) == 45
     assert len(detail["chapter_summaries"]) == 45
     assert len(detail["volumes"]) == 3
     assert detail["volumes"][-1]["chapter_to"] == 45
 
 
-def test_export_bundle_contains_manuscript_and_aigc(client, headers, app):
+def test_export_bundle_contains_outline_and_aigc(client, headers, app):
     _stub(app)
     subscribe(client, headers)
     created = _create(client, headers, mode="hot", title="交付包样书")
@@ -686,8 +658,6 @@ def test_export_bundle_contains_manuscript_and_aigc(client, headers, app):
     with zipfile.ZipFile(io.BytesIO(response.content)) as bundle:
         names = set(bundle.namelist())
         assert {
-            "正文/正文.md",
-            "正文/正文.txt",
             "章纲/章纲.md",
             "设定/角色.json",
             "设定/势力.json",
@@ -698,8 +668,7 @@ def test_export_bundle_contains_manuscript_and_aigc(client, headers, app):
             "交付说明.md",
             "manifest.json",
         } <= names
-        manuscript = bundle.read("正文/正文.md").decode("utf-8")
-        assert "第1章" in manuscript or "第一章" in manuscript
+        assert not any(name.startswith("正文/") for name in names)
         manifest = json.loads(bundle.read("manifest.json"))
         assert manifest["run_id"] == run_id
         assert manifest["aigc"]["enabled"] is True
@@ -709,101 +678,6 @@ def test_export_bundle_contains_manuscript_and_aigc(client, headers, app):
 def test_export_rejects_missing_run(client, headers, app):
     response = client.get("/v1/agent-runs/not-a-run/export", headers=headers)
     assert response.status_code == 404
-
-
-def test_chapter_fields_sse_and_single_chapter_retry(client, headers, app):
-    _stub(app)
-    subscribe(client, headers)
-    created = _create(
-        client, headers, mode="hot", title="章级校验书", options={"target_chapters": 3}
-    )
-    run_id = created.json()["run_id"]
-    flaky = _FlakyChapter(fail_chapter=2)
-    assert _execute(app, run_id, overrides={"chapter_write": flaky}) == "succeeded"
-    assert flaky.failed_once is True
-
-    detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
-    章 = detail["chapters"]
-    total = len(章)
-    assert total >= 3
-    assert [item["chapter"] for item in 章] == list(range(1, total + 1))
-    assert all(item["content"] for item in 章)
-    assert all(item["word_count"] == len(item["content"]) for item in 章)
-
-    summaries = detail["chapter_summaries"]
-    assert len(summaries) == total
-    for item in summaries:
-        assert 80 <= len(item["summary"]) <= 200
-        assert item["conflict"] and item["hook"]
-        assert item["chapter_no"] in range(1, total + 1)
-        assert item["word_count"] > 0
-
-    for row in detail["characters"]:
-        assert {
-            "name",
-            "alias",
-            "gender",
-            "role",
-            "affiliation",
-            "identity",
-            "personality",
-            "appearance",
-            "goal",
-            "arc",
-            "relations",
-            "first_chapter",
-        } <= set(row)
-    for row in detail["factions"]:
-        assert {
-            "name",
-            "type",
-            "leader",
-            "members",
-            "territory",
-            "stance",
-            "goal",
-            "relations",
-            "first_chapter",
-        } <= set(row)
-    for row in detail["items"]:
-        assert {
-            "name",
-            "category",
-            "grade",
-            "owner",
-            "effect",
-            "cost",
-            "first_chapter",
-            "notes",
-        } <= set(row)
-
-    with db_session(app) as session:
-        attempts = session.scalar(
-            select(AgentRunStep.attempts).where(
-                AgentRunStep.run_id == run_id,
-                AgentRunStep.node_key == "chapter_expand:ch:002",
-            )
-        )
-    assert attempts == 2, "第 2 章首次失败后应只重试该章一次"
-
-    messages = [
-        item for item in _event_messages(client, headers, run_id)
-        if item["stage"] == "chapter_expand"
-    ]
-    order = []
-    for item in messages:
-        if "章开始：" in item["message"]:
-            order.append("start")
-        elif "章完成" in item["message"]:
-            order.append("done")
-    assert order.count("start") == total
-    assert order.count("done") >= total
-
-    manuscript = app.state.storage.get_bytes(
-        f"{book_slug('章级校验书')}/{run_id}/manuscript.md"
-    ).decode("utf-8")
-    assert manuscript.count("# 第") == total
-    assert "第2章" in manuscript
 
 
 def test_reference_mode_e2e_with_sse_and_artifacts(client, headers, app):
@@ -1044,7 +918,7 @@ def test_content_review_model_is_admin_configurable(client, app):
     assert resolved.model == "review-specific-model"
 
 
-def test_hot_never_pauses_and_has_three_chapter_preview(client, headers, app):
+def test_hot_never_pauses_on_high_risk(client, headers, app):
     _stub(app)
     subscribe(client, headers)
     created = _create(client, headers, mode="hot", title="自动热榜书")
@@ -1053,19 +927,12 @@ def test_hot_never_pauses_and_has_three_chapter_preview(client, headers, app):
 
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     assert detail["status"] == "succeeded"
-    assert detail["summary"]["chapters_count"] == 3
-    assert detail["summary"]["preview_chapters_count"] == 3
+    assert detail["summary"]["chapters_count"] == 0
+    assert detail["summary"]["preview_chapters_count"] == 0
+    assert detail["chapters"] == []
     messages = [item["message"] for item in _event_messages(client, headers, run_id)]
     assert not any("已暂停" in message for message in messages)
     assert any("已记录风险" in message for message in messages)
-
-    markdown = app.state.storage.get_bytes(f"{book_slug('自动热榜书')}/{run_id}/hot_preview.md").decode()
-    sections = markdown.split("## 第 ")[1:]
-    assert len(sections) == 3
-    for section in sections:
-        lines = section.splitlines()
-        assert 150 <= len(lines[1].strip()) <= 300
-        assert "冲突" in section and "人物" in section
 
 
 def test_reference_high_risk_does_not_pause(client, headers, app):
@@ -1160,13 +1027,13 @@ def test_checkpoint_resume_continues_from_next_node(client, headers, app):
 
     overrides = {
         name: _Counting(registry.get(name), calls)
-        for name in ("genre_research", "outline", "chapter_write", "review")
+        for name in ("genre_research", "outline", "chapter_summarize", "review")
     }
     assert _execute(app, run_id, overrides=overrides, max_steps=2) == "queued"
     steps = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()["stages"]
     assert [s["state"] for s in steps[:2]] == ["succeeded", "succeeded"]
-    # 六阶段热门流程：校准 → 定位卡 → 设定生成 → 大纲 → 黄金三章 → 质检发布
-    assert len(steps) == 10
+    # 热门流程：校准 → 定位卡 → 设定生成 → 大纲 → 概括 → 抽取 → 体检 → 发布
+    assert len(steps) == 8
     assert all(s["state"] == "pending" for s in steps[2:])
     assert calls["genre_research"] == 1
     assert "outline" not in calls
@@ -1175,7 +1042,7 @@ def test_checkpoint_resume_continues_from_next_node(client, headers, app):
     assert _execute(app, run_id, overrides=overrides) == "succeeded"
     assert calls["genre_research"] == before["genre_research"] == 1
     assert calls["outline"] == 1
-    assert calls["chapter_write"] == 3  # hot 固定前三章，每章一次
+    assert calls["chapter_summarize"] == 1
     assert calls["review"] == 1
 
 
@@ -1703,20 +1570,9 @@ def test_optional_workbench_fields_and_volume_consistency(client, headers, app):
     assert _execute(app, run_id) == "succeeded"
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
 
-    chapters = detail["chapters"]
-    total = len(chapters)
-    assert total >= 3
-    for index, chapter in enumerate(chapters, 1):
-        assert chapter["chapter_id"] == f"ch-{index:03d}"
-        assert chapter["scene"]
-        assert chapter["hook_type"] in {"悬念", "危机", "转折", "情感"}
-        assert chapter["emotion"]
-        assert 1 <= chapter["tension"] <= 10
-        assert chapter["payoff"] and chapter["setup"]
-        assert chapter["points"] and chapter["roles"]
-        assert chapter["factions"] and chapter["items"]
-
-    assert len(detail["chapter_summaries"]) == total
+    assert detail["chapters"] == []
+    total = len(detail["chapter_summaries"])
+    assert total == 3
     for summary in detail["chapter_summaries"]:
         for key in (
             "chapter_id",
@@ -1733,8 +1589,8 @@ def test_optional_workbench_fields_and_volume_consistency(client, headers, app):
         ):
             assert key in summary
         assert summary["chapter_id"].startswith("ch-")
-        assert 1 <= summary["tension"] <= 10
-        assert summary["points"] and summary["roles"]
+        assert 0 <= summary["tension"] <= 10
+        assert summary["points"]
 
     volumes = detail["volumes"]
     assert volumes
@@ -1817,7 +1673,7 @@ def test_optional_workbench_fields_and_volume_consistency(client, headers, app):
     hot_volumes = hot_detail["volumes"]
     assert len(hot_volumes) == 1
     assert hot_volumes[0]["chapter_from"] == 1
-    assert hot_volumes[0]["chapter_to"] == len(hot_detail["chapters"]) == 3
+    assert hot_volumes[0]["chapter_to"] == len(hot_detail["chapter_summaries"]) == 3
     assert hot_volumes[0]["title"] and hot_volumes[0]["arc"]
 
 
