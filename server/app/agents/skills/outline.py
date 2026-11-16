@@ -37,6 +37,9 @@ class OutlineInput(StrictModel):
     research: dict = Field(default_factory=dict)
     decomposition: dict = Field(default_factory=dict)
     adaptation: dict = Field(default_factory=dict)
+    # 热门流程阶段2/3 产出：定位卡与设定包（缺失时为空，不影响 reference/custom）
+    positioning: dict = Field(default_factory=dict)
+    settings: dict = Field(default_factory=dict)
     # 创作高级选项：0 = 沿用篇幅默认；续写章数追加在目标章数之后
     target_chapters: int = Field(default=0, ge=0, le=500)
     sequel_chapters: int = Field(default=0, ge=0, le=200)
@@ -49,6 +52,10 @@ class OutlineChapter(StrictModel):
     key_events: list[str] = Field(default_factory=list)
     hook: str = ""
     arc: str = ""
+    # 阶段4「大纲拆解」结构化字段：冲突 / 反转 / 伏笔
+    conflict: str = ""
+    reversal: str = ""
+    foreshadow: str = ""
 
 
 class OutlineOutput(StrictModel):
@@ -108,6 +115,11 @@ class OutlineOutput(StrictModel):
     audience: str = ""
     book_summary: str = ""
     beats: list[str] = Field(default_factory=list)
+    # 阶段4「大纲拆解」结构化产出：伏笔台账与爽点分布
+    foreshadow_ledger: list[dict] = Field(default_factory=list)
+    highlight_distribution: list[dict] = Field(default_factory=list)
+    # 工作台「伏笔台账」页签契约（client ForeshadowEntry），由台账映射而来
+    foreshadows: list[dict] = Field(default_factory=list)
 
 
 SYSTEM = "你是网文主编，输出可逐章执行的大纲 JSON，不写正文。"
@@ -117,12 +129,21 @@ PROMPT = """【技能 outline】
 题材：{genre}　读者：{audience}　篇幅：{length}
 创作 brief：{brief}
 
+定位卡（用户已确认，必须遵守）：
+{positioning}
+设定包（世界观/力量体系/金手指/角色，正文只引用不另造）：
+{settings}
+
 调研要点：{research}
 改编素材摘要：{material}
 
+请按「总纲 → 分卷 → 章纲」三层拆解：先收敛一句话总纲与设定，再切分卷，
+最后逐章写章纲。每章必须带冲突（conflict）、反转（reversal）、伏笔（foreshadow）、结尾钩子（hook）。
 输出 JSON：
 {{"logline":"一句话故事线","theme":"主题","story_bible":{{"synopsis":"","world":"","power":"","protagonist":"","mainline":""}},
- "chapters":[{{"chapter":1,"title":"","summary":"","key_events":[""],"hook":"","arc":"开局"}}],
+ "chapters":[{{"chapter":1,"title":"","summary":"","key_events":[""],"hook":"","arc":"开局","conflict":"","reversal":"","foreshadow":""}}],
+ "foreshadow_ledger":[{{"id":"F1","desc":"伏笔内容","planted_chapter":1,"payoff_chapter":5}}],
+ "highlight_distribution":[{{"chapter":1,"highlights":["本章兑现的爽点"],"intensity":5}}],
  "volumes":[{{"no":1,"title":"第一卷","summary":"","conflict":"","chapter_from":1,"chapter_to":3,
  "theme":"","core_event":"","conflict_axis":"","end_hook":"","arc":"","tension_profile":"3→5→7"}}],
  "opening":{{"strategy":"","first_image":"","golden_finger_demo":1}},
@@ -143,6 +164,8 @@ PROMPT = """【技能 outline】
  "series_plan":"系列化规划","keywords":["关键词"],"aigc_disclosure":"AI 辅助创作说明",
  "beats":["第1章具体事件","第3章具体事件","第6章阶段兑现"]}}
 章节数要求：{total} 章，章号连续，前三章必须完成「冲突—选择—阶段兑现」。
+每章 conflict/reversal/foreshadow/hook 四项必填；foreshadow_ledger 要覆盖全部伏笔并给出埋设章与回收章。
+爽点分布要服从定位卡的情绪基调配比，每章至少 1 个爽点。
 卷划分：按每 3 章一卷切分（不足 3 章的尾卷独立成卷）；只有一卷时同样输出完整字段。
 作品信息字段要求：除无法从题材/书名/brief 推断的信息外，上面的定位、叙事、连载字段都要填写；
 列表字段每条不超过 60 字，不要输出空字符串占位。
@@ -383,6 +406,20 @@ def _total_of(payload: OutlineInput) -> int:
     return max(1, min(500, base + max(0, payload.sequel_chapters)))
 
 
+def _chapter_structure(index: int, total: int, summary: str, arc: str) -> dict:
+    """阶段4 每章结构化字段的确定性兜底：冲突/反转/伏笔。"""
+    conflict = f"{arc}阶段的正面冲突：主角与对手围绕「{summary[:20]}」交锋" if summary else f"第 {index} 章核心冲突"
+    reversal = ""
+    if index % 3 == 0:
+        reversal = "旧线索被推翻，真正的对手浮出水面"
+    foreshadow = ""
+    if index <= 2:
+        foreshadow = "为后文埋设身世/规则类伏笔"
+    elif index == total:
+        foreshadow = "回收前置伏笔并留下新局钩子"
+    return {"conflict": conflict[:120], "reversal": reversal, "foreshadow": foreshadow}
+
+
 def _fallback(payload: OutlineInput, *, stub: bool = True) -> OutlineOutput:
     material = _material(payload)
     total = _total_of(payload)
@@ -395,6 +432,7 @@ def _fallback(payload: OutlineInput, *, stub: bool = True) -> OutlineOutput:
         summary = text_of(src.get("summary")) or (
             f"《{payload.title}》第 {index} 章：{note}。主角主动作出选择，并把局面推向下一阶段。"
         )
+        structure = _chapter_structure(index, total, summary, arc)
         chapters.append(
             OutlineChapter(
                 chapter=index,
@@ -404,6 +442,9 @@ def _fallback(payload: OutlineInput, *, stub: bool = True) -> OutlineOutput:
                 or [note],
                 hook=text_of(src.get("hook")) or "新的问题被抛出，答案要等到下一章。",
                 arc=arc,
+                conflict=text_of(src.get("conflict")) or structure["conflict"],
+                reversal=text_of(src.get("reversal")) or structure["reversal"],
+                foreshadow=text_of(src.get("foreshadow")) or structure["foreshadow"],
             )
         )
     bible = {
@@ -415,6 +456,8 @@ def _fallback(payload: OutlineInput, *, stub: bool = True) -> OutlineOutput:
     }
     logline = f"一个普通人被卷入{payload.genre_name}世界的核心冲突，在一次次代价中学会主动改写规则。"
     theme = payload.genre_name + "题材下的成长与选择"
+    ledger = _build_ledger(chapters)
+    highlights = _build_highlights(chapters, payload)
     volumes = _build_volumes(chapters, payload)
     map_levels, map_regions, map_scenes = _build_map(
         payload, chapters, bible, stub=stub
@@ -476,7 +519,66 @@ def _fallback(payload: OutlineInput, *, stub: bool = True) -> OutlineOutput:
         audience=audience_text,
         book_summary=bible["synopsis"],
         beats=[chapter.summary[:60] for chapter in chapters[:6]],
+        foreshadow_ledger=ledger,
+        highlight_distribution=highlights,
+        foreshadows=_ledger_to_client(ledger),
     )
+
+
+def _ledger_to_client(ledger: list[dict]) -> list[dict]:
+    """把伏笔台账映射为工作台 ForeshadowEntry 契约（text/chapter/payoff/status）。"""
+    rows: list[dict] = []
+    for item in ledger:
+        planted = int(item.get("planted_chapter") or 0)
+        payoff = int(item.get("payoff_chapter") or 0)
+        rows.append(
+            {
+                "text": text_of(item.get("desc"))[:120],
+                "chapter": planted or None,
+                "payoff": f"第 {payoff} 章兑现" if payoff else "",
+                "status": "未回收",
+            }
+        )
+    return rows
+
+
+def _build_ledger(chapters: list[OutlineChapter]) -> list[dict]:
+    """伏笔台账：从各章伏笔字段聚合，补齐埋设章与回收章。"""
+    rows: list[dict] = []
+    for index, chapter in enumerate(chapters, 1):
+        desc = text_of(chapter.foreshadow)
+        if not desc:
+            continue
+        rows.append(
+            {
+                "id": f"F{len(rows) + 1}",
+                "desc": desc[:160],
+                "planted_chapter": index,
+                "payoff_chapter": min(len(chapters), index + 3),
+            }
+        )
+    return rows
+
+
+def _build_highlights(chapters: list[OutlineChapter], payload: OutlineInput) -> list[dict]:
+    """爽点分布：每章至少 1 个爽点，强度沿章序爬升后在尾章回落。"""
+    positioning = payload.positioning or {}
+    pool = [
+        text_of(item)
+        for item in (positioning.get("highlight_preferences") or [])
+        if text_of(item)
+    ] or ["阶段性兑现", "打脸反转"]
+    rows: list[dict] = []
+    for index, chapter in enumerate(chapters, 1):
+        intensity = min(10, 4 + index) if index < len(chapters) else 6
+        rows.append(
+            {
+                "chapter": chapter.chapter,
+                "highlights": [pool[(index - 1) % len(pool)]],
+                "intensity": intensity,
+            }
+        )
+    return rows
 
 
 def _int(value, default: int = 0) -> int:
@@ -544,6 +646,7 @@ def _normalize(
 ) -> OutlineOutput:
     chapters = []
     for index, item in enumerate(list_of_dicts(data.get("chapters")), 1):
+        fb_chapter = fallback.chapters[index - 1] if index - 1 < len(fallback.chapters) else None
         chapters.append(
             OutlineChapter(
                 chapter=index,
@@ -554,6 +657,13 @@ def _normalize(
                 # 叙事阶段用于分卷结构与节奏检查；模型缺失时按章序回退到模板
                 arc=text_of(item.get("arc"))
                 or ARC_TEMPLATES[(index - 1) % len(ARC_TEMPLATES)][0],
+                # 阶段4 结构化字段：模型 → 章节大纲 → stub 兜底
+                conflict=text_of(item.get("conflict"))
+                or text_of(fb_chapter.conflict if fb_chapter else ""),
+                reversal=text_of(item.get("reversal"))
+                or text_of(fb_chapter.reversal if fb_chapter else ""),
+                foreshadow=text_of(item.get("foreshadow"))
+                or text_of(fb_chapter.foreshadow if fb_chapter else ""),
             )
         )
     if not chapters:
@@ -685,7 +795,74 @@ def _normalize(
         book_summary=book_summary,
         beats=_texts(data, "beats", 20)
         or [chapter.summary[:60] for chapter in chapters[:6]],
+        foreshadow_ledger=_ledger_of(data, chapters),
+        highlight_distribution=_highlights_of(data, chapters, payload),
+        foreshadows=_ledger_to_client(_ledger_of(data, chapters)),
     )
+
+def _ledger_of(data: dict, chapters: list[OutlineChapter]) -> list[dict]:
+    """优先采用模型伏笔台账；缺失或非法时从章纲 foreshadow 字段聚合。"""
+    rows: list[dict] = []
+    for item in list_of_dicts(data.get("foreshadow_ledger"), 30):
+        desc = text_of(item.get("desc"))
+        if not desc:
+            continue
+        try:
+            planted = int(item.get("planted_chapter") or 0)
+            payoff = int(item.get("payoff_chapter") or 0)
+        except (TypeError, ValueError):
+            continue
+        if planted < 1 or payoff < planted:
+            continue
+        rows.append(
+            {
+                "id": text_of(item.get("id")) or f"F{len(rows) + 1}",
+                "desc": desc[:160],
+                "planted_chapter": planted,
+                "payoff_chapter": payoff,
+            }
+        )
+    if rows:
+        return rows
+    return _build_ledger(chapters)
+
+
+def _highlights_of(data: dict, chapters: list[OutlineChapter], payload: OutlineInput) -> list[dict]:
+    """优先采用模型爽点分布；缺失或章号不连续时回退确定性分布。"""
+    computed = _build_highlights(chapters, payload)
+    by_no = {row.get("chapter"): row for row in computed}
+    rows: list[dict] = []
+    for item in list_of_dicts(data.get("highlight_distribution"), 60):
+        try:
+            number = int(item.get("chapter") or 0)
+        except (TypeError, ValueError):
+            continue
+        if number < 1:
+            continue
+        highlights = [
+            text_of(value) for value in (item.get("highlights") or []) if text_of(value)
+        ][:4]
+        try:
+            intensity = int(item.get("intensity") or 0)
+        except (TypeError, ValueError):
+            intensity = 0
+        if not highlights:
+            base = by_no.get(number) or {}
+            highlights = base.get("highlights") or []
+            intensity = intensity or base.get("intensity", 0)
+        rows.append(
+            {
+                "chapter": number,
+                "highlights": highlights,
+                "intensity": max(0, min(10, intensity)),
+            }
+        )
+    covered = {row["chapter"] for row in rows}
+    for base in computed:
+        if base["chapter"] not in covered:
+            rows.append(base)
+    rows.sort(key=lambda row: row["chapter"])
+    return rows
 
 
 class OutlineSkill(BaseSkill):
@@ -708,7 +885,30 @@ class OutlineSkill(BaseSkill):
         research_view = {
             "works": [w.get("title") for w in list_of_dicts(payload.research.get("works"), 4)],
             "takeaways": payload.research.get("takeaways") or [],
+            "hooks": payload.research.get("hooks") or [],
+            "highlight_types": payload.research.get("highlight_types") or [],
+            "anti_cliche": payload.research.get("anti_cliche") or [],
         }
+        positioning = payload.positioning or {}
+        positioning_view = {
+            key: positioning.get(key)
+            for key in (
+                "platform", "platform_direction", "genre_boundary",
+                "emotional_tone", "highlight_preferences", "taboos", "summary",
+            )
+            if text_of(positioning.get(key)) or positioning.get(key)
+        }
+        settings = payload.settings or {}
+        settings_view = {
+            key: settings.get(key)
+            for key in ("worldview", "power_system", "golden_finger")
+            if text_of(settings.get(key))
+        }
+        if settings.get("characters"):
+            settings_view["characters"] = [
+                {k: c.get(k) for k in ("name", "role", "stance", "goal") if text_of(c.get(k))}
+                for c in list_of_dicts(settings.get("characters"), 6)
+            ]
         data = call_json(
             ctx,
             system=SYSTEM,
@@ -718,6 +918,8 @@ class OutlineSkill(BaseSkill):
                 audience="男频" if payload.audience == "male" else "女频",
                 length="长篇" if payload.length == "long" else "短篇",
                 brief=payload.brief or "无",
+                positioning=json.dumps(positioning_view, ensure_ascii=False)[:2000] or "未生成",
+                settings=json.dumps(settings_view, ensure_ascii=False)[:2000] or "未生成",
                 research=json.dumps(research_view, ensure_ascii=False),
                 material=json.dumps(material_view, ensure_ascii=False)[:8000],
                 total=total,

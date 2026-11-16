@@ -142,7 +142,7 @@ const tabs: SegmentedTab[] = [
 ]
 
 const MODE_DESC: Record<RunMode, string> = {
-  hot: '参考同题材热门写法，生成前三章初稿，自动换名换设定。',
+  hot: '六阶段流水线：题材校准 → 定位卡 → 设定生成 → 大纲拆解 → 黄金三章 → 质检发布。',
   reference: '上传大纲或小说，全量改编为新书大纲，自动换名换设定。',
   custom: '从书名开始，世界观、角色与章节全部由你定义。',
 }

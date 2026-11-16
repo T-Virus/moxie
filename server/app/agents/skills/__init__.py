@@ -12,7 +12,10 @@ from .hot_preview import HotPreviewSkill
 from .lore_extract import LoreExtractSkill
 from .outline import OutlineSkill
 from .outline_decompose import OutlineDecomposeSkill
+from .positioning import PositioningSkill
+from .publish_pack import PublishPackSkill
 from .review import ReviewSkill
+from .settings_pack import SettingsPackSkill
 
 __all__ = [
     "AdaptationSkill",
@@ -26,5 +29,8 @@ __all__ = [
     "LoreExtractSkill",
     "OutlineSkill",
     "OutlineDecomposeSkill",
+    "PositioningSkill",
+    "PublishPackSkill",
     "ReviewSkill",
+    "SettingsPackSkill",
 ]

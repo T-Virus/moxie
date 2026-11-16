@@ -204,6 +204,21 @@ export interface TaskDashboard {
   [key: string]: unknown
 }
 
+export interface RunEvent {
+  seq: number
+  stage: string
+  level: string
+  message: string
+  at?: string | null
+}
+
+export interface TaskDetail {
+  source: 'task' | 'agent_run'
+  detail: Record<string, unknown>
+  events: RunEvent[]
+  [key: string]: unknown
+}
+
 export interface AlertRow {
   id?: number
   account_id?: number | null

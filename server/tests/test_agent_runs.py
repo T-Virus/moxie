@@ -316,10 +316,57 @@ def test_hot_and_custom_modes_end_to_end(client, headers, app):
         "story_bible.json",
         "hot_research.json",
         "hot_preview.md",
+        "positioning_card.json",
+        "settings_pack.json",
+        "foreshadow_ledger.json",
+        "publish_pack.json",
     } <= names
     assert detail["summary"]["preview_chapters_count"] == 3
     assert len(detail["chapter_summaries"]) == 3
     assert len(detail["items"]) == detail["summary"]["items_count"]
+
+    # 六阶段结构化产出抽查
+    research_doc = client.get(
+        f"/v1/agent-runs/{hot.json()['run_id']}/artifacts/hot_research.json", headers=headers
+    ).json()
+    assert research_doc["hooks"] and research_doc["highlight_types"]
+    assert research_doc["conflict_density"] and research_doc["opening_pace"]
+    assert research_doc["anti_cliche"]
+    positioning_doc = client.get(
+        f"/v1/agent-runs/{hot.json()['run_id']}/artifacts/positioning_card.json", headers=headers
+    ).json()
+    assert positioning_doc["platform_direction"] and positioning_doc["genre_boundary"]
+    assert positioning_doc["emotional_tone"] and positioning_doc["taboos"]
+    settings_doc = client.get(
+        f"/v1/agent-runs/{hot.json()['run_id']}/artifacts/settings_pack.json", headers=headers
+    ).json()
+    assert settings_doc["worldview"] and settings_doc["power_system"] and settings_doc["golden_finger"]
+    assert settings_doc["characters"] and settings_doc["factions"] and settings_doc["items"]
+    assert settings_doc["faction_relations"]
+    ledger_doc = client.get(
+        f"/v1/agent-runs/{hot.json()['run_id']}/artifacts/foreshadow_ledger.json", headers=headers
+    ).json()
+    assert ledger_doc["ledger"]
+    for row in ledger_doc["ledger"]:
+        assert row["planted_chapter"] >= 1 and row["payoff_chapter"] >= row["planted_chapter"]
+    publish_doc = client.get(
+        f"/v1/agent-runs/{hot.json()['run_id']}/artifacts/publish_pack.json", headers=headers
+    ).json()
+    assert publish_doc["tags"] and publish_doc["blurb"]
+    assert publish_doc["cover_prompt"] and publish_doc["sequel_hint"]
+    # 大纲每章带冲突/反转/伏笔/结尾钩子四要素，且爽点分布覆盖全部章
+    outline_doc = detail["outline"]
+    for chapter in outline_doc["chapters"]:
+        assert chapter["conflict"]
+        assert chapter["hook"]
+    assert {row["chapter"] for row in outline_doc["highlight_distribution"]} == {
+        chapter["chapter"] for chapter in outline_doc["chapters"]
+    }
+    # 前三章概览含节奏诊断与备选开篇
+    preview_md = app.state.storage.get_bytes(
+        f"{book_slug('热榜样书')}/{hot.json()['run_id']}/hot_preview.md"
+    ).decode("utf-8")
+    assert "节奏诊断" in preview_md and "备选开篇" in preview_md
 
     custom = _create(
         client,
@@ -796,15 +843,16 @@ def test_checkpoint_resume_continues_from_next_node(client, headers, app):
     assert _execute(app, run_id, overrides=overrides, max_steps=2) == "queued"
     steps = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()["stages"]
     assert [s["state"] for s in steps[:2]] == ["succeeded", "succeeded"]
-    assert len(steps) == 7
+    # 六阶段热门流程：校准 → 定位卡 → 设定生成 → 大纲 → 黄金三章 → 质检发布
+    assert len(steps) == 10
     assert all(s["state"] == "pending" for s in steps[2:])
     assert calls["genre_research"] == 1
-    assert "outline" not in calls or calls.get("outline", 0) == 1
+    assert "outline" not in calls
 
     before = dict(calls)
     assert _execute(app, run_id, overrides=overrides) == "succeeded"
     assert calls["genre_research"] == before["genre_research"] == 1
-    assert calls["outline"] == before["outline"] == 1
+    assert calls["outline"] == 1
     assert calls["chapter_write"] == 3  # hot 固定前三章，每章一次
     assert calls["review"] == 1
 
@@ -979,6 +1027,55 @@ def test_adaptation_options_reach_skill_payload():
     )
     assert payload["style"] == "冷峻短句"
     assert payload["requirements"] == "主角改为女性"
+
+
+def test_positioning_payload_derives_from_research():
+    """阶段2 定位卡：入参只带榜单校准结论，不做任何用户确认项透传。"""
+    from types import SimpleNamespace
+
+    from app.agents.graph import _hot_positioning
+
+    payload = _hot_positioning(
+        SimpleNamespace(title="定位书", genre_name="玄幻", audience="male", length="long"),
+        {"genre_research": {"hooks": ["第一章抛危机"], "highlight_types": ["打脸反转"]}},
+        {"options": {"platform": "起点"}},  # 选项应被忽略，定位卡不再消费用户输入
+    )
+    assert payload["research"]["hooks"] == ["第一章抛危机"]
+    assert payload["research"]["highlight_types"] == ["打脸反转"]
+    assert "platform" not in payload
+    assert "highlight_preferences" not in payload
+    assert "taboos" not in payload
+
+
+def test_hot_positioning_derived_from_research_flows_to_publish(client, headers, app):
+    """热门六阶段：定位卡由榜单分析自动推导，发布包随交付稿导出。"""
+    _stub(app)
+    subscribe(client, headers)
+    created = _create(client, headers, mode="hot", title="定位样书")
+    assert created.status_code == 201, created.text
+    run_id = created.json()["run_id"]
+    assert _execute(app, run_id) == "succeeded"
+
+    detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
+    assert not detail.get("options")
+    card = client.get(
+        f"/v1/agent-runs/{run_id}/artifacts/positioning_card.json", headers=headers
+    ).json()
+    # 平台/方向/边界/基调均由校准结论推导，字段必须非空
+    assert card["platform"]
+    assert card["platform_direction"] and card["genre_boundary"]
+    assert card["emotional_tone"] and card["summary"]
+    assert card["highlight_preferences"], card
+    assert card["taboos"], card
+
+    bundle_resp = client.get(f"/v1/agent-runs/{run_id}/export", headers=headers)
+    assert bundle_resp.status_code == 200, bundle_resp.text
+    with zipfile.ZipFile(io.BytesIO(bundle_resp.content)) as bundle:
+        names = set(bundle.namelist())
+        assert "发布包/发布包.md" in names
+        publish_md = bundle.read("发布包/发布包.md").decode("utf-8")
+        assert "封面提示词" in publish_md
+        assert "续写入口" in publish_md
 
 
 def test_outline_includes_work_info_fields(client, headers, app):

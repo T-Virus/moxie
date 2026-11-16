@@ -34,6 +34,10 @@ ARTIFACT_NAMES = (
     "hot_research.json",
     "hot_preview.md",
     "decomposed.json",
+    "positioning_card.json",
+    "settings_pack.json",
+    "foreshadow_ledger.json",
+    "publish_pack.json",
 )
 TERMINAL_STATUSES = {"succeeded", "failed", "canceled"}
 RUN_STATUSES = {"queued", "running", "paused", "succeeded", "failed", "canceled"}

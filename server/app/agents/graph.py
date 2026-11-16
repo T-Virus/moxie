@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .contracts import text_of
+
 
 @dataclass(frozen=True)
 class RunView:
@@ -107,6 +109,42 @@ def _hot_outline(run: RunView, state: dict, extra: dict) -> dict:
         "research": _state(state, "genre_research"),
         "decomposition": {},
         "adaptation": {},
+        "positioning": _state(state, "positioning"),
+        "settings": _state(state, "settings"),
+    }
+
+
+def _hot_positioning(run: RunView, state: dict, extra: dict) -> dict:
+    """阶段2 定位卡：完全由阶段1 校准结论（月榜 Top10 分析）推导，无用户额外输入。"""
+    return {
+        "title": run.title,
+        "genre_name": run.genre_name,
+        "audience": run.audience,
+        "length": run.length,
+        "research": _state(state, "genre_research"),
+    }
+
+
+def _hot_settings(run: RunView, state: dict, extra: dict) -> dict:
+    """阶段3 设定生成：定位卡 + 校准结论 → 世界观/力量体系/金手指/角色/道具。"""
+    return {
+        "title": run.title,
+        "genre_name": run.genre_name,
+        "positioning": _state(state, "positioning"),
+        "research": _state(state, "genre_research"),
+    }
+
+
+def _hot_publish(run: RunView, state: dict, extra: dict) -> dict:
+    """阶段6 发布包：质检通过后产出标签/简介/封面提示词/续写入口。"""
+    return {
+        "title": run.title,
+        "genre_name": run.genre_name,
+        "chapters": _state(state, "chapter_expand").get("chapters") or [],
+        "outline": _state(state, "outline").get("chapters") or [],
+        "positioning": _state(state, "positioning"),
+        "settings": _state(state, "settings"),
+        "review": _state(state, "review"),
     }
 
 
@@ -135,15 +173,19 @@ def _expand_reference(run: RunView, state: dict, extra: dict) -> dict:
 
 
 def _summarize(run: RunView, state: dict, extra: dict) -> dict:
-    return {
-        "title": run.title,
-        "chapters": _state(state, "chapter_expand").get("chapters") or [],
-    }
+    # hot 模式前三章已写正文（见 _expand 的 [:3]），概括只针对其后的章节，来源读大纲剩余章；
+    # reference/custom 正文已全覆盖，直接对正文章节（chapter_expand）做概括。
+    if run.mode == "hot":
+        chapters = list((_state(state, "outline") or {}).get("chapters") or [])[3:]
+    else:
+        chapters = list((_state(state, "chapter_expand") or {}).get("chapters") or [])
+    return {"title": run.title, "chapters": chapters}
 
 
 def _lore(run: RunView, state: dict, extra: dict) -> dict:
     adapted = _state(state, "adaptation")
     decomposed = _state(state, "outline_decompose")
+    settings = _state(state, "settings")
     outline = _state(state, "outline")
     return {
         "title": run.title,
@@ -151,14 +193,37 @@ def _lore(run: RunView, state: dict, extra: dict) -> dict:
         "story_bible": (
             adapted.get("story_bible")
             or decomposed.get("story_bible")
+            or _settings_bible(settings)
             or outline.get("story_bible")
             or {}
         ),
-        "characters": adapted.get("characters") or decomposed.get("characters") or [],
-        "factions": adapted.get("factions") or decomposed.get("factions") or [],
-        "items": adapted.get("items") or decomposed.get("items") or [],
+        "characters": (
+            adapted.get("characters")
+            or decomposed.get("characters")
+            or settings.get("characters")
+            or []
+        ),
+        "factions": (
+            adapted.get("factions")
+            or decomposed.get("factions")
+            or settings.get("factions")
+            or []
+        ),
+        "items": adapted.get("items") or decomposed.get("items") or settings.get("items") or [],
         "chapters": _state(state, "chapter_expand").get("chapters") or [],
         "outline": outline.get("chapters") or [],
+    }
+
+
+def _settings_bible(settings: dict) -> dict:
+    """把设定包的世界观/力量体系/金手指折叠成 story_bible 形态。"""
+    worldview = text_of(settings.get("worldview"))
+    if not worldview:
+        return {}
+    return {
+        "world": worldview,
+        "power": text_of(settings.get("power_system")),
+        "golden_finger": text_of(settings.get("golden_finger")),
     }
 
 
@@ -170,6 +235,8 @@ def _review_from_expand(run: RunView, state: dict, extra: dict) -> dict:
         "genre_name": run.genre_name,
         "chapters": chapters,
         "outline": _state(state, "outline").get("chapters") or [],
+        "positioning": _state(state, "positioning"),
+        "settings": _state(state, "settings"),
     }
 
 
@@ -270,17 +337,24 @@ def _custom_outline(run: RunView, state: dict, extra: dict) -> dict:
 HOT = Graph(
     mode="hot",
     nodes=(
-        NodeSpec("genre_research", "genre_research", "同题材调研", (), _hot_research),
-        NodeSpec("outline", "outline", "大纲规划", ("genre_research",), _hot_outline),
+        # 阶段1 题材校准：先对月榜 Top10 做结构化分析，不直接生成
+        NodeSpec("genre_research", "genre_research", "题材校准", (), _hot_research),
+        # 阶段2 定位卡：用户确认 男/女频、长短篇、目标平台、爽点偏好、雷区
+        NodeSpec("positioning", "positioning", "定位卡", ("genre_research",), _hot_positioning),
+        # 阶段3 设定生成：世界观/力量体系/势力/金手指 → 派生角色卡与功法道具表
+        NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),
+        # 阶段4 大纲拆解：总纲 → 分卷 → 章纲（冲突/反转/伏笔/结尾钩子）
+        NodeSpec("outline", "outline", "大纲拆解", ("settings",), _hot_outline),
+        # 阶段5 黄金三章：主角在场 + 当下危机 + 未知悬念，去AI化润色
         NodeSpec(
             "chapter_expand",
             "chapter_write",
-            "前三章正文",
+            "黄金三章",
             ("outline",),
             _expand,
             chaptered=True,
         ),
-        NodeSpec("hot_preview", "hot_preview", "前三章概览", ("chapter_expand", "outline"), _hot_preview),
+        NodeSpec("hot_preview", "hot_preview", "前三章概览与节奏诊断", ("chapter_expand", "outline"), _hot_preview),
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
@@ -293,15 +367,23 @@ HOT = Graph(
             "character_graph",
             "lore_extract",
             "角色/势力/道具功法抽取",
-            ("outline", "chapter_expand", "chapter_summarize"),
+            ("outline", "chapter_expand", "chapter_summarize", "settings"),
             _lore,
         ),
+        # 阶段6 质检发布：一致性检查 + 平台合规检查，然后产出发布包
         NodeSpec(
             "review",
             "review",
             "签约体检",
             ("chapter_expand", "outline", "hot_preview", "chapter_summarize", "character_graph"),
             _review_from_expand,
+        ),
+        NodeSpec(
+            "publish",
+            "publish_pack",
+            "发布包",
+            ("review", "chapter_expand", "outline", "positioning", "settings"),
+            _hot_publish,
         ),
     ),
 )

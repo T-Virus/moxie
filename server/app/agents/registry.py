@@ -14,7 +14,10 @@ from .skills.hot_preview import HotPreviewSkill
 from .skills.lore_extract import LoreExtractSkill
 from .skills.outline import OutlineSkill
 from .skills.outline_decompose import OutlineDecomposeSkill
+from .skills.positioning import PositioningSkill
+from .skills.publish_pack import PublishPackSkill
 from .skills.review import ReviewSkill
+from .skills.settings_pack import SettingsPackSkill
 
 
 class SkillRegistry:
@@ -62,7 +65,10 @@ def build_registry() -> SkillRegistry:
         HotPreviewSkill(),
         CharacterGraphSkill(),
         LoreExtractSkill(),
+        PositioningSkill(),
+        SettingsPackSkill(),
         ReviewSkill(),
+        PublishPackSkill(),
     ):
         registry.register(skill)
     return registry

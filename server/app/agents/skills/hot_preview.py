@@ -41,23 +41,36 @@ class PreviewChapter(StrictModel):
     relations: list[PreviewRelation] = Field(default_factory=list)
 
 
+class PacingNote(StrictModel):
+    chapter: int
+    tempo: str = ""
+    advice: str = ""
+
+
 class HotPreviewOutput(StrictModel):
     chapters: list[PreviewChapter] = Field(default_factory=list)
     mainline_conflict: str = ""
     character_relations: list[PreviewRelation] = Field(default_factory=list)
+    # 阶段5「黄金三章」附加产出：节奏诊断与备选开篇
+    pacing: list[PacingNote] = Field(default_factory=list)
+    alt_openings: list[str] = Field(default_factory=list)
 
 
 SYSTEM = "你是网文编辑，只输出 JSON，概览必须具体、可读、不写空话。"
 
 PROMPT = """【技能 hot_preview】
 书名：{title}　题材：{genre}
-请基于前三章正文与大纲，输出「前三章概览」。
+请基于前三章正文与大纲，输出「前三章概览 + 节奏诊断 + 备选开篇」。
 每章 synopsis 控制在 150-300 字，必须包含主线冲突与人物关系。
+节奏诊断按章给出 tempo（快/中/慢）与 advice（一句话改进建议）。
+备选开篇给 2 个不同的第一章开场写法（各 80-150 字，主角在场、当下危机、未知悬念三要素齐备）。
 输出 JSON：
 {{"mainline_conflict":"",
  "chapters":[{{"chapter":1,"title":"","synopsis":"","main_conflict":"",
    "characters":[""],"relations":[{{"source":"","target":"","kind":"盟友/对手/亲属"}}]}}],
- "character_relations":[{{"source":"","target":"","kind":""}}]}}
+ "character_relations":[{{"source":"","target":"","kind":""}}],
+ "pacing":[{{"chapter":1,"tempo":"快","advice":""}}],
+ "alt_openings":["备选开篇1","备选开篇2"]}}
 章节：{chapters}
 大纲：{outline}
 设定：{bible}
@@ -151,10 +164,35 @@ def _fallback(payload: HotPreviewInput) -> HotPreviewOutput:
                 for old in relations
             ):
                 relations.append(relation)
+    pacing = [
+        PacingNote(
+            chapter=item.chapter,
+            tempo="快" if len(item.synopsis) > 200 else "中",
+            advice="保持章末钩子为可执行问题，减少回顾式叙述。",
+        )
+        for item in chapters
+    ]
+    first = chapters[0] if chapters else None
+    alt_openings = [
+        (
+            f"开场直接落在危机现场：{first.main_conflict[:60]}。主角必须在两个都有代价的选项里立刻做决定，"
+            "而他不知道的是，选哪一个都会把第三个人牵进来。"
+            if first
+            else "开场直接落在危机现场，主角必须立刻在两个都有代价的选项里做决定。"
+        ),
+        (
+            f"开场先给结果再给原因：把第一章的高潮场面（{first.main_conflict[:40]}）提到开头三行内，"
+            "再回切到半小时前，让读者带着答案看主角如何走向它。"
+            if first
+            else "开场先给结果再给原因：把第一章的高潮场面提到开头三行内，再回切。"
+        ),
+    ]
     return HotPreviewOutput(
         chapters=chapters[:PREVIEW_COUNT],
         mainline_conflict=mainline[:200],
         character_relations=relations[:12],
+        pacing=pacing,
+        alt_openings=alt_openings,
     )
 
 
@@ -216,9 +254,34 @@ class HotPreviewSkill(BaseSkill):
                 )
             )
         mainline = text_of(data.get("mainline_conflict")) or fallback.mainline_conflict
-        ctx.log(f"前三章概览完成：{len(chapters)} 章")
+        pacing: list[PacingNote] = []
+        advice_by_no = {}
+        for item in list_of_dicts(data.get("pacing"), PREVIEW_COUNT):
+            try:
+                number = int(item.get("chapter") or 0)
+            except (TypeError, ValueError):
+                continue
+            if number < 1:
+                continue
+            advice_by_no[number] = text_of(item.get("advice"))[:120]
+        for note in fallback.pacing:
+            advice = advice_by_no.get(note.chapter, "")
+            if advice:
+                pacing.append(
+                    PacingNote(chapter=note.chapter, tempo=note.tempo, advice=advice)
+                )
+            else:
+                pacing.append(note)
+        alt_openings = [
+            text_of(item)[:300]
+            for item in (data.get("alt_openings") or [])
+            if text_of(item)
+        ][:2] or fallback.alt_openings
+        ctx.log(f"前三章概览完成：{len(chapters)} 章，备选开篇 {len(alt_openings)} 个")
         return HotPreviewOutput(
             chapters=chapters[:PREVIEW_COUNT],
             mainline_conflict=mainline[:200],
             character_relations=fallback.character_relations,
+            pacing=pacing,
+            alt_openings=alt_openings,
         )

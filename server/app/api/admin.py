@@ -38,7 +38,9 @@ from ..models import (
     Refund,
     Subscription,
     Task,
+    TaskEvent,
     TaskStep,
+    AgentRunEvent,
     UsageAggregate,
     UsageEvent,
 )
@@ -60,6 +62,8 @@ from ..services.model_config import describe_configs, encrypt_key, resolve_step_
 from ..services.model_gateway import complete_sync, validate_upstream_base_url
 from ..services.uploads import safe_filename as safe_upload_name
 from ..services.quota import QuotaService, period_of
+from ..agents.store import run_to_dict
+from ..services.tasks import task_to_dict
 
 # 统一预设值维护（后台纳管）
 from ..models import Preset
@@ -982,6 +986,70 @@ def retry_task(
     db.commit()
     enqueue_agent_run(request.app.state.settings, run.id)
     return {"ok": True, "task_id": task_id, "source": "agent_run"}
+
+
+@admin_router.get("/tasks/{task_id}")
+def admin_task_detail(
+    task_id: str,
+    request: Request,
+    source: str | None = Query(default=None, pattern="^(task|agent_run)$"),
+    admin: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """运营看板任务详情：统一返回任务/写作运行信息与执行过程事件流。
+
+    执行过程事件已完整落库（task_events / agent_run_events），此前只由用户端 SSE 暴露，
+    运营后台看不到；这里补齐管理端读取入口，便于排查「章节缺失 / 卡死」等问题。
+    """
+    events: list[dict] = []
+    detail: dict = {}
+    resolved_source: str | None = None
+
+    if source in (None, "agent_run"):
+        run = db.get(AgentRun, task_id)
+        if run is not None:
+            resolved_source = "agent_run"
+            detail = run_to_dict(db, run, storage=request.app.state.storage)
+            rows = db.scalars(
+                select(AgentRunEvent)
+                .where(AgentRunEvent.run_id == run.id)
+                .order_by(AgentRunEvent.seq.asc())
+                .limit(500)
+            ).all()
+            events = [
+                {
+                    "seq": row.seq,
+                    "stage": row.stage,
+                    "level": row.level,
+                    "message": row.message,
+                    "at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ]
+    if resolved_source is None and source in (None, "task"):
+        task = db.get(Task, task_id)
+        if task is not None:
+            resolved_source = "task"
+            detail = task_to_dict(task)
+            rows = db.scalars(
+                select(TaskEvent)
+                .where(TaskEvent.task_id == task.id)
+                .order_by(TaskEvent.seq.asc())
+                .limit(500)
+            ).all()
+            events = [
+                {
+                    "seq": row.seq,
+                    "stage": "(task)",
+                    "level": row.level,
+                    "message": row.message,
+                    "at": None,
+                }
+                for row in rows
+            ]
+    if resolved_source is None:
+        raise ApiError(404, "task_not_found", "任务不存在")
+    return {"source": resolved_source, "detail": detail, "events": events}
 
 
 @admin_router.get("/tasks")

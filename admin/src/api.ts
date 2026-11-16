@@ -10,8 +10,8 @@ import {
 } from './payloadCrypto'
 import type {
   AlertRow, AuditRow, InvoiceRow, ListResult, LoginResponse, NotificationRow, OrderRow,
-  PlanRow, ReconcileReport, RefundRow, SubscriptionRow, TaskDashboard, TaskRow, UserDetail,
-  UserRow,
+  PlanRow, ReconcileReport, RefundRow, SubscriptionRow, TaskDashboard, TaskDetail, TaskRow,
+  UserDetail, UserRow,
 } from './types'
 
 export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
@@ -535,6 +535,11 @@ export const api = {
   },
   taskRetry(id: string) {
     return request<any>(`/v1/admin/tasks/${encodeURIComponent(id)}/retry`, { method: 'POST', body: {} })
+  },
+  taskDetail(id: string, source?: string) {
+    return request<TaskDetail>(`/v1/admin/tasks/${encodeURIComponent(id)}`, {
+      query: source ? { source } : {},
+    })
   },
 
   alerts(query: Record<string, unknown>) {

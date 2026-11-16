@@ -18,6 +18,9 @@ class ReviewInput(StrictModel):
     genre_name: str = Field(min_length=1, max_length=60)
     chapters: list[dict] = Field(default_factory=list)
     outline: list[dict] = Field(default_factory=list)
+    # 阶段6 质检输入：定位卡（平台/雷区）与设定包（一致性比对基准）
+    positioning: dict = Field(default_factory=dict)
+    settings: dict = Field(default_factory=dict)
 
 
 class ReviewRisk(StrictModel):
@@ -32,17 +35,29 @@ class ReviewOutput(StrictModel):
     risks: list[ReviewRisk] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
     high_risk: bool = False
+    # 阶段6 附加产出：一致性检查（正文 vs 章纲/设定）与平台合规检查
+    consistency_issues: list[str] = Field(default_factory=list)
+    compliance_issues: list[str] = Field(default_factory=list)
 
 
 SYSTEM = "你是网文签约审核编辑，只输出 JSON。"
 
 PROMPT = """【技能 review】
 书名：{title}　题材：{genre}
-请对下列章节做签约体检：开篇吸引力、节奏、人物动机、逻辑漏洞、复制风险。
+目标平台：{platform}　雷区：{taboos}
+设定基准（人物/势力/道具以此为准）：
+{settings}
+
+请对下列章节做签约体检，分三部分：
+1. 签约体检：开篇吸引力、节奏、人物动机、逻辑漏洞、复制风险；
+2. 一致性检查：正文是否落实章纲的冲突/反转/伏笔/结尾钩子，人物、势力、道具与设定基准是否一致；
+3. 平台合规检查：按目标平台的红线（低俗、血腥、违规题材、导向问题）与用户雷区逐项排查。
 输出 JSON：
 {{"score":0,
  "risks":[{{"level":"high/medium/low","code":"","message":"","chapter":1}}],
- "suggestions":[""]}}
+ "suggestions":[""],
+ "consistency_issues":[""],
+ "compliance_issues":[""]}}
 只有确实存在会导致拒稿的问题才标 high。
 
 章节：
@@ -75,6 +90,19 @@ def _local_risks(payload: ReviewInput) -> list[ReviewRisk]:
     return risks
 
 
+def _local_consistency(payload: ReviewInput) -> list[str]:
+    """确定性一致性检查：正文章数与章纲对齐。"""
+    issues: list[str] = []
+    if not payload.outline:
+        return issues
+    written = {int(c.get("chapter") or i) for i, c in enumerate(payload.chapters, 1)}
+    planned = {int(c.get("chapter") or i) for i, c in enumerate(payload.outline, 1)}
+    missing = sorted(planned - written)
+    if missing:
+        issues.append(f"章纲规划了 {len(planned)} 章，正文只覆盖 {len(written)} 章（缺第 {missing[:6]} 章）")
+    return issues
+
+
 class ReviewSkill(BaseSkill):
     name = "review"
     version = "1.0.0"
@@ -83,6 +111,7 @@ class ReviewSkill(BaseSkill):
 
     def run(self, payload: ReviewInput, ctx: SkillContext) -> ReviewOutput:
         fallback_risks = _local_risks(payload)
+        consistency_fallback = _local_consistency(payload)
         material = [
             {
                 "chapter": c.get("chapter") or i,
@@ -92,12 +121,27 @@ class ReviewSkill(BaseSkill):
             }
             for i, c in enumerate(payload.chapters, 1)
         ]
+        positioning = payload.positioning or {}
+        settings = payload.settings or {}
+        settings_view = {
+            key: [
+                {k: item.get(k) for k in ("name", "role", "stance", "kind", "category")}
+                for item in list_of_dicts(settings.get(key), 6)
+            ]
+            for key in ("characters", "factions", "items")
+            if settings.get(key)
+        }
         data = call_json(
             ctx,
             system=SYSTEM,
             user=PROMPT.format(
                 title=payload.title,
                 genre=payload.genre_name,
+                platform=text_of(positioning.get("platform")) or "未指定",
+                taboos="、".join(
+                    text_of(item) for item in (positioning.get("taboos") or []) if text_of(item)
+                ) or "未指定",
+                settings=json.dumps(settings_view, ensure_ascii=False)[:2500] or "未提供设定基准",
                 material=json.dumps(material, ensure_ascii=False)[:12000],
             ),
         )
@@ -118,11 +162,26 @@ class ReviewSkill(BaseSkill):
             )
         risks.extend(fallback_risks)
         suggestions = [text_of(s) for s in (data.get("suggestions") or []) if text_of(s)][:6] or FALLBACK_SUGGESTIONS
+        consistency_issues = [
+            text_of(item) for item in (data.get("consistency_issues") or []) if text_of(item)
+        ][:10] or consistency_fallback
+        compliance_issues = [
+            text_of(item) for item in (data.get("compliance_issues") or []) if text_of(item)
+        ][:10]
         high_risk = any(r.level == "high" for r in risks)
         score = data.get("score")
         try:
             score = max(0, min(int(score), 100))
         except (TypeError, ValueError):
             score = max(0, 90 - 15 * sum(1 for r in risks if r.level == "medium") - 40 * sum(1 for r in risks if r.level == "high"))
-        ctx.log(f"体检完成：score={score}，高危={high_risk}")
-        return ReviewOutput(score=score, risks=risks[:20], suggestions=suggestions, high_risk=high_risk)
+        ctx.log(
+            f"体检完成：score={score}，高危={high_risk}，一致性={len(consistency_issues)}，合规={len(compliance_issues)}"
+        )
+        return ReviewOutput(
+            score=score,
+            risks=risks[:20],
+            suggestions=suggestions,
+            high_risk=high_risk,
+            consistency_issues=consistency_issues,
+            compliance_issues=compliance_issues,
+        )

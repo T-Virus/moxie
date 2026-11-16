@@ -40,10 +40,31 @@ def render_outline_md(run: RunView, outline: dict) -> str:
             lines.append(chapter["summary"])
         for event in chapter.get("key_events") or []:
             lines.append(f"- {event}")
+        for key, label in (("conflict", "冲突"), ("reversal", "反转"), ("foreshadow", "伏笔")):
+            if chapter.get(key):
+                lines.append(f"- **{label}**：{chapter[key]}")
         if chapter.get("hook"):
             lines.extend([f"> 钩子：{chapter['hook']}", ""])
         else:
             lines.append("")
+    ledger = outline.get("foreshadow_ledger") or []
+    if ledger:
+        lines.append("## 伏笔台账")
+        lines.append("| 编号 | 伏笔 | 埋设章 | 回收章 |")
+        lines.append("| --- | --- | --- | --- |")
+        for row in ledger:
+            lines.append(
+                f"| {row.get('id') or ''} | {row.get('desc') or ''} | "
+                f"第 {row.get('planted_chapter') or '?'} 章 | 第 {row.get('payoff_chapter') or '?'} 章 |"
+            )
+        lines.append("")
+    highlights = outline.get("highlight_distribution") or []
+    if highlights:
+        lines.append("## 爽点分布")
+        for row in highlights:
+            names = "、".join(str(item) for item in (row.get("highlights") or []))
+            lines.append(f"- 第 {row.get('chapter')} 章：{names}（强度 {row.get('intensity') or '?'}）")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -66,6 +87,22 @@ def render_hot_preview_md(run: RunView, preview: dict) -> str:
                 f"（{relation.get('kind') or '同章出场'}）"
             )
         lines.append("")
+    pacing = preview.get("pacing") or []
+    if pacing:
+        lines.append("## 节奏诊断")
+        for note in pacing:
+            lines.append(
+                f"- 第 {note.get('chapter')} 章：节奏「{note.get('tempo') or '?'}」"
+                + (f"——{note.get('advice')}" if note.get("advice") else "")
+            )
+        lines.append("")
+    alt_openings = preview.get("alt_openings") or []
+    if alt_openings:
+        lines.append("## 备选开篇")
+        for index, opening in enumerate(alt_openings, 1):
+            lines.append(f"### 开篇方案 {index}")
+            lines.append(str(opening))
+            lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -213,6 +250,38 @@ def write_artifacts(storage, run: RunView, state: dict) -> list[dict]:
             "text/markdown; charset=utf-8",
         )
         written.append({"name": "hot_preview.md"})
+
+    positioning = state.get("positioning") or {}
+    if positioning.get("summary") or positioning.get("platform_direction"):
+        storage.put_json(
+            f"{prefix}/positioning_card.json",
+            {"book_title": run.title, **positioning},
+        )
+        written.append({"name": "positioning_card.json"})
+
+    settings = state.get("settings") or {}
+    if settings.get("worldview") or settings.get("characters"):
+        storage.put_json(
+            f"{prefix}/settings_pack.json",
+            {"book_title": run.title, **settings},
+        )
+        written.append({"name": "settings_pack.json"})
+
+    ledger = (state.get("outline") or {}).get("foreshadow_ledger") or []
+    if ledger:
+        storage.put_json(
+            f"{prefix}/foreshadow_ledger.json",
+            {"book_title": run.title, "ledger": ledger},
+        )
+        written.append({"name": "foreshadow_ledger.json"})
+
+    publish = state.get("publish") or {}
+    if publish.get("blurb") or publish.get("tags"):
+        storage.put_json(
+            f"{prefix}/publish_pack.json",
+            {"book_title": run.title, **publish},
+        )
+        written.append({"name": "publish_pack.json"})
     return written
 
 

@@ -39,6 +39,12 @@ class GenreResearchOutput(StrictModel):
     works: list[ResearchWork] = Field(default_factory=list)
     takeaways: list[str] = Field(default_factory=list)
     sources: list[ResearchSource] = Field(default_factory=list)
+    # 阶段1「题材校准」的结构化分析维度（先分析，不直接生成正文）
+    hooks: list[str] = Field(default_factory=list)
+    highlight_types: list[str] = Field(default_factory=list)
+    conflict_density: str = ""
+    opening_pace: str = ""
+    anti_cliche: list[str] = Field(default_factory=list)
 
 
 SYSTEM = "你是网文市场研究员，只输出 JSON，不编造真实榜单或链接。"
@@ -49,10 +55,17 @@ PROMPT = """【技能 genre_research】
 篇幅：{length}
 拟写书名：{title}
 
-给出同题材 4 个「典型热门作品特征」，可以是虚构样本名，但必须明确是模型推断。
+月榜参考（仅书名/排名元数据，禁止抓取正文）：{ranking}
+
+请先对月榜 Top10 热门作品做结构化分析，再提炼可复用结论；不要直接生成正文。
 输出 JSON：
 {{"works":[{{"title":"样本名","hook":"一句话卖点","three_chapter_summary":"前三章剧情梗概","tags":["标签"]}}],
  "takeaways":["可复用的开篇策略"],
+ "hooks":["榜单共性钩子1","共性钩子2"],
+ "highlight_types":["榜单主流爽点类型，如 打脸/升级/扮猪吃虎"],
+ "conflict_density":"冲突密度结论，如 每章 2-3 个冲突点，章末必有对抗",
+ "opening_pace":"开篇节奏结论，如 第一章 500 字内进入危机，三章内完成第一次兑现",
+ "anti_cliche":["反套路空间1","反套路空间2"],
  "sources":[{{"type":"model_inference","note":"无外部检索源，内容为模型知识推断"}}]}}
 """
 
@@ -94,6 +107,17 @@ def _fallback(payload: GenreResearchInput) -> GenreResearchOutput:
             "主角主动做决定，避免被动推进",
         ],
         sources=[ResearchSource(type="model_inference", note="无外部检索源，以上为模型知识推断，非真实榜单数据")],
+        hooks=[
+            "第一章 500 字内让主角直接遭遇核心危机",
+            "三章内给一次明确的小胜利，兑现追读预期",
+        ],
+        highlight_types=["打脸反转", "扮猪吃虎", "阶段性升级"],
+        conflict_density="每章 2-3 个冲突点，章末必有一次正面交锋",
+        opening_pace="第一章直入危机，不写背景铺垫；第二章扩大对抗；第三章完成第一次兑现",
+        anti_cliche=[
+            "主角开局不必废柴，可用「被低估的强者」替代",
+            "反派给明确目标与合理动机，避免纯工具人",
+        ],
     )
 
 
@@ -119,6 +143,10 @@ class GenreResearchSkill(BaseSkill):
             except Exception as exc:  # noqa: BLE001 - 榜单失败不影响主流程
                 ctx.log(f"榜单抓取失败，回退模型推断：{type(exc).__name__}", level="warning")
 
+        ranking_titles = [
+            f"{SOURCE_LABELS.get(item.get('site'), item.get('site'))}第{item.get('rank')}名《{item.get('title')}》"
+            for item in ranking_items[:10]
+        ]
         data = call_json(
             ctx,
             system=SYSTEM,
@@ -127,6 +155,7 @@ class GenreResearchSkill(BaseSkill):
                 audience="男频" if payload.audience == "male" else "女频",
                 length="长篇" if payload.length == "long" else "短篇",
                 title=payload.title,
+                ranking="；".join(ranking_titles) if ranking_titles else "未取得榜单元数据，请基于题材通用规律做结构化分析",
             ),
         )
         works = []
@@ -187,9 +216,25 @@ class GenreResearchSkill(BaseSkill):
             sources = [ResearchSource(type="model_inference", note="无外部检索源，以上为模型知识推断")]
         takeaways = [text_of(t) for t in (data.get("takeaways") or []) if text_of(t)][:6]
         takeaways.append("榜单只用于提炼题材与开篇策略；人物、地名、组织名与书名必须全部重命名，禁止同名与连续撞句。")
+        base = _fallback(payload)
+
+        def _dim(key: str, limit: int = 6) -> list[str]:
+            values = [text_of(item) for item in (data.get(key) or []) if text_of(item)]
+            return values[:limit] or getattr(base, key)
+
+        hooks = _dim("hooks")
+        highlight_types = _dim("highlight_types")
+        anti_cliche = _dim("anti_cliche")
+        conflict_density = text_of(data.get("conflict_density")) or base.conflict_density
+        opening_pace = text_of(data.get("opening_pace")) or base.opening_pace
         return GenreResearchOutput(
             genre=payload.genre_name,
             works=(real_works + works)[:8],
             takeaways=takeaways[:7],
             sources=sources,
+            hooks=hooks,
+            highlight_types=highlight_types,
+            conflict_density=conflict_density,
+            opening_pace=opening_pace,
+            anti_cliche=anti_cliche,
         )

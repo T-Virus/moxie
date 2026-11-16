@@ -19,6 +19,18 @@ SYSTEM = "你是网文写手，只输出 JSON；正文要具体、有动作与�
 PROMPT = """【技能 chapter_write】
 书名：{title}　题材：{genre}
 请把下列章节大纲扩写为可发布正文，正文不少于 600 字，结尾保留钩子。
+
+黄金三章硬性要求（前三章逐项自查）：
+1. 主角在场：第一章开场即主角视角，禁止大段他人视角或背景介绍开场；
+2. 当下危机：开篇 500 字内出现正在发生的、有具体对手的危机；
+3. 未知悬念：每章结尾留下一个读者不知道答案、且下一章会推进的问题。
+
+去AI化润色要求：
+- 禁止比喻堆砌与「仿佛/宛如/像是…一样」连用，每千字最多 1 处比喻；
+- 用具体动作与可感细节代替情绪形容词（不写「他感到愤怒」，写他攥紧了那枚硬币）；
+- 对话推动剧情，禁止两人各说一段独白的说明式对话；
+- 段落控制在 3 行以内，长短句交错，禁止排比堆叠与「不是…而是…」句式连用。
+
 同时给出本章的结构化字段；无法确定的字段留空，不要编造。
 输出 JSON：
 {{"chapters":[{{"chapter":1,"title":"","content":"","scene":"","hook_type":"","emotion":"",
@@ -221,6 +233,9 @@ class ChapterWriteSkill(BaseSkill):
                 "key_events": chapter.get("key_events") or [],
                 "hook": chapter.get("hook") or "",
                 "arc": chapter.get("arc") or "",
+                "conflict": chapter.get("conflict") or "",
+                "reversal": chapter.get("reversal") or "",
+                "foreshadow": chapter.get("foreshadow") or "",
             }
             for index, chapter in enumerate(chapters, 1)
         ]

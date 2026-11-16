@@ -138,6 +138,26 @@ def _render_review_md(run: AgentRun, detail: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _render_publish_md(run: AgentRun, publish: dict) -> str:
+    lines = [f"# 《{run.title}》发布包", ""]
+    if publish.get("tags"):
+        lines.append(f"- 平台标签：{'、'.join(str(t) for t in publish['tags'])}")
+    if publish.get("first_chapter_hook"):
+        lines.append(f"- 第一章展示语：{publish['first_chapter_hook']}")
+    if publish.get("blurb"):
+        lines.extend(["", "## 简介", str(publish["blurb"]).strip(), ""])
+    if publish.get("cover_prompt"):
+        lines.extend(["## 封面提示词", str(publish["cover_prompt"]).strip(), ""])
+    if publish.get("sequel_hint"):
+        lines.extend(["## 续写入口", str(publish["sequel_hint"]).strip(), ""])
+    if publish.get("notes"):
+        lines.append("## 发布注意事项")
+        for item in publish["notes"]:
+            lines.append(f"- {item}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def build_book_export(
     db: Session, run: AgentRun, storage, *, aigc_label: bool = True
 ) -> tuple[str, bytes]:
@@ -239,6 +259,9 @@ def build_book_export(
         )
 
         add("体检/体检报告.md", _render_review_md(run, detail).encode("utf-8"))
+        publish = _read_json(storage, view, "publish_pack.json")
+        if publish:
+            add("发布包/发布包.md", _render_publish_md(run, publish).encode("utf-8"))
         if aigc_label:
             add("AIGC声明.txt", AIGC_STATEMENT.encode("utf-8"))
 
@@ -271,6 +294,7 @@ def _render_readme(run: AgentRun, manifest: dict, artifacts: dict[str, bytes]) -
         "- 章纲/：分章章纲",
         "- 设定/：角色、势力、道具功法、设定集与分卷（JSON，可编辑）",
         "- 体检/：本次运行的体检结论与风险提示",
+        "- 发布包/：平台标签、简介、封面提示词与续写入口（如有）",
         "- 原始产物/：系统原始产物（outline/chapters/story_bible 等）",
         "- AIGC声明.txt：AI 生成合成内容声明（默认附带）",
         "",

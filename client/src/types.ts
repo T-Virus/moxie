@@ -54,6 +54,7 @@ export interface CreateRunPayload {
   genre: GenreSelection
   source_key?: string | null
   brief?: string | null
+  options?: CreateRunOptions
 }
 
 export interface CreateRunResponse {
