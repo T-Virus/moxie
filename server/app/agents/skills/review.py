@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""签约体检与改写建议。高危问题会让编排引擎暂停，等待人工介入。"""
+"""内容体检：只核对设定一致性与敏感/违禁表达，不做签约或商业价值评估。高危命中会让编排引擎暂停。"""
 
 from __future__ import annotations
 
@@ -35,12 +35,12 @@ class ReviewOutput(StrictModel):
     risks: list[ReviewRisk] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
     high_risk: bool = False
-    # 阶段6 附加产出：一致性检查（正文 vs 章纲/设定）与平台合规检查
+    # 内容体检产出：设定一致性、敏感/违禁表达
     consistency_issues: list[str] = Field(default_factory=list)
     compliance_issues: list[str] = Field(default_factory=list)
 
 
-SYSTEM = "你是网文签约审核编辑，只输出 JSON。"
+SYSTEM = "你是网文内容合规审读编辑，只输出 JSON，不做签约或商业价值评估。"
 
 PROMPT = """【技能 review】
 书名：{title}　题材：{genre}
@@ -48,58 +48,70 @@ PROMPT = """【技能 review】
 设定基准（人物/势力/道具以此为准）：
 {settings}
 
-请对下列章节做签约体检，分三部分：
-1. 签约体检：开篇吸引力、节奏、人物动机、逻辑漏洞、复制风险；
-2. 一致性检查：正文是否落实章纲的冲突/反转/伏笔/结尾钩子，人物、势力、道具与设定基准是否一致；
-3. 平台合规检查：按目标平台的红线（低俗、血腥、违规题材、导向问题）与用户雷区逐项排查。
+只核对下列三类问题，不评价开篇吸引力、爽点节奏、人物动机、复制风险或是否可签约：
+1. 设定一致性：人物、势力、道具、称谓与时间线是否与设定基准冲突；章纲与章节概括/正文的覆盖是否一致；
+2. 敏感词：低俗、血腥暴力、自伤自残等平台敏感表达；
+3. 违禁词：违法违规、赌博、毒品、色情交易、诈骗等明确禁止内容，以及用户列出的雷区。
+正常剧情表达不要误报；只有明确违禁才标 high，敏感表达标 medium/low。
 输出 JSON：
 {{"score":0,
  "risks":[{{"level":"high/medium/low","code":"","message":"","chapter":1}}],
  "suggestions":[""],
  "consistency_issues":[""],
  "compliance_issues":[""]}}
-只有确实存在会导致拒稿的问题才标 high。
 
-章节：
+待核对内容：
 {material}
 """
 
+FORBIDDEN_WORDS = ("赌博", "毒品", "贩毒", "制毒", "诈骗", "枪支", "爆炸物", "色情交易", "走私")
+SENSITIVE_WORDS = ("血腥", "虐杀", "自残", "自杀", "低俗", "粗口")
+
 FALLBACK_SUGGESTIONS = [
-    "前三章每章补一个「主角主动做决定」的动作，减少被动推进。",
-    "章末钩子写成可执行的问题，而不是情绪感叹。",
-    "给对手一个明确目标，让冲突有来有回。",
+    "复核命中词所在段落，按平台规范弱化或替换敏感/违禁表达。",
+    "对照设定基准统一人物、势力、道具的名称与立场，避免前后冲突。",
+    "把用户雷区加入发布前检查清单，逐章确认没有遗漏。",
 ]
 
 
 def _local_risks(payload: ReviewInput) -> list[ReviewRisk]:
+    """确定性兜底：只扫敏感/违禁词与用户雷区，不评判作品质量。"""
     risks: list[ReviewRisk] = []
-    if not payload.chapters:
-        risks.append(ReviewRisk(level="high", code="no_chapters", message="没有可用正文章节，无法进入签约流程"))
+    if not payload.chapters and not payload.outline:
+        risks.append(ReviewRisk(level="medium", code="no_material", message="没有可核对的章纲或章节内容"))
         return risks
+    taboos = [text_of(item) for item in (payload.positioning or {}).get("taboos") or [] if text_of(item)]
     for index, chapter in enumerate(payload.chapters, 1):
         body = text_of(chapter.get("content")) or text_of(chapter.get("summary"))
         no = int(chapter.get("chapter") or index)
-        if len(body) < 200:
-            risks.append(
-                ReviewRisk(level="medium", code="thin_chapter", message="章节内容偏薄，开场冲突与人物行动不足", chapter=no)
-            )
-        if not text_of(chapter.get("hook")):
-            risks.append(
-                ReviewRisk(level="low", code="weak_hook", message="章末钩子缺失或不可执行", chapter=no)
-            )
+        for word in FORBIDDEN_WORDS:
+            if word in body:
+                risks.append(
+                    ReviewRisk(level="high", code="forbidden_word", message=f"命中违禁表达：{word}", chapter=no)
+                )
+        for word in SENSITIVE_WORDS:
+            if word in body:
+                risks.append(
+                    ReviewRisk(level="medium", code="sensitive_word", message=f"命中敏感表达：{word}", chapter=no)
+                )
+        for word in taboos:
+            if word in body:
+                risks.append(
+                    ReviewRisk(level="medium", code="taboo", message=f"命中用户雷区：{word}", chapter=no)
+                )
     return risks
 
 
 def _local_consistency(payload: ReviewInput) -> list[str]:
-    """确定性一致性检查：正文章数与章纲对齐。"""
+    """确定性一致性检查：章纲与待核内容的章节覆盖对齐。"""
     issues: list[str] = []
     if not payload.outline:
         return issues
-    written = {int(c.get("chapter") or i) for i, c in enumerate(payload.chapters, 1)}
+    provided = {int(c.get("chapter") or i) for i, c in enumerate(payload.chapters, 1)}
     planned = {int(c.get("chapter") or i) for i, c in enumerate(payload.outline, 1)}
-    missing = sorted(planned - written)
+    missing = sorted(planned - provided)
     if missing:
-        issues.append(f"章纲规划了 {len(planned)} 章，正文只覆盖 {len(written)} 章（缺第 {missing[:6]} 章）")
+        issues.append(f"章纲规划了 {len(planned)} 章，待核内容只覆盖 {len(provided)} 章（缺第 {missing[:6]} 章）")
     return issues
 
 
@@ -112,15 +124,26 @@ class ReviewSkill(BaseSkill):
     def run(self, payload: ReviewInput, ctx: SkillContext) -> ReviewOutput:
         fallback_risks = _local_risks(payload)
         consistency_fallback = _local_consistency(payload)
-        material = [
-            {
-                "chapter": c.get("chapter") or i,
-                "title": c.get("title"),
-                "content": text_of(c.get("content"))[:1500] or text_of(c.get("summary"))[:300],
-                "hook": c.get("hook") or "",
-            }
-            for i, c in enumerate(payload.chapters, 1)
-        ]
+        material = {
+            "chapters": [
+                {
+                    "chapter": c.get("chapter") or i,
+                    "title": c.get("title"),
+                    "content": text_of(c.get("content"))[:1200] or text_of(c.get("summary"))[:300],
+                    "hook": c.get("hook") or "",
+                }
+                for i, c in enumerate(payload.chapters, 1)
+            ],
+            "outline": [
+                {
+                    "chapter": c.get("chapter") or i,
+                    "title": c.get("title"),
+                    "summary": text_of(c.get("summary"))[:300],
+                    "key_events": c.get("key_events") or [],
+                }
+                for i, c in enumerate(payload.outline, 1)
+            ][:200],
+        }
         positioning = payload.positioning or {}
         settings = payload.settings or {}
         settings_view = {
@@ -175,7 +198,7 @@ class ReviewSkill(BaseSkill):
         except (TypeError, ValueError):
             score = max(0, 90 - 15 * sum(1 for r in risks if r.level == "medium") - 40 * sum(1 for r in risks if r.level == "high"))
         ctx.log(
-            f"体检完成：score={score}，高危={high_risk}，一致性={len(consistency_issues)}，合规={len(compliance_issues)}"
+            f"内容体检完成：score={score}，高危={high_risk}，一致性={len(consistency_issues)}，合规={len(compliance_issues)}"
         )
         return ReviewOutput(
             score=score,

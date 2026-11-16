@@ -52,6 +52,7 @@ from ..schemas import (
     AdminQuotaAdjustRequest,
     AdminReasonRequest,
     AdminSubscriptionPatchRequest,
+    AdminTaskControlRequest,
     AdminUserStatusRequest,
 )
 from ..services import model_config as model_config_svc
@@ -852,7 +853,19 @@ def admin_reconcile_reports(
 # 看板聚合两类「用户触发的任务」：拆解/改编任务（tasks）与写作运行（agent_runs）。
 # 二者由不同接口创建、落在不同表，早期看板只读 tasks，导致创作页触发的写作任务
 # 完全不出现在看板上。此处统一读取同一套 brief 结构，保证前后端数据一致。
+# 运行中任务超过该时长没有心跳（章节完成、阶段切换都会刷新），视为疑似卡死，
+# 运营据此判断是否需要「重新排队」或「强制终止」。
+STALLED_SECONDS = 900
+
+
+def _stalled(status: str, last_activity: datetime | None) -> bool:
+    if status != "running" or last_activity is None:
+        return False
+    return (utcnow() - last_activity).total_seconds() > STALLED_SECONDS
+
+
 def _task_brief(task: Task) -> dict:
+    last_activity = task.heartbeat_at or task.started_at or task.created_at
     return {
         "id": task.id,
         "account_id": task.account_id,
@@ -864,12 +877,15 @@ def _task_brief(task: Task) -> dict:
         "lease_until": task.lease_until.isoformat() if task.lease_until else None,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "created_at": task.created_at.isoformat(),
+        "last_activity_at": last_activity.isoformat() if last_activity else None,
+        "stalled": _stalled(task.status, last_activity),
         "source": "task",
         "title": None,
     }
 
 
 def _agent_run_brief(run: AgentRun) -> dict:
+    last_activity = run.updated_at or run.started_at or run.created_at
     return {
         "id": run.id,
         "account_id": run.account_id,
@@ -881,6 +897,8 @@ def _agent_run_brief(run: AgentRun) -> dict:
         "lease_until": None,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "created_at": run.created_at.isoformat(),
+        "last_activity_at": last_activity.isoformat() if last_activity else None,
+        "stalled": _stalled(run.status, last_activity),
         "source": "agent_run",
         "title": run.title,
     }
@@ -959,8 +977,8 @@ def retry_task(
         task.status = "queued"
         task.cancel_requested = False
         task.error_code = None
-        task.error_message = None
         task.lease_until = None
+        task.heartbeat_at = utcnow()
         task.attempts = 0
         for step in db.scalars(select(TaskStep).where(TaskStep.task_id == task_id)).all():
             if step.status in ("failed", "running"):
@@ -968,7 +986,12 @@ def retry_task(
         write_audit(db, actor_id=admin.id, action="task.retry", request=request,
                     target_type="task", target_id=task_id)
         db.commit()
-        return {"ok": True, "task_id": task_id, "source": "task"}
+        # 必须立即投递：只改状态不投递时任务会一直停在 queued，
+        # 只能等调度器判定「卡住的排队任务」后才被拾起，运营以为重试无效。
+        from ..worker import enqueue_task
+
+        enqueue_task(request.app.state.settings, task.id)
+        return {"ok": True, "task_id": task_id, "source": "task", "status": task.status}
 
     # 写作运行：复用编排侧 resume 语义（重新预占额度、只重跑失败节点），
     # 与用户端 /agent-runs/{id}/resume 保持一致，避免看板重试造成额度/状态漂移。
@@ -986,6 +1009,94 @@ def retry_task(
     db.commit()
     enqueue_agent_run(request.app.state.settings, run.id)
     return {"ok": True, "task_id": task_id, "source": "agent_run"}
+
+
+@admin_router.post("/tasks/{task_id}/control")
+def control_task(
+    task_id: str,
+    payload: AdminTaskControlRequest,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """运营统一管控：取消 / 暂停 / 继续 / 重新排队 / 强制终止。
+
+    同时覆盖拆解改编任务（tasks）与写作运行（agent_runs）。协作式动作只置标志，
+    需要「立刻停下」的场景用 force_cancel（直接落终态并释放预占）。
+    """
+    from ..agents.store import cancel_run, force_cancel_run, pause_run, requeue_run, resume_run
+    from ..services.tasks import cancel_task, force_cancel_task, requeue_task
+    from ..worker import enqueue_agent_run, enqueue_task
+
+    run = db.get(AgentRun, task_id) if payload.source in (None, "agent_run") else None
+    task = db.get(Task, task_id) if run is None and payload.source in (None, "task") else None
+    if run is None and task is None:
+        raise ApiError(404, "task_not_found", "任务不存在")
+
+    reason = payload.reason or {
+        "cancel": "已由运营取消",
+        "pause": "已由运营暂停",
+        "resume": "已由运营继续",
+        "requeue": "已由运营重新排队",
+        "force_cancel": "已由运营强制终止",
+    }[payload.action]
+    action = payload.action
+    source = "agent_run" if run is not None else "task"
+
+    if run is not None:
+        if action == "cancel":
+            changed = cancel_run(db, run)
+        elif action == "pause":
+            changed = pause_run(db, run)
+        elif action == "resume":
+            # 失败运行等同「重试失败节点」：与看板 retry 语义保持一致
+            if run.status not in ("paused", "failed"):
+                raise ApiError(409, "invalid_state", f"当前状态不可继续：{run.status}")
+            resume_run(db, run, approval=True, retry_failed=True)
+            changed = True
+        elif action == "requeue":
+            changed = requeue_run(db, run)
+        else:
+            changed = force_cancel_run(db, run, reason=reason)
+    else:
+        if action == "cancel":
+            changed = cancel_task(db, task)
+        elif action == "force_cancel":
+            changed = force_cancel_task(db, task, reason=reason)
+        elif action == "requeue":
+            changed = requeue_task(db, task)
+        else:
+            # 拆解/改编任务没有「暂停/继续」语义，避免造出前端无法展示的中间态
+            raise ApiError(409, "unsupported_action", "拆解/改编任务仅支持取消、重新排队与强制终止")
+
+    if not changed:
+        raise ApiError(409, "invalid_state", "任务已结束或状态未发生变化")
+
+    write_audit(
+        db,
+        actor_id=admin.id,
+        action=f"{source}.{action}",
+        request=request,
+        target_type=source,
+        target_id=task_id,
+        meta={"reason": reason},
+    )
+    db.commit()
+
+    # 需要重新执行的动作用 RQ 立即投递；投递失败时调度器会兜底重投
+    if action in ("resume", "requeue"):
+        if run is not None:
+            enqueue_agent_run(request.app.state.settings, run.id)
+        else:
+            enqueue_task(request.app.state.settings, task.id)
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "source": source,
+        "status": (run.status if run is not None else task.status),
+        "action": action,
+    }
 
 
 @admin_router.get("/tasks/{task_id}")

@@ -44,8 +44,8 @@ if [ ! -f server/.env ]; then
 fi
 
 # --- 启动 ---
-echo "==> 拉取/构建镜像并启动（首次构建耗时较长，请耐心等待）"
-$COMPOSE $COMPOSE_FILES up -d --build
+echo "==> 拉取/构建镜像并启动（${WORKER_REPLICAS:-4} 个 worker 并发消费队列）"
+$COMPOSE $COMPOSE_FILES up -d --build --scale worker=${WORKER_REPLICAS:-4}
 
 echo "==> 等待后端健康检查 http://127.0.0.1:8000/healthz ..."
 ready=0

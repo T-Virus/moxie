@@ -44,10 +44,10 @@ server/app/agents/
 | `adaptation` | 1.0.0 | 去抄袭改编（换名/换设定/改写正文） | `app/prompts/adapt.py`（薄封装 `src/adapt.py`），含 `local_adapt` 兜底 |
 | `outline` | 1.0.0 | 分章大纲规划 | 汇总调研/拆解/改编素材 |
 | `chapter_write` | 1.0.0 | 逐章正文写作（章级节点 `chapter_expand` 使用） | 引擎按章调用；模型缺失时确定性兜底，正文非空 |
-| `chapter_summarize` | 1.0.0 | 逐章概括（80-200 字 + 冲突 + 钩子） | 章级节点 `chapter_summarize` 使用；模型缺失时确定性兜底 |
+| `chapter_summarize` | 1.0.0 | 全量章节概括（80-200 字 + 冲突 + 钩子） | 有正文的章节批量调用模型；无正文章节直接采用章纲概括，不再逐章调用 |
 | `lore_extract` | 1.0.0 | 角色卡 / 势力表 / 道具功法统一抽取 | 章级节点 `character_graph` 使用；字段齐全，空输入有默认设定 |
 | `hot_preview` | 1.0.0 | 前三章概览（150-300 字梗概 + 主线冲突 + 人物关系） | 基于前三章正文/大纲，模型失败时确定性兜底 |
-| `review` | 1.0.0 | 签约体检与改写建议 | 模型结果 + 本地确定性检查合并 |
+| `review` | 1.0.0 | 内容体检：设定一致性、敏感词、违禁词 | 模型结果 + 本地确定性检查合并，不做签约/商业价值评估 |
 
 > 旧技能 `chapter_expand`、`character_graph` 仍保留类与注册名以兼容自定义图；三种内置图分别改用 `chapter_write` / `lore_extract`。
 
@@ -69,24 +69,28 @@ server/app/agents/
 
 `hot`
 ```
-genre_research → outline → chapter_expand(chapter_write，3 章)
-  → hot_preview ┐
-  → chapter_summarize(chaptered) → character_graph(lore_extract) → review
+genre_research → positioning → settings → outline(全书章纲)
+  → chapter_expand(chapter_write，仅前三章正文)
+  → hot_preview / chapter_summarize(全量章节概括)
+  → character_graph(lore_extract) → review → publish
 ```
-> `review` 只记录风险与建议，任何模式都不会 `paused` 等待人工确认，运行直接 `succeeded`；`hot` 正文/概括/概览均固定 3 章，`summary.chapters_count=3`。
+> `review` 只记录风险与建议，任何模式都不会 `paused` 等待人工确认，运行直接 `succeeded`。
+> `hot` 按篇幅产出全书大纲与全部章节概括（短篇至少 200 章、长篇至少 2000 章，可用 `target_chapters` 覆盖，上限 5000），
+> 正文与前三章概览只覆盖黄金三章，`summary.chapters_count=3`，大纲/概括数量等于目标章数。
 
 `reference`
 ```
-outline_decompose(source_key，分段) → adaptation → outline
-  → chapter_expand(chapter_write，全部改编章节) → chapter_summarize(chaptered)
+outline_decompose(source_key，分段) → adaptation → outline(全文大纲)
+  → chapter_summarize(全卷全章概览)
   → character_graph(lore_extract) → review
 ```
+> 参考创作不生成正文，`chapters` 为空；全量卷章概览由拆解/改编/大纲数据生成。
 
 `custom`
 ```
-outline → chapter_expand(chapter_write，大纲目标章数) → chapter_summarize(chaptered)
-  → character_graph(lore_extract) → review
+outline → chapter_summarize(全量概括) → character_graph(lore_extract) → review
 ```
+> `custom` 当前沿用 brief/选项驱动生成，只产出全书章纲与全卷全章概括，不写正文；完全由用户逐章输入内容的编辑流不在本接口范围内。
 
 章节写作、概括、设定抽取按图序串行；`hot_preview` 可与 `chapter_summarize` 同层并发。节点默认 1 次重试（最多 2 次尝试），章级节点按章重试。
 
@@ -201,7 +205,10 @@ BYOK（可选）：创建与续跑均可带 `X-BYOK-Key: <你的模型 API Key>`
 }
 ```
 
-- `target_chapters`：目标章数；留空按篇幅默认（长篇 12 / 短篇 6）。
+- `target_chapters`：目标章数（1–5000）；留空时热门按篇幅默认，参考创作默认沿用源章数。
+  默认值按 `ENV` 自动选择：生产环境短篇 200 章 / 长篇 2000 章 / 每批 20 章，
+  开发测试环境短篇 10 章 / 长篇 30 章 / 每批 10 章，避免本地联调触发上百次模型调用。
+  只有需要覆盖自动值时才设置 `OUTLINE_LONG_CHAPTERS` / `OUTLINE_SHORT_CHAPTERS` / `OUTLINE_CHAPTER_BATCH` / `OUTLINE_MAX_CHAPTERS`。
 - `sequel_chapters`：在目标章数之后追加的续写章数。
 - `adaptation_style` / `adaptation_extra`：仅 `reference` 生效，分别控制改编文风与额外要求。
 - 选项原样保存在 `run.meta.options`，详情接口通过 `options` 字段回显。
@@ -306,8 +313,8 @@ curl -s "http://127.0.0.1:8010/v1/agent-runs/$RUN_ID/artifacts/outline.md" -H "A
 - 文件名白名单：`outline.md`、`volumes.json`、`chapters.json`、`chapters_full.json`、`manuscript.md`、
   `chapter_summaries.json`、`characters.json`、`factions.json`、`items.json`、`story_bible.json`、
   `hot_research.json`、`hot_preview.md`、`decomposed.json`。
-- `reference` 的 `decomposed.json` 是全书拆解结果（含 `segmentation`/`segments`），`chapters.json` 是改编并逐章写作后的最终章节；`summary.chapters_count` 与 `chapter_summaries` / `manuscript` 章数一致。
-- `hot` 固定 3 章（正文、概括、`hot_preview.md`）；`custom` 按大纲目标章数。
+- `reference` 的 `decomposed.json` 是全书拆解结果（含 `segmentation`/`segments`），不写 `chapters.json` / `manuscript.md`；`chapter_summaries.json` 覆盖全卷全章概览。
+- `hot` 的 `outline.md` / `chapter_summaries.json` 覆盖全书目标章数，`chapters.json` / `manuscript.md` / `hot_preview.md` 只含前三章；`custom` 与 `reference` 一样只产出 `outline.md` / `chapter_summaries.json`，不写 `chapters.json` / `manuscript.md`。
 - 新增产物字段：
   - `chapters_full.json`：`{book_title, chapters:[{no,title,content}]}`
   - `manuscript.md`：`# 第N章 标题` 分节，逐章正文连贯
@@ -370,12 +377,12 @@ curl -s -OJ "http://127.0.0.1:8010/v1/agent-runs/$RUN_ID/export" -H "Authorizati
 
 `server/tests/test_agent_runs.py` 覆盖：
 
-- 三种模式创建与 stub 端到端（reference 5 节点全成功，3 章产物）
+- 三种模式创建与 stub 端到端（reference 无正文，全部章纲 + 全量概览）
 - 超长全文（≥5 万字、≥10 章）分段拆解：全部章节、跨段连续编号、角色同名合并、段级 SSE 顺序
 - 段级 checkpoint：前两段完成后第 3 段失败；`resume(retry_failed)` 跳过已完成段，只重跑失败段及后续段
 - 单段失败重试只作用于当前段（节点 `retries=1`）
 - 分段阈值显式失败：`source_too_large`，不静默截断
-- `hot` 全程无 `paused`，`hot_preview.md` 固定 3 章且每章梗概 150-300 字
+- `hot` 全程无 `paused`，全书大纲/概括按目标章数输出，`hot_preview.md` 固定 3 章且每章梗概 150-300 字
 - `reference` 仍支持 `paused → resume(approval)`
 - 幂等键（同一 run、不重复预占）
 - 无订阅 `403 subscription_required`、额度不足 `402 quota_exceeded`
@@ -390,7 +397,7 @@ curl -s -OJ "http://127.0.0.1:8010/v1/agent-runs/$RUN_ID/export" -H "Authorizati
 - 节点失败重试（1 次失败后成功、节点 `attempts=2`）
 - 运行失败后 `resume(retry_failed)` 只重跑失败节点
 
-本地端到端实测（SQLite + 本地存储 + `MODEL_STUB`，54,125 字 / 12 章）：reference `succeeded`，12 段、12 章、0.91s、22,829 tokens、16 分；hot `succeeded`，3 章概览、0.27s、3,798 tokens、3 分，全程无 `paused`。
+本地端到端实测（SQLite + 本地存储 + `MODEL_STUB`，54,125 字 / 12 章）：reference `succeeded`，12 段、12 章概览、无正文；hot 显式 `target_chapters=12` 时 `succeeded`，12 章大纲/概括 + 3 章正文，全程无 `paused`。
 
 运行：
 
@@ -583,7 +590,7 @@ for row in rows:
 | `arc` | string | 人物弧光 |
 | `tension_profile` | string | 节奏曲线，如 `3→5→7` |
 
-分卷按每 3 章一卷；不足 3 章的尾卷独立成卷，只有 1 卷时同样输出完整结构。卷区间必须连续覆盖 `1..N`，否则服务端回退为确定性分卷。
+分卷按每 20 章一卷；不足 20 章的尾卷独立成卷，只有 1 卷时同样输出完整结构。卷区间必须连续覆盖 `1..N`，否则服务端回退为确定性分卷。
 
 **人物**（`characters[]` 追加）：
 

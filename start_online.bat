@@ -42,9 +42,9 @@ if errorlevel 1 (
 )
 
 REM ---------- 1. backend Docker ----------
-echo [1/3] Starting backend Docker (Postgres / Redis / MinIO / api / worker / scheduler)...
+echo [1/3] Starting backend Docker (Postgres / Redis / MinIO / api / 4 workers / scheduler)...
 pushd server
-docker compose up -d --build
+docker compose up -d --build --scale worker=4
 if errorlevel 1 (
   echo [x] Backend Docker failed to start. Check server\docker-compose.yml and server\.env
   popd

@@ -186,6 +186,9 @@ export interface TaskRow {
   created_at?: string | null
   started_at?: string | null
   finished_at?: string | null
+  /** 最近一次心跳/阶段更新时间，用于判断是否卡死 */
+  last_activity_at?: string | null
+  stalled?: boolean
   cost_actual_cents?: number | null
   [key: string]: unknown
 }

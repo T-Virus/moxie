@@ -289,6 +289,51 @@ def resume_run(
     return run
 
 
+def force_cancel_run(
+    session: Session,
+    run: AgentRun,
+    *,
+    now: datetime | None = None,
+    reason: str = "已由运营强制终止",
+    code: str = "canceled_by_admin",
+) -> bool:
+    """运营强制终止：不等 worker 检查点，直接落终态并释放预占。"""
+    now = now or utcnow()
+    if run.status in TERMINAL_STATUSES:
+        return False
+    QuotaService(session).release(reservation_of(session, run), now=now)
+    run.status = "canceled"
+    run.cancel_requested = True
+    run.finished_at = now
+    run.error_code = code
+    run.error_message = reason[:255]
+    run.updated_at = now
+    append_event(session, run.id, "run", f"{reason}，预占额度已释放", level="warning")
+    _metrics_canceled(run)
+    session.flush()
+    return True
+
+
+def requeue_run(session: Session, run: AgentRun, *, now: datetime | None = None) -> bool:
+    """把卡在 queued/running 的运行重新投递：清暂停/取消标记，等待 worker 认领。"""
+    now = now or utcnow()
+    if run.status in TERMINAL_STATUSES or run.status == "paused":
+        return False
+    meta = dict(run.meta or {})
+    meta.pop("pause_requested", None)
+    meta.pop("pause_reason", None)
+    run.meta = meta
+    run.status = "queued"
+    run.cancel_requested = False
+    run.error_code = None
+    run.error_message = None
+    run.finished_at = None
+    run.updated_at = now
+    append_event(session, run.id, "run", "运营已将运行重新排队，等待 worker 认领", level="warning")
+    session.flush()
+    return True
+
+
 def reservation_of(session: Session, run: AgentRun):
     from ..services.quota import Reservation
 
@@ -366,6 +411,9 @@ def run_to_dict(
     node_rows = {node.id: _node_rows(steps, node.id) for node in graph.nodes}
     stages = []
     current = None
+    # 运行已落终态（failed/canceled）后残留的 running/pending step 不能再报「进行中」，
+    # 否则前端会把已结束的任务一直画成生成中，运营也无法判断任务真实状态。
+    live = run.status in ("queued", "running", "paused")
     for node in graph.nodes:
         rows = node_rows[node.id]
         state = "pending"
@@ -375,8 +423,8 @@ def run_to_dict(
             elif all(row.status == "done" for row in rows):
                 state = "succeeded"
             elif any(row.status in ("running", "done") for row in rows):
-                # 分章节点执行到一半（或取消时）仍显示进行中，避免误报「待开始」
-                state = "running"
+                # 分章节点执行到一半仍显示进行中，避免误报「待开始」；已结束的运行降级为待开始
+                state = "running" if live else "pending"
         started = min(
             (row.started_at for row in rows if row.started_at is not None),
             default=None,
@@ -420,11 +468,8 @@ def run_to_dict(
                 )
         if merged:
             outputs[node.id] = {"chapters": merged}
-    chapters = (
-        (outputs.get("chapter_expand") or {}).get("chapters")
-        or (outputs.get("adaptation") or {}).get("chapters")
-        or []
-    )
+    # 正文只认 chapter_expand；参考创作没有正文节点，不能把改编数据当正文回显。
+    chapters = (outputs.get("chapter_expand") or {}).get("chapters") or []
     graph_output = outputs.get("character_graph") or {}
     characters = (
         graph_output.get("characters")
@@ -558,12 +603,14 @@ def run_to_dict(
         if key not in outline_data and key not in duplicate_keys
     }
     logline = outline_data.get("logline") or ""
-    # 分卷必须覆盖最终写作章数；reference 改编后章数可能偏离大纲，按最终章节重算
+    # 分卷必须覆盖全书章纲：热门只有前三章正文，不能按正文章数把 200 章大纲压成 1 卷。
+    planned = list(outline_data.get("chapters") or [])
+    volume_total = len(planned) or len(chapters)
     volumes = outline_data.get("volumes") or []
-    if chapters and not _volumes_cover(volumes, len(chapters)):
+    if volume_total and not _volumes_cover(volumes, volume_total):
         from .skills.outline import volumes_for_chapters
 
-        volumes = volumes_for_chapters(chapters, run.genre_name)
+        volumes = volumes_for_chapters(planned or chapters, run.genre_name)
         outline_data["volumes"] = volumes
 
     # 人物/势力/道具/卷章概览的手工增删改：整组覆盖，未编辑的集合沿用生成结果
@@ -621,9 +668,14 @@ def run_to_dict(
         "status_label": info.get("status") or "连载中",
         "progress": run.progress,
         "stages": stages,
-        "current_stage": current
-        or run.current_stage
-        or (graph.nodes[-1].id if run.status == "succeeded" else None),
+        # 失败/取消后不再回吐「当前阶段」，否则前端会一直高亮进行中的阶段
+        "current_stage": (
+            None
+            if run.status in ("failed", "canceled")
+            else current
+            or run.current_stage
+            or (graph.nodes[-1].id if run.status == "succeeded" else None)
+        ),
         "quota": quota_block(session, run),
         "artifacts": artifacts,
         # AI 封面：有封面时返回需要鉴权的相对路径（客户端带 Bearer 拉取）
@@ -671,6 +723,13 @@ def run_to_dict(
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        # 客户端暂停态要用 updated_at 计算已耗时，缺字段会退化成 started_at 而显示成 0 秒
+        "updated_at": run.updated_at.isoformat() if run.updated_at else None,
+        "duration_seconds": (
+            int((run.finished_at - (run.started_at or run.created_at)).total_seconds())
+            if run.finished_at and (run.started_at or run.created_at)
+            else None
+        ),
         "tokens_total": run.tokens_total,
         "cost_cents": run.cost_cents,
     }

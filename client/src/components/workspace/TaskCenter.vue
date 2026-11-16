@@ -2,16 +2,13 @@
   <aside class="card task-center" aria-label="任务中心">
     <header class="task-center__head">
       <h2 class="task-center__title">任务中心</h2>
-      <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load">
+      <button type="button" class="btn btn--ghost btn--sm" :disabled="loading" @click="load()">
         刷新
       </button>
     </header>
 
-    <p v-if="actionError" class="task-center__action-error" role="alert">{{ actionError }}</p>
-
     <div class="task-center__body">
       <div v-if="loading && !items.length" class="task-center__state">加载中…</div>
-      <p v-else-if="error" class="task-center__state task-center__state--error">{{ error }}</p>
       <p v-else-if="!items.length" class="task-center__state">暂无任务</p>
 
       <ul v-else class="task-center__list">
@@ -56,6 +53,15 @@
               取消
             </button>
           </template>
+          <button
+            v-else-if="canRetryRun(task)"
+            type="button"
+            class="task-center__action task-center__action--start"
+            :disabled="!!busyId"
+            @click="retry(task)"
+          >
+            {{ busyId === task.run_id ? '重试中…' : '重试' }}
+          </button>
         </li>
       </ul>
     </div>
@@ -87,7 +93,6 @@
         cancelTarget?.title || '未命名作品'
       }}》吗？
     </p>
-    <div v-if="cancelError" class="alert" role="alert">{{ cancelError }}</div>
     <template #footer>
       <button type="button" class="btn" :disabled="!!busyId" @click="closeCancel">继续等待</button>
       <button type="button" class="btn btn--danger" :disabled="!!busyId" @click="confirmCancel">
@@ -95,38 +100,50 @@
       </button>
     </template>
   </AppDialog>
+
+  <ErrorDialog
+    :open="!!notice"
+    :title="notice?.title || '操作提示'"
+    :message="notice?.message || ''"
+    :tone="notice?.tone || 'error'"
+    @close="closeNotice"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppDialog from '@/components/AppDialog.vue'
+import ErrorDialog from '@/components/ErrorDialog.vue'
 import type { RunDetail } from '@/types'
 import { cancelRun, getRun, listRuns, pauseRun, resumeRun } from '@/services/agentApi'
 import { ApiError } from '@/services/http'
 import { STATUS_TONE, statusLabel } from '@/utils/format'
 
 const props = defineProps<{ currentId: string; status?: string }>()
+const emit = defineEmits<{ (e: 'changed', runId?: string): void }>()
 
 const PAGE_SIZE = 8
 const TERMINAL = ['succeeded', 'failed', 'canceled']
 /** 停止请求：running 的任务要等引擎在章节/段落边界落 paused，轮询确认避免「停止中…」悬挂 */
 const STOP_POLL_INTERVAL = 2000
 const STOP_POLL_TIMEOUT = 30000
+/** 存在未结束任务时的列表刷新间隔：状态标记不再依赖用户手动点「刷新」 */
+const LIST_POLL_INTERVAL = 4000
 
 const items = ref<RunDetail[]>([])
 const page = ref(1)
 const total = ref(0)
 const nextOffset = ref<number | undefined>(undefined)
 const loading = ref(false)
-const error = ref('')
-const actionError = ref('')
 const busyId = ref('')
 const cancelTarget = ref<RunDetail | null>(null)
-const cancelError = ref('')
+/** 任务列表不再内联回显错误，统一走 ErrorDialog 弹出 */
+const notice = ref<{ title: string; message: string; tone: 'error' | 'warn' | 'info' | 'success' } | null>(null)
 /** 每秒推进一次，仅用于「生成中」行的耗时文本刷新 */
 const now = ref(Date.now())
 let tickTimer: number | null = null
+let listTimer: number | null = null
 
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const hasNext = computed(() => nextOffset.value !== undefined)
@@ -138,6 +155,11 @@ function canStop(task: RunDetail): boolean {
 /** 暂停的运行都可以继续：审查暂停需在工作台确认，热门写作是被用户停止的 */
 function canStart(task: RunDetail): boolean {
   return task.status === 'paused'
+}
+
+/** 失败运行可重试：服务端要求 retry_failed=true，只重跑失败节点 */
+function canRetryRun(task: RunDetail): boolean {
+  return task.status === 'failed'
 }
 
 function parseTime(iso?: string | null): number | null {
@@ -198,23 +220,53 @@ function syncTick(): void {
   }
 }
 
+/**
+ * 存在未结束任务（含 paused）时定时静默刷新列表。
+ * 此前只有手动点「刷新」或切换任务才会重查，导致停止/完成/被运营终止后
+ * 徽章一直停在旧状态，前端看起来「状态改不了」。
+ */
+function syncListPolling(): void {
+  const active = items.value.some((task) => !TERMINAL.includes(task.status))
+  if (active && listTimer === null) {
+    listTimer = window.setInterval(() => {
+      if (busyId.value) return // 操作进行中不打断按钮态
+      void load(true)
+    }, LIST_POLL_INTERVAL)
+  } else if (!active && listTimer !== null) {
+    window.clearInterval(listTimer)
+    listTimer = null
+  }
+}
+
 function errorText(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message || fallback : fallback
 }
 
-async function load(): Promise<void> {
-  loading.value = true
-  error.value = ''
+function showNotice(
+  title: string,
+  message: string,
+  tone: 'error' | 'warn' | 'info' | 'success' = 'error',
+): void {
+  notice.value = { title, message, tone }
+}
+
+function closeNotice(): void {
+  notice.value = null
+}
+
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     const result = await listRuns({}, { limit: PAGE_SIZE, offset: (page.value - 1) * PAGE_SIZE })
     items.value = result.items
     total.value = result.total ?? result.items.length
     nextOffset.value = result.next_offset
     syncTick()
+    syncListPolling()
   } catch {
-    error.value = '任务列表加载失败'
+    if (!silent) showNotice('加载失败', '任务列表加载失败，请稍后重试')
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -243,17 +295,17 @@ async function waitStopped(runId: string): Promise<boolean> {
 async function stop(task: RunDetail): Promise<void> {
   if (busyId.value) return
   busyId.value = task.run_id
-  actionError.value = ''
   try {
     await pauseRun(task.run_id)
     // running 的任务由引擎在章节/段落边界落 paused：轮询确认后再放开按钮
     const stopped = await waitStopped(task.run_id)
+    emit('changed', task.run_id)
     await load()
     if (!stopped) {
-      actionError.value = '停止请求已提交，任务将在当前章节完成后暂停'
+      showNotice('停止请求已提交', '任务将在当前章节完成后暂停，状态会自动刷新', 'info')
     }
   } catch (err) {
-    actionError.value = errorText(err, '停止失败，请稍后重试')
+    showNotice('停止失败', errorText(err, '停止失败，请稍后重试'))
   } finally {
     busyId.value = ''
   }
@@ -261,28 +313,28 @@ async function stop(task: RunDetail): Promise<void> {
 
 function openCancel(task: RunDetail): void {
   if (busyId.value) return
-  cancelError.value = ''
   cancelTarget.value = task
 }
 
 function closeCancel(): void {
   if (busyId.value) return
   cancelTarget.value = null
-  cancelError.value = ''
 }
 
 async function confirmCancel(): Promise<void> {
   const task = cancelTarget.value
   if (!task || busyId.value) return
   busyId.value = task.run_id
-  cancelError.value = ''
-  actionError.value = ''
   try {
     await cancelRun(task.run_id)
     cancelTarget.value = null
+    // running 任务要等检查点才落 canceled，等一轮再回调，避免工作台闪现旧状态
+    await waitStopped(task.run_id)
+    emit('changed', task.run_id)
     await load()
   } catch (err) {
-    cancelError.value = errorText(err, '取消失败，请稍后重试')
+    cancelTarget.value = null
+    showNotice('取消失败', errorText(err, '取消失败，请稍后重试'))
   } finally {
     busyId.value = ''
   }
@@ -291,22 +343,39 @@ async function confirmCancel(): Promise<void> {
 async function resume(task: RunDetail): Promise<void> {
   if (busyId.value) return
   busyId.value = task.run_id
-  actionError.value = ''
   try {
     await resumeRun(task.run_id, { approval: true })
+    emit('changed', task.run_id)
     await load()
   } catch (err) {
-    actionError.value = errorText(err, '继续失败，请稍后重试')
+    showNotice('继续失败', errorText(err, '继续失败，请稍后重试'))
   } finally {
     busyId.value = ''
   }
 }
 
-watch([() => props.currentId, () => props.status], load)
-onMounted(load)
+/** 失败重试：只重置失败节点，已完成节点复用 checkpoint */
+async function retry(task: RunDetail): Promise<void> {
+  if (busyId.value) return
+  busyId.value = task.run_id
+  try {
+    await resumeRun(task.run_id, { approval: true, retry_failed: true })
+    emit('changed', task.run_id)
+    await load()
+  } catch (err) {
+    showNotice('重试失败', errorText(err, '重试失败，请稍后重试'))
+  } finally {
+    busyId.value = ''
+  }
+}
+
+watch([() => props.currentId, () => props.status], () => load())
+onMounted(() => load())
 onBeforeUnmount(() => {
   if (tickTimer !== null) window.clearInterval(tickTimer)
+  if (listTimer !== null) window.clearInterval(listTimer)
   tickTimer = null
+  listTimer = null
 })
 </script>
 
@@ -354,18 +423,6 @@ onBeforeUnmount(() => {
   padding: 16px;
   font-size: var(--text-xs);
   color: var(--color-text-3);
-}
-
-.task-center__state--error {
-  color: var(--color-danger);
-}
-
-.task-center__action-error {
-  flex: none;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--color-line);
-  font-size: var(--text-xs);
-  color: var(--color-danger);
 }
 
 .task-center__list {

@@ -13,7 +13,7 @@
             class="composer__input"
             type="text"
             maxlength="60"
-            placeholder="写入书名，一起创作"
+            :placeholder="`写入书名，${modeDesc}`"
             aria-label="书名"
             :aria-invalid="showInvalidTitle"
             @blur="touched = true"
@@ -91,12 +91,6 @@
           </div>
         </Transition>
       </form>
-
-      <div class="home__foot">
-        <div class="home__meta">
-          <p class="home__desc">{{ modeDesc }}</p>
-        </div>
-      </div>
     </div>
 
     <Teleport to="body">
@@ -142,9 +136,9 @@ const tabs: SegmentedTab[] = [
 ]
 
 const MODE_DESC: Record<RunMode, string> = {
-  hot: '六阶段流水线：题材校准 → 定位卡 → 设定生成 → 大纲拆解 → 黄金三章 → 质检发布。',
-  reference: '上传大纲或小说，全量改编为新书大纲，自动换名换设定。',
-  custom: '从书名开始，世界观、角色与章节全部由你定义。',
+  hot: '热门题材，快速上手。',
+  reference: '参考改编，完善大纲。',
+  custom: '自定义题材，自由发挥。',
 }
 
 const audienceOptions: Array<{ value: Audience; label: string }> = [
@@ -153,8 +147,8 @@ const audienceOptions: Array<{ value: Audience; label: string }> = [
 ]
 
 const lengthOptions: Array<{ value: RunLength; label: string }> = [
-  { value: 'long', label: '长篇' },
   { value: 'short', label: '短篇' },
+  { value: 'long', label: '长篇' }
 ]
 
 const DRAFT_KEY = 'mx_composer_draft'
@@ -165,7 +159,7 @@ const DEFAULT_GENRE_ID = 'shuangwen'
 const mode = ref<RunMode>('hot')
 const title = ref('')
 const audience = ref<Audience>('male')
-const length = ref<RunLength>('long')
+const length = ref<RunLength>('short')
 const genre = ref<GenreSelection>({ id: DEFAULT_GENRE_ID, name: DEFAULT_GENRE_NAME })
 const file = ref<File | null>(null)
 const genres = ref<GenreItem[]>([])
@@ -592,27 +586,6 @@ onMounted(async () => {
   backdrop-filter: blur(3px);
   font-size: var(--text-sm);
   color: #dbe7f1;
-}
-
-.home__foot {
-  grid-row: 3;
-  align-self: start;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.home__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.home__desc {
-  color: var(--color-text-2);
-  font-size: var(--text-sm);
 }
 
 /* ---------- 页面级 toast：底部居中、可关闭、不遮挡创作面板 ---------- */

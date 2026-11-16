@@ -109,7 +109,7 @@
 
       <div v-else-if="error" class="alert" role="alert">
         <span>{{ error }}</span>
-        <button type="button" class="runs__retry" @click="load">重试</button>
+        <button type="button" class="runs__retry" @click="load()">重试</button>
       </div>
 
       <template v-else>
@@ -238,8 +238,9 @@ const AUDIENCE_FILTERS: Array<{ value: Audience | ''; label: string }> = [
 ]
 const LENGTH_FILTERS: Array<{ value: RunLength | ''; label: string }> = [
   { value: '', label: '全部' },
-  { value: 'long', label: '长篇' },
   { value: 'short', label: '短篇' },
+  { value: 'long', label: '长篇' }
+
 ]
 
 const route = useRoute()
@@ -415,7 +416,25 @@ function titleInitial(title: string): string {
   return title.trim().charAt(0) || '书'
 }
 
-async function load(): Promise<void> {
+/** 有进行中的运行（含被运营暂停的）时静默刷新列表，状态徽章不再停在旧值 */
+const LIVE_STATUS = ['queued', 'running', 'paused']
+const LIST_POLL_INTERVAL = 6000
+let listTimer: number | null = null
+
+function syncListPolling(): void {
+  const live = runs.value.some((item) => LIVE_STATUS.includes(item.status))
+  if (live && listTimer === null) {
+    listTimer = window.setInterval(() => {
+      if (document.hidden) return
+      void load(true)
+    }, LIST_POLL_INTERVAL)
+  } else if (!live && listTimer !== null) {
+    window.clearInterval(listTimer)
+    listTimer = null
+  }
+}
+
+async function load(silent = false): Promise<void> {
   // 未登录不读取任何本机/演示记录，只展示账号引导
   if (!session.account) {
     runs.value = []
@@ -425,8 +444,10 @@ async function load(): Promise<void> {
     return
   }
   const seq = ++loadSeq
-  loading.value = true
-  error.value = ''
+  if (!silent) {
+    loading.value = true
+    error.value = ''
+  }
   try {
     const result = await listRuns({
       audience: filters.audience,
@@ -444,7 +465,8 @@ async function load(): Promise<void> {
     for (const item of result.items) {
       if (item.genre?.id && item.genre.name) dataGenres.value.set(item.genre.id, item.genre.name)
     }
-    page.value = 1
+    if (!silent) page.value = 1
+    syncListPolling()
   } catch (err) {
     if (seq !== loadSeq) return
     // 会话过期：清空列表与账号态，回落到引导页
@@ -456,12 +478,14 @@ async function load(): Promise<void> {
       resetSession()
       return
     }
+    // 后台静默刷新失败时保留上一次结果，避免列表闪空
+    if (silent) return
     runs.value = []
     total.value = 0
     error.value =
       err instanceof ApiError ? err.message : '作品列表加载失败，请检查网络后重试'
   } finally {
-    if (seq === loadSeq) loading.value = false
+    if (seq === loadSeq && !silent) loading.value = false
   }
 }
 
@@ -493,6 +517,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.clearTimeout(searchTimer)
+  if (listTimer !== null) window.clearInterval(listTimer)
+  listTimer = null
   document.removeEventListener('pointerdown', onDocPointerDown)
 })
 </script>

@@ -193,7 +193,8 @@ class RunContext:
 
     def progress(self, pct: int) -> None:
         self.task.progress = max(0, min(int(pct), 99))
-        self.session.flush()
+        # 进度需要实时可见，不能等到整轮执行结束才随大事务提交
+        self.session.commit()
 
     def get_step(self, step_key: str) -> TaskStep | None:
         return self.session.get(TaskStep, (self.task.id, step_key))
@@ -336,7 +337,8 @@ def execute_task(
         seconds=(settings.task_lease_seconds if settings else 1800)
     )
     task.heartbeat_at = now
-    session.flush()
+    # 认领后立即提交，否则 worker 整轮执行期间外部看到的仍是 queued
+    session.commit()
     append_event(session, task.id, f"任务开始执行（第 {task.attempts} 次尝试）")
 
     ctx = RunContext(session, task, settings=settings, storage=storage, byok_key=byok_key)
@@ -438,5 +440,49 @@ def cancel_task(session: Session, task: Task, *, now: datetime | None = None) ->
     else:
         task.cancel_requested = True
         append_event(session, task.id, "已请求取消，等待执行器在检查点停止", level="warning")
+    session.flush()
+    return True
+
+
+def force_cancel_task(
+    session: Session,
+    task: Task,
+    *,
+    now: datetime | None = None,
+    reason: str = "已由运营强制终止",
+) -> bool:
+    """运营强制终止：不再等执行器检查点，直接落终态并释放预占。
+
+    用于 worker 卡死、长任务无法在检查点停下的场景；返回 True 表示状态有变化。
+    """
+    now = now or utcnow()
+    if task.status in ("succeeded", "failed", "canceled"):
+        return False
+    QuotaService(session).release(_reservation_of(session, task), now=now)
+    task.status = "canceled"
+    task.cancel_requested = True
+    task.error_code = "canceled_by_admin"
+    task.lease_until = None
+    task.finished_at = now
+    task.heartbeat_at = now
+    append_event(session, task.id, f"{reason}，预占额度已释放", level="warning")
+    from ..metrics import increment
+
+    increment("moxie_tasks_total", status="canceled")
+    session.flush()
+    return True
+
+
+def requeue_task(session: Session, task: Task, *, now: datetime | None = None) -> bool:
+    """把卡在 queued/running 的任务重新排队：清租约与取消标记，交还调度器投递。"""
+    now = now or utcnow()
+    if task.status in ("succeeded", "failed", "canceled"):
+        return False
+    task.status = "queued"
+    task.cancel_requested = False
+    task.error_code = None
+    task.lease_until = None
+    task.heartbeat_at = now
+    append_event(session, task.id, "运营已将任务重新排队，等待 worker 认领", level="warning")
     session.flush()
     return True

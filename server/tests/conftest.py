@@ -46,6 +46,10 @@ def settings(tmp_path) -> Settings:
         storage_local_dir=str(tmp_path / "artifacts"),
         storage_public_base_url="",
         task_source_dirs=str(tmp_path),
+        # 全书章纲用例固定按生产标准跑，环境自动值由单测单独覆盖验证。
+        outline_long_chapters=2000,
+        outline_short_chapters=200,
+        outline_chapter_batch=20,
     )
 
 

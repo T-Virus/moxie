@@ -37,7 +37,7 @@ def enqueue_agent_run(settings: Settings, run_id: str) -> bool:
         settings,
         "app.worker.worker.run_agent_job",
         run_id,
-        3600,
+        21600,
         "enqueue agent run failed（保持 queued，可用 worker --once 执行）",
     )
 

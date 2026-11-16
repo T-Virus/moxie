@@ -536,6 +536,18 @@ export const api = {
   taskRetry(id: string) {
     return request<any>(`/v1/admin/tasks/${encodeURIComponent(id)}/retry`, { method: 'POST', body: {} })
   },
+  /** 运营管控：cancel/pause/resume 为协作式，force_cancel 直接落终态并释放预占。 */
+  taskControl(
+    id: string,
+    action: 'cancel' | 'pause' | 'resume' | 'force_cancel' | 'requeue',
+    source?: string,
+    reason?: string,
+  ) {
+    return request<any>(`/v1/admin/tasks/${encodeURIComponent(id)}/control`, {
+      method: 'POST',
+      body: { action, ...(source ? { source } : {}), ...(reason ? { reason } : {}) },
+    })
+  },
   taskDetail(id: string, source?: string) {
     return request<TaskDetail>(`/v1/admin/tasks/${encodeURIComponent(id)}`, {
       query: source ? { source } : {},

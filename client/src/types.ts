@@ -36,7 +36,7 @@ export interface GenreSelection {
 }
 
 export interface CreateRunOptions {
-  /** 目标章数；留空按篇幅默认（长篇 12 / 短篇 6） */
+  /** 目标章数（1–5000）；留空按篇幅默认（长篇 2000 章 / 短篇 200 章） */
   target_chapters?: number
   /** 续写新章数，追加在目标章数之后 */
   sequel_chapters?: number
@@ -723,6 +723,8 @@ export interface UploadResponse {
 export interface ResumePayload {
   input?: { chapter_no: number; content: string }
   approval?: boolean
+  /** 失败运行重跑：服务端要求显式声明，否则 409（与运营看板重试语义一致） */
+  retry_failed?: boolean
 }
 
 /* ---------- 认证 / 订阅（沿用现服务端路径） ---------- */

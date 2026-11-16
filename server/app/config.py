@@ -215,6 +215,43 @@ class Settings(BaseSettings):
     # 优先与环境变量 MODEL_KEY_SECRET 配合，回退到 artifact_signing_secret。
     model_key_secret: str = ""
 
+    # Agent 全书大纲章数：留空（None）时按 ENV 自动选择，显式配置才覆盖。
+    # 生产：长篇 2000 / 短篇 200 / 每批 20；开发测试：长篇 30 / 短篇 10 / 每批 10。
+    outline_long_chapters: int | None = None
+    outline_short_chapters: int | None = None
+    outline_max_chapters: int | None = None
+    outline_chapter_batch: int | None = None
+
+    @property
+    def outline_env_defaults(self) -> tuple[int, int, int]:
+        """(长篇章数, 短篇章数, 分批大小)：按运行环境自动选择。"""
+        if self.is_production:
+            return 2000, 200, 20
+        return 30, 10, 10
+
+    @property
+    def effective_outline_max_chapters(self) -> int:
+        value = self.outline_max_chapters
+        return max(1, min(5000, value if value is not None else 5000))
+
+    @property
+    def effective_outline_long_chapters(self) -> int:
+        default = self.outline_env_defaults[0]
+        value = self.outline_long_chapters if self.outline_long_chapters is not None else default
+        return max(1, min(self.effective_outline_max_chapters, value))
+
+    @property
+    def effective_outline_short_chapters(self) -> int:
+        default = self.outline_env_defaults[1]
+        value = self.outline_short_chapters if self.outline_short_chapters is not None else default
+        return max(1, min(self.effective_outline_max_chapters, value))
+
+    @property
+    def effective_outline_chapter_batch(self) -> int:
+        default = self.outline_env_defaults[2]
+        value = self.outline_chapter_batch if self.outline_chapter_batch is not None else default
+        return max(1, value)
+
     # 拆解链路
     src_path: str = str(ROOT_DIR / "src")
     # 每处理多少段主动让出 worker（0=不限）；用于分批执行与断点验证

@@ -48,7 +48,7 @@ STEP_REGISTRY: dict[str, str] = {
     "chapter_write": "章节正文",
     "chapter_summarize": "章节概括",
     "lore_extract": "角色/势力/道具抽取",
-    "review": "签约体检",
+    "review": "内容体检",
     "genre_research": "同题材调研",
     "outline_decompose": "参考作品拆解",
     "adaptation": "去抄袭改编",
@@ -219,7 +219,7 @@ STEP_RECOMMENDATIONS: dict[str, StepRecommendation] = {
     "review": {
         "primary": "edgeone:deepseek-v4-pro",
         "alternatives": ["edgeone:kimi-k2.6", "edgeone:minimax-m3"],
-        "reason": "签约体检要发现逻辑漏洞与人设崩塌，属推理密集型，值得用思考型 pro 换更低的误报与漏报。",
+        "reason": "内容体检要核对设定一致性并准确区分敏感/违禁表达，误报漏报成本高，适合用推理模型复核。",
     },
     "genre_research": {
         "primary": "edgeone:deepseek-v4.1-flash",

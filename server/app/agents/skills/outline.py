@@ -10,7 +10,12 @@ from pydantic import Field
 from ..contracts import SkillContext, StrictModel, call_json, list_of_dicts, text_of
 from .base import BaseSkill
 
-CHAPTER_TOTAL = {"long": 12, "short": 6}
+# 热门/参考按篇幅产出全量章纲，遵循网文连载标准：
+# 短篇至少 200 章（约 30–50 万字），长篇至少 2000 章（约 500 万字以上）。
+# 运行时可被 Settings.outline_long_chapters / outline_short_chapters 覆盖（测试时调小）。
+CHAPTER_TOTAL = {"long": 2000, "short": 200}
+# 单本最多规划 5000 章；target_chapters 显式设置时也不能超过此上限。
+MAX_CHAPTERS = 5000
 
 ARC_TEMPLATES = [
     ("开局", "主角被卷入核心冲突，第一次异常暴露"),
@@ -41,8 +46,10 @@ class OutlineInput(StrictModel):
     positioning: dict = Field(default_factory=dict)
     settings: dict = Field(default_factory=dict)
     # 创作高级选项：0 = 沿用篇幅默认；续写章数追加在目标章数之后
-    target_chapters: int = Field(default=0, ge=0, le=500)
+    target_chapters: int = Field(default=0, ge=0, le=MAX_CHAPTERS)
     sequel_chapters: int = Field(default=0, ge=0, le=200)
+    # 模式决定默认章数：hot/reference 走全量篇幅，custom 由用户自定义
+    mode: str = Field(default="hot", pattern="^(hot|reference|custom)$")
 
 
 class OutlineChapter(StrictModel):
@@ -124,6 +131,26 @@ class OutlineOutput(StrictModel):
 
 SYSTEM = "你是网文主编，输出可逐章执行的大纲 JSON，不写正文。"
 
+# 全量长篇一次输出几百章容易被模型截断，按 20 章一批续写；与分卷粒度一致。
+CHAPTER_BATCH = 20
+PLAN_SUFFIX = (
+    "\n本轮先只输出总纲、设定、分卷、作品信息、伏笔台账与爽点分布；"
+    "chapters 必须返回空数组，后续会按分卷逐批补章纲。"
+)
+CHAPTER_PROMPT = """【技能 outline·分卷章纲】
+书名：{title}　题材：{genre}　读者：{audience}　篇幅：{length}
+全书总纲：{logline}
+主题：{theme}
+核心设定：{context}
+分卷计划：{volumes}
+前情摘要：{recent}
+
+请只输出第 {start}–{end} 章的章纲，章号必须从 {start} 连续到 {end}，共 {count} 章。
+输出 JSON：
+{{"chapters":[{{"chapter":{start},"title":"","summary":"","key_events":[""],"hook":"","arc":"","conflict":"","reversal":"","foreshadow":""}}]}}
+每章 summary 60-150 字，写清本章事件、冲突、转折与结尾钩子；不要写正文，不要输出其他字段。
+"""
+
 PROMPT = """【技能 outline】
 书名：{title}
 题材：{genre}　读者：{audience}　篇幅：{length}
@@ -166,7 +193,7 @@ PROMPT = """【技能 outline】
 章节数要求：{total} 章，章号连续，前三章必须完成「冲突—选择—阶段兑现」。
 每章 conflict/reversal/foreshadow/hook 四项必填；foreshadow_ledger 要覆盖全部伏笔并给出埋设章与回收章。
 爽点分布要服从定位卡的情绪基调配比，每章至少 1 个爽点。
-卷划分：按每 3 章一卷切分（不足 3 章的尾卷独立成卷）；只有一卷时同样输出完整字段。
+卷划分：按每 20 章左右一卷切分（不足 20 章的尾卷独立成卷）；只有一卷时同样输出完整字段。
 作品信息字段要求：除无法从题材/书名/brief 推断的信息外，上面的定位、叙事、连载字段都要填写；
 列表字段每条不超过 60 字，不要输出空字符串占位。
 beats 必须写本书的具体剧情节点并按章号递增，禁止照抄示例文字。
@@ -203,8 +230,11 @@ def _material(payload: OutlineInput) -> dict:
     return {}
 
 
-CN_NUM = ("一", "二", "三", "四", "五", "六", "七", "八", "九", "十")
-VOLUME_CHAPTERS = 3
+CN_NUM = (
+    "一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
+    "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+)
+VOLUME_CHAPTERS = 20
 POWER_GENRES = ("玄幻", "仙侠", "奇幻", "都市", "科幻", "武侠")
 
 
@@ -213,7 +243,7 @@ def _cn_no(value: int) -> str:
 
 
 def _build_volumes(chapters: list[OutlineChapter], payload: OutlineInput) -> list[dict]:
-    """按每 3 章一卷切分；单卷（含不足 3 章）也输出完整字段。"""
+    """按每 20 章一卷切分；单卷（含不足 20 章）也输出完整字段。"""
     total = len(chapters)
     if total <= 0:
         return []
@@ -401,9 +431,22 @@ def _completeness_check(
     }
 
 
-def _total_of(payload: OutlineInput) -> int:
-    base = payload.target_chapters or CHAPTER_TOTAL.get(payload.length, 12)
-    return max(1, min(500, base + max(0, payload.sequel_chapters)))
+def _total_of(payload: OutlineInput, settings=None) -> int:
+    """目标章数：显式设置优先；参考创作沿用源章数；热门按篇幅；自定义默认短篇。"""
+    long_default = getattr(settings, "effective_outline_long_chapters", CHAPTER_TOTAL["long"])
+    short_default = getattr(settings, "effective_outline_short_chapters", CHAPTER_TOTAL["short"])
+    cap = max(1, min(MAX_CHAPTERS, getattr(settings, "effective_outline_max_chapters", MAX_CHAPTERS)))
+    base = payload.target_chapters
+    if not base:
+        source = _material(payload)
+        source_count = len(source.get("chapters") or []) if source else 0
+        if payload.mode == "reference" and source_count:
+            base = source_count
+        elif payload.mode == "custom":
+            base = 12
+        else:
+            base = {"long": long_default, "short": short_default}.get(payload.length, short_default)
+    return max(1, min(cap, base + max(0, payload.sequel_chapters)))
 
 
 def _chapter_structure(index: int, total: int, summary: str, arc: str) -> dict:
@@ -420,9 +463,9 @@ def _chapter_structure(index: int, total: int, summary: str, arc: str) -> dict:
     return {"conflict": conflict[:120], "reversal": reversal, "foreshadow": foreshadow}
 
 
-def _fallback(payload: OutlineInput, *, stub: bool = True) -> OutlineOutput:
+def _fallback(payload: OutlineInput, *, stub: bool = True, settings=None) -> OutlineOutput:
     material = _material(payload)
-    total = _total_of(payload)
+    total = _total_of(payload, settings)
     source_chapters = list_of_dicts(material.get("chapters"))
     chapters: list[OutlineChapter] = []
     for index in range(1, total + 1):
@@ -650,12 +693,17 @@ def _normalize(
         chapters.append(
             OutlineChapter(
                 chapter=index,
-                title=text_of(item.get("title")) or f"第{index}章",
-                summary=text_of(item.get("summary")) or "剧情推进。",
-                key_events=[text_of(e) for e in (item.get("key_events") or []) if text_of(e)][:6],
-                hook=text_of(item.get("hook")),
+                title=text_of(item.get("title"))
+                or (fb_chapter.title if fb_chapter else f"第{index}章"),
+                summary=text_of(item.get("summary"))
+                or (fb_chapter.summary if fb_chapter else "剧情推进。"),
+                key_events=[text_of(e) for e in (item.get("key_events") or []) if text_of(e)][:6]
+                or (fb_chapter.key_events if fb_chapter else []),
+                hook=text_of(item.get("hook"))
+                or (fb_chapter.hook if fb_chapter else ""),
                 # 叙事阶段用于分卷结构与节奏检查；模型缺失时按章序回退到模板
                 arc=text_of(item.get("arc"))
+                or (fb_chapter.arc if fb_chapter else "")
                 or ARC_TEMPLATES[(index - 1) % len(ARC_TEMPLATES)][0],
                 # 阶段4 结构化字段：模型 → 章节大纲 → stub 兜底
                 conflict=text_of(item.get("conflict"))
@@ -865,6 +913,82 @@ def _highlights_of(data: dict, chapters: list[OutlineChapter], payload: OutlineI
     return rows
 
 
+def _generate_full(
+    ctx: SkillContext,
+    payload: OutlineInput,
+    total: int,
+    base_user: str,
+    context: str,
+    fallback: OutlineOutput,
+) -> dict:
+    """全量章纲：先出总纲/分卷，再按 20 章一批补章纲，避免单次输出被截断。"""
+    try:
+        plan = call_json(ctx, system=SYSTEM, user=base_user + PLAN_SUFFIX)
+    except Exception as exc:  # noqa: BLE001 - 单批失败不拖垮整本大纲，后续按卷重试
+        ctx.log(f"全书总纲生成失败，改用确定性大纲：{type(exc).__name__}", level="warning")
+        plan = {}
+    logline = text_of(plan.get("logline")) or fallback.logline
+    theme = text_of(plan.get("theme")) or fallback.theme
+    volumes_view = json.dumps(plan.get("volumes") or [], ensure_ascii=False)[:2500] or "未提供，按每 20 章一卷"
+    by_no: dict[int, dict] = {}
+    recent = "这是全书开篇第一批章节。"
+    batch = max(1, int(getattr(ctx.settings, "effective_outline_chapter_batch", CHAPTER_BATCH)))
+    for start in range(1, total + 1, batch):
+        end = min(total, start + batch - 1)
+        try:
+            data = call_json(
+                ctx,
+                system=SYSTEM,
+                user=CHAPTER_PROMPT.format(
+                    title=payload.title,
+                    genre=payload.genre_name,
+                    audience="男频" if payload.audience == "male" else "女频",
+                    length="长篇" if payload.length == "long" else "短篇",
+                    logline=logline,
+                    theme=theme,
+                    context=context,
+                    volumes=volumes_view,
+                    recent=recent[:800],
+                    start=start,
+                    end=end,
+                    count=end - start + 1,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - 该批用确定性章纲补齐
+            ctx.log(
+                f"第 {start}–{end} 章章纲生成失败，使用确定性大纲补齐：{type(exc).__name__}",
+                level="warning",
+            )
+            data = {}
+        got = list_of_dicts(data.get("chapters"))
+        if not got:
+            ctx.log(f"第 {start}–{end} 章章纲缺失，使用确定性大纲补齐", level="warning")
+        for index, item in enumerate(got, 1):
+            number = _int(item.get("chapter"), start + index - 1)
+            if number < start or number > end:
+                number = start + index - 1
+            row = dict(item)
+            row["chapter"] = number
+            by_no[number] = row
+        if got:
+            tail = got[-2:]
+            recent = "；".join(
+                f"第{_int(item.get('chapter'), start + idx)}章：{text_of(item.get('summary'))[:120]}"
+                for idx, item in enumerate(tail, 1)
+            ) or recent
+        if ctx.on_progress is not None:
+            try:
+                ctx.on_progress()
+            except Exception as exc:  # noqa: BLE001 - 心跳失败不打断大纲生成
+                ctx.log(f"大纲心跳写入失败：{type(exc).__name__}", level="warning")
+    plan["chapters"] = [by_no.get(index) or {} for index in range(1, total + 1)]
+    if not text_of(plan.get("logline")):
+        plan["logline"] = logline
+    if not text_of(plan.get("theme")):
+        plan["theme"] = theme
+    return plan
+
+
 class OutlineSkill(BaseSkill):
     name = "outline"
     version = "1.0.0"
@@ -872,8 +996,9 @@ class OutlineSkill(BaseSkill):
     output_model = OutlineOutput
 
     def run(self, payload: OutlineInput, ctx: SkillContext) -> OutlineOutput:
-        fallback = _fallback(payload, stub=ctx.settings.model_stub)
-        total = _total_of(payload)
+        fallback = _fallback(payload, stub=ctx.settings.model_stub, settings=ctx.settings)
+        total = _total_of(payload, ctx.settings)
+        batch_size = max(1, int(getattr(ctx.settings, "effective_outline_chapter_batch", CHAPTER_BATCH)))
         material = _material(payload)
         material_view = {
             "book_summary": text_of(material.get("book_summary"))[:300],
@@ -909,22 +1034,32 @@ class OutlineSkill(BaseSkill):
                 {k: c.get(k) for k in ("name", "role", "stance", "goal") if text_of(c.get(k))}
                 for c in list_of_dicts(settings.get("characters"), 6)
             ]
-        data = call_json(
-            ctx,
-            system=SYSTEM,
-            user=PROMPT.format(
-                title=payload.title,
-                genre=payload.genre_name,
-                audience="男频" if payload.audience == "male" else "女频",
-                length="长篇" if payload.length == "long" else "短篇",
-                brief=payload.brief or "无",
-                positioning=json.dumps(positioning_view, ensure_ascii=False)[:2000] or "未生成",
-                settings=json.dumps(settings_view, ensure_ascii=False)[:2000] or "未生成",
-                research=json.dumps(research_view, ensure_ascii=False),
-                material=json.dumps(material_view, ensure_ascii=False)[:8000],
-                total=total,
-            ),
+        base_user = PROMPT.format(
+            title=payload.title,
+            genre=payload.genre_name,
+            audience="男频" if payload.audience == "male" else "女频",
+            length="长篇" if payload.length == "long" else "短篇",
+            brief=payload.brief or "无",
+            positioning=json.dumps(positioning_view, ensure_ascii=False)[:2000] or "未生成",
+            settings=json.dumps(settings_view, ensure_ascii=False)[:2000] or "未生成",
+            research=json.dumps(research_view, ensure_ascii=False),
+            material=json.dumps(material_view, ensure_ascii=False)[:8000],
+            total=total,
         )
+        # 小体量一次生成；全量长篇分批生成，避免几百章被模型截断。
+        if total > batch_size * 2 and not ctx.settings.model_stub:
+            context = json.dumps(
+                {
+                    "brief": payload.brief or "",
+                    "positioning": positioning_view,
+                    "settings": settings_view,
+                    "research": research_view,
+                },
+                ensure_ascii=False,
+            )[:2500]
+            data = _generate_full(ctx, payload, total, base_user, context, fallback)
+        else:
+            data = call_json(ctx, system=SYSTEM, user=base_user)
         result = _normalize(
             data,
             fallback,

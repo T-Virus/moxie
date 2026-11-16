@@ -111,7 +111,7 @@ class AgentGenre(AppModel):
 class AgentRunOptions(AppModel):
     """创作高级选项；全部可选，缺省时沿用模式默认行为。"""
 
-    target_chapters: int | None = Field(default=None, ge=1, le=500)
+    target_chapters: int | None = Field(default=None, ge=1, le=5000)
     sequel_chapters: int | None = Field(default=None, ge=0, le=200)
     adaptation_style: str | None = Field(default=None, max_length=300)
     adaptation_extra: str | None = Field(default=None, max_length=1000)
@@ -202,7 +202,7 @@ class AgentCollectionsUpdateRequest(AppModel):
     characters: list[dict[str, Any]] | None = Field(default=None, max_length=500)
     factions: list[dict[str, Any]] | None = Field(default=None, max_length=200)
     items: list[dict[str, Any]] | None = Field(default=None, max_length=500)
-    volumes: list[dict[str, Any]] | None = Field(default=None, max_length=100)
+    volumes: list[dict[str, Any]] | None = Field(default=None, max_length=1000)
     chapter_summaries: list[dict[str, Any]] | None = Field(default=None, max_length=5000)
     chapter_hidden: list[int] | None = Field(default=None, max_length=5000)
 
@@ -303,6 +303,18 @@ class AdminModelConfigView(AppModel):
 
 class AdminReasonRequest(AppModel):
     reason: str = Field(min_length=2, max_length=200)
+
+
+class AdminTaskControlRequest(AppModel):
+    """运营对单个任务/运行的状态操作。
+
+    source 缺省时按 agent_runs → tasks 的顺序自动识别；
+    pause/resume 仅对 agent 运行有效（拆解/改编任务只有取消语义）。
+    """
+
+    action: Literal["cancel", "pause", "resume", "requeue", "force_cancel"]
+    source: Literal["task", "agent_run"] | None = None
+    reason: str | None = Field(default=None, max_length=180)
 
 
 class AdminSubscriptionPatchRequest(AppModel):

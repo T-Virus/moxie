@@ -151,9 +151,8 @@ def write_artifacts(storage, run: RunView, state: dict) -> list[dict]:
         )
         written.append({"name": "decomposed.json"})
 
-    chapters = (state.get("chapter_expand") or {}).get("chapters") or (
-        (state.get("adaptation") or {}).get("chapters")
-    )
+    # 只有真正写过正文的节点才产出章节正文/手稿；参考创作不写正文。
+    chapters = (state.get("chapter_expand") or {}).get("chapters") or []
     if chapters:
         storage.put_json(
             f"{prefix}/chapters.json",

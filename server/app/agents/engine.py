@@ -75,6 +75,7 @@ def _run_node(
     session: Session,
     api_key: str,
     byok: bool,
+    on_progress=None,
 ) -> NodeOutcome:
     attempts = max(1, node.retries + 1)
     records: list[tuple[int, ModelResult]] = []
@@ -90,6 +91,7 @@ def _run_node(
             api_key=resolved.api_key,
             byok=byok,
             base_url=resolved.base_url,
+            on_progress=on_progress,
         )
         try:
             payload = node.builder(view, state, extra)
@@ -747,7 +749,9 @@ def execute_agent_run(
         run.started_at = now
     append_event(session, run.id, "run", f"开始执行（第 {run.attempts} 次尝试，mode={run.mode}）")
     increment("moxie_agent_runs_started_total", mode=run.mode)
-    session.flush()
+    # 认领后必须立刻提交：worker 整轮执行可能持续数分钟，若一直握着事务，
+    # 外部看到的始终是 queued，用户会以为任务从没开始。
+    session.commit()
 
     view = RunView(
         id=run.id,
@@ -855,9 +859,10 @@ def execute_agent_run(
 
         outcomes: list[NodeOutcome] = []
         paused_mid = False
-        # 分段/章级节点在主线程串行执行（需要写子级 checkpoint），其余节点同层并发
+        # 分段/章级/显式串行节点在主线程执行（需要写子级 checkpoint 或复用 session），
+        # 其余节点同层并发。
         for node in pending:
-            if not node.segmented and not node.chaptered:
+            if not node.segmented and not node.chaptered and not node.serial:
                 continue
             skill = overrides.get(node.skill) or registry.get(node.skill)
             if node.segmented:
@@ -874,7 +879,7 @@ def execute_agent_run(
                     api_key=api_key,
                     byok=byok,
                 )
-            else:
+            elif node.chaptered:
                 outcome = _run_chaptered_node(
                     session,
                     run,
@@ -887,13 +892,32 @@ def execute_agent_run(
                     api_key=api_key,
                     byok=byok,
                 )
+            else:
+                def _heartbeat() -> None:
+                    # 长节点（如 2000 章全量大纲）分批刷新 updated_at，
+                    # 避免 scheduler 把仍在执行的 running 误判为无心跳并重新入队。
+                    run.updated_at = utcnow()
+                    session.commit()
+
+                outcome = _run_node(
+                    node,
+                    view,
+                    state,
+                    extra,
+                    skill,
+                    settings,
+                    session=session,
+                    api_key=api_key,
+                    byok=byok,
+                    on_progress=_heartbeat,
+                )
             outcomes.append(outcome)
             if outcome.paused:
                 # 用户请求停止：不再启动本层剩余节点，落 paused 保留进度
                 paused_mid = True
                 break
         parallel = [] if paused_mid else [
-            node for node in pending if not node.segmented and not node.chaptered
+            node for node in pending if not node.segmented and not node.chaptered and not node.serial
         ]
         if parallel:
             workers = min(4, len(parallel))
@@ -987,7 +1011,8 @@ def execute_agent_run(
         run.progress = min(99, int(done_count * 100 / max(1, len(graph.nodes))))
         run.current_stage = _next_stage(graph, steps)
         run.updated_at = finished
-        session.flush()
+        # 每完成一层就提交 checkpoint，工作台才能看到进度推进；中断后也能从此处续跑
+        session.commit()
 
         try:
             write_artifacts(storage, view, state)

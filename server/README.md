@@ -112,6 +112,17 @@ python -m app.worker.worker --once
 python -m app.worker.worker --loop
 ```
 
+生产队列由 RQ worker 消费，**一个 worker 同一时刻只执行一个任务**。
+`start.sh` / `start_online.bat` 默认启动 4 个 worker 副本，与套餐最大并发数一致；
+如需调整，可设置 `WORKER_REPLICAS=N`，或在 compose 目录手动执行：
+
+```powershell
+docker compose up -d --scale worker=N
+```
+
+任务状态里的「排队中 1 / 生成中 1」表示两个不同的运行：一个已认领执行、一个等待空闲 worker，
+不是同一个任务卡住。贡献额度/套餐的并发上限目前不参与 worker 认领，仅用于权益展示。
+
 ## 拆解链路
 
 ### 1) 创建任务

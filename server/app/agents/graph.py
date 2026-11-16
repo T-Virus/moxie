@@ -46,6 +46,8 @@ class NodeSpec:
     segmented: bool = False
     # 章级节点：由引擎按 builder 给出的 chapters 逐章执行并写章级 checkpoint
     chaptered: bool = False
+    # 主线程串行节点：需要复用引擎 session 查询模型配置，不能放进并发线程池
+    serial: bool = False
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,7 @@ def _hot_research(run: RunView, state: dict, extra: dict) -> dict:
 
 
 def _hot_outline(run: RunView, state: dict, extra: dict) -> dict:
+    # 热门创作输出全书大纲与全部章节概括，但正文仍只写黄金三章。
     return {
         "title": run.title,
         "audience": run.audience,
@@ -111,6 +114,8 @@ def _hot_outline(run: RunView, state: dict, extra: dict) -> dict:
         "adaptation": {},
         "positioning": _state(state, "positioning"),
         "settings": _state(state, "settings"),
+        **_outline_options(extra),
+        "mode": run.mode,
     }
 
 
@@ -173,13 +178,39 @@ def _expand_reference(run: RunView, state: dict, extra: dict) -> dict:
 
 
 def _summarize(run: RunView, state: dict, extra: dict) -> dict:
-    # hot 模式前三章已写正文（见 _expand 的 [:3]），概括只针对其后的章节，来源读大纲剩余章；
-    # reference/custom 正文已全覆盖，直接对正文章节（chapter_expand）做概括。
-    if run.mode == "hot":
-        chapters = list((_state(state, "outline") or {}).get("chapters") or [])[3:]
-    else:
-        chapters = list((_state(state, "chapter_expand") or {}).get("chapters") or [])
-    return {"title": run.title, "chapters": chapters}
+    """全量章节概括：有正文时用正文，无正文模式直接用章纲生成。
+
+    hot 的正文只覆盖前三章，reference/custom 不写正文，但任务结果必须覆盖全书所有卷章，
+    因此以完整章纲为基础合并正文，而不是只截取已写章节。
+    """
+    outline = list((_state(state, "outline") or {}).get("chapters") or [])
+    written = list((_state(state, "chapter_expand") or {}).get("chapters") or [])
+    written_by_no = {
+        int(item.get("chapter") or index): item
+        for index, item in enumerate(written, 1)
+        if isinstance(item, dict)
+    }
+    if not outline:
+        return {"title": run.title, "chapters": written}
+    merged: list[dict] = []
+    for index, item in enumerate(outline, 1):
+        if not isinstance(item, dict):
+            continue
+        number = int(item.get("chapter") or index)
+        row = dict(item)
+        row["chapter_no"] = number
+        body = written_by_no.get(number)
+        if body:
+            row.update(
+                {
+                    key: value
+                    for key, value in body.items()
+                    if value not in (None, "", [], {})
+                }
+            )
+            row["summary"] = text_of(body.get("summary")) or text_of(item.get("summary"))
+        merged.append(row)
+    return {"title": run.title, "chapters": merged}
 
 
 def _lore(run: RunView, state: dict, extra: dict) -> dict:
@@ -235,6 +266,19 @@ def _review_from_expand(run: RunView, state: dict, extra: dict) -> dict:
         "genre_name": run.genre_name,
         "chapters": chapters,
         "outline": _state(state, "outline").get("chapters") or [],
+        "positioning": _state(state, "positioning"),
+        "settings": _state(state, "settings"),
+    }
+
+
+def _review_outline_only(run: RunView, state: dict, extra: dict) -> dict:
+    """不写正文模式（reference/custom）：用全套章纲/卷章概览做体检。"""
+    outline = list(_state(state, "outline").get("chapters") or [])
+    return {
+        "title": run.title,
+        "genre_name": run.genre_name,
+        "chapters": outline,
+        "outline": outline,
         "positioning": _state(state, "positioning"),
         "settings": _state(state, "settings"),
     }
@@ -317,6 +361,7 @@ def _reference_outline(run: RunView, state: dict, extra: dict) -> dict:
         "decomposition": _state(state, "outline_decompose"),
         "adaptation": _state(state, "adaptation"),
         **_outline_options(extra),
+        "mode": run.mode,
     }
 
 
@@ -331,6 +376,7 @@ def _custom_outline(run: RunView, state: dict, extra: dict) -> dict:
         "decomposition": {},
         "adaptation": {},
         **_outline_options(extra),
+        "mode": run.mode,
     }
 
 
@@ -344,7 +390,7 @@ HOT = Graph(
         # 阶段3 设定生成：世界观/力量体系/势力/金手指 → 派生角色卡与功法道具表
         NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),
         # 阶段4 大纲拆解：总纲 → 分卷 → 章纲（冲突/反转/伏笔/结尾钩子）
-        NodeSpec("outline", "outline", "大纲拆解", ("settings",), _hot_outline),
+        NodeSpec("outline", "outline", "大纲拆解", ("settings",), _hot_outline, serial=True),
         # 阶段5 黄金三章：主角在场 + 当下危机 + 未知悬念，去AI化润色
         NodeSpec(
             "chapter_expand",
@@ -359,9 +405,9 @@ HOT = Graph(
             "chapter_summarize",
             "chapter_summarize",
             "章节概括",
-            ("chapter_expand",),
+            ("chapter_expand", "outline"),
             _summarize,
-            chaptered=True,
+            serial=True,
         ),
         NodeSpec(
             "character_graph",
@@ -374,7 +420,7 @@ HOT = Graph(
         NodeSpec(
             "review",
             "review",
-            "签约体检",
+            "内容体检",
             ("chapter_expand", "outline", "hot_preview", "chapter_summarize", "character_graph"),
             _review_from_expand,
         ),
@@ -400,36 +446,28 @@ REFERENCE = Graph(
             segmented=True,
         ),
         NodeSpec("adaptation", "adaptation", "去抄袭改编", ("outline_decompose",), _adaptation),
-        NodeSpec("outline", "outline", "新书大纲", ("adaptation",), _reference_outline),
-        NodeSpec(
-            "chapter_expand",
-            "chapter_write",
-            "章节正文",
-            ("outline",),
-            _expand_reference,
-            chaptered=True,
-        ),
+        NodeSpec("outline", "outline", "新书大纲", ("adaptation",), _reference_outline, serial=True),
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
             "章节概括",
-            ("chapter_expand",),
+            ("outline",),
             _summarize,
-            chaptered=True,
+            serial=True,
         ),
         NodeSpec(
             "character_graph",
             "lore_extract",
             "角色/势力/道具功法抽取",
-            ("adaptation", "outline", "chapter_expand", "chapter_summarize"),
+            ("adaptation", "outline", "chapter_summarize"),
             _lore,
         ),
         NodeSpec(
             "review",
             "review",
-            "签约体检",
-            ("chapter_expand", "outline", "chapter_summarize", "character_graph"),
-            _review_from_expand,
+            "内容体检",
+            ("outline", "chapter_summarize", "character_graph"),
+            _review_outline_only,
         ),
     ),
 )
@@ -437,36 +475,28 @@ REFERENCE = Graph(
 CUSTOM = Graph(
     mode="custom",
     nodes=(
-        NodeSpec("outline", "outline", "大纲规划", (), _custom_outline),
-        NodeSpec(
-            "chapter_expand",
-            "chapter_write",
-            "章节正文",
-            ("outline",),
-            _expand,
-            chaptered=True,
-        ),
+        NodeSpec("outline", "outline", "大纲规划", (), _custom_outline, serial=True),
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
             "章节概括",
-            ("chapter_expand",),
+            ("outline",),
             _summarize,
-            chaptered=True,
+            serial=True,
         ),
         NodeSpec(
             "character_graph",
             "lore_extract",
             "角色/势力/道具功法抽取",
-            ("outline", "chapter_expand", "chapter_summarize"),
+            ("outline", "chapter_summarize"),
             _lore,
         ),
         NodeSpec(
             "review",
             "review",
-            "签约体检",
-            ("chapter_expand", "outline", "chapter_summarize", "character_graph"),
-            _review_from_expand,
+            "内容体检",
+            ("outline", "chapter_summarize", "character_graph"),
+            _review_outline_only,
         ),
     ),
 )

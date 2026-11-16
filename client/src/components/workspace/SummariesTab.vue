@@ -1311,7 +1311,7 @@ function jump(no: number): void {
 .summaries__row-label {
   flex: none;
   width: 32px;
-  padding-top: 5px;
+  line-height: 26px;
   font-size: 14px;
   color: var(--color-text-3);
 }

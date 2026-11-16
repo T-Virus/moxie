@@ -21,6 +21,7 @@ const loading = ref(false)
 const error = ref('')
 const autoRefresh = ref(true)
 const retryingId = ref('')
+const controllingId = ref('')
 
 const detailTask = ref<TaskRow | null>(null)
 const detail = ref<TaskDetail | null>(null)
@@ -46,6 +47,13 @@ const detailMeta = computed<[string, unknown][]>(() => {
     ['结束时间', d.finished_at],
   ].filter(([, v]) => v !== undefined && v !== null && v !== '') as [string, unknown][]
 })
+
+const detailStatus = computed(() => {
+  const d = (detail.value?.detail || {}) as Record<string, unknown>
+  return String(d.status || detailTask.value?.status || '')
+})
+const detailIsRun = computed(() => detailTask.value?.source === 'agent_run')
+const detailLive = computed(() => ['queued', 'running', 'paused'].includes(detailStatus.value))
 
 async function openDetail(task: TaskRow) {
   detailTask.value = task
@@ -82,6 +90,7 @@ const failedTasks = computed(() => taskList('failed'))
 const queueDepth = computed(() => dashboard.value?.queue_depth ?? null)
 const runningCount = computed(() => dashboard.value?.running_count ?? runningTasks.value.length)
 const failedCount = computed(() => dashboard.value?.failed_count ?? failedTasks.value.length)
+const stalledCount = computed(() => runningTasks.value.filter((task) => task.stalled).length)
 const retryableCount = computed(() => {
   if (typeof dashboard.value?.retryable_count === 'number') return dashboard.value.retryable_count
   return failedTasks.value.filter(item => ['failed', 'retry_pending', 'queued'].includes(String(item.status))).length
@@ -113,12 +122,51 @@ async function retryTask(task: TaskRow) {
   }
 }
 
+type ControlAction = 'cancel' | 'pause' | 'resume' | 'force_cancel' | 'requeue'
+const CONTROL_LABEL: Record<ControlAction, string> = {
+  cancel: '取消',
+  pause: '暂停',
+  resume: '继续',
+  force_cancel: '强制终止',
+  requeue: '重新排队',
+}
+
+async function controlTask(task: TaskRow, action: ControlAction) {
+  const label = CONTROL_LABEL[action]
+  if (action === 'force_cancel') {
+    const ok = window.confirm(
+      `确认强制终止任务 ${task.id}？\n该操作会让任务立即落 canceled 终态并释放预占额度，正在执行的 worker 结果将被丢弃。`,
+    )
+    if (!ok) return
+  }
+  if (action === 'requeue') {
+    const ok = window.confirm(
+      `确认将任务 ${task.id} 重新排队？\n仅在该任务确认卡死时使用，重复投递可能造成同一任务被并发执行。`,
+    )
+    if (!ok) return
+  }
+  controllingId.value = String(task.id)
+  try {
+    const res = await api.taskControl(String(task.id), action, task.source)
+    pushToast(`任务 ${task.id} ${label}成功${res?.status ? `（当前状态：${res.status}）` : ''}`)
+    await load()
+    if (detailTask.value && String(detailTask.value.id) === String(task.id)) {
+      await openDetail(detailTask.value)
+    }
+  } catch (e) {
+    pushToast(errorMessage(e), 'error')
+  } finally {
+    controllingId.value = ''
+  }
+}
+
 let timer: number | null = null
 onMounted(() => {
   void load()
+  // 运行中任务状态变化快，30 秒刷新一次在排查卡死时会误判，改为 10 秒
   timer = window.setInterval(() => {
     if (autoRefresh.value) void load()
-  }, 30_000)
+  }, 10_000)
 })
 onUnmounted(() => {
   if (timer !== null) window.clearInterval(timer)
@@ -126,7 +174,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <PageHeader title="任务看板" desc="聚合拆解/改编任务与创作页触发的写作运行，查看队列深度、运行中与失败任务并重试。页面每 30 秒自动刷新。">
+  <PageHeader title="任务看板" desc="聚合拆解/改编任务与创作页触发的写作运行，查看队列深度、运行中与失败任务，并可直接取消、暂停、继续、重新排队或强制终止。页面每 10 秒自动刷新。">
     <label class="badge muted" style="cursor: pointer">
       <input v-model="autoRefresh" type="checkbox" style="margin-right: 5px" />自动刷新
     </label>
@@ -144,7 +192,7 @@ onUnmounted(() => {
     <div class="stat-card">
       <div class="stat-label">运行中</div>
       <div class="stat-value">{{ formatNumber(runningCount) }}</div>
-      <div class="stat-desc">当前持有租约的任务</div>
+      <div class="stat-desc">{{ stalledCount ? `${stalledCount} 条疑似卡死，建议强制终止` : '当前持有租约的任务' }}</div>
     </div>
     <div class="stat-card red">
       <div class="stat-label">失败任务</div>
@@ -175,7 +223,7 @@ onUnmounted(() => {
       </div>
       <div v-if="runningTasks.length" class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>任务 ID</th><th>账号</th><th>来源 / 类型</th><th>作品</th><th>状态</th><th class="num">进度</th><th>开始时间</th><th>创建时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>任务 ID</th><th>账号</th><th>来源 / 类型</th><th>作品</th><th>状态</th><th class="num">进度</th><th>开始时间</th><th>最近活动</th><th>创建时间</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="task in runningTasks" :key="task.id">
               <td class="mono truncate" :title="String(task.id)">{{ task.id }}</td>
@@ -188,8 +236,27 @@ onUnmounted(() => {
               <td><StatusBadge :value="task.status" dot /></td>
               <td class="num">{{ task.progress ?? 0 }}%</td>
               <td class="muted">{{ formatTime(task.started_at) }}</td>
+              <td class="muted">
+                {{ formatTime(task.last_activity_at || task.started_at) }}
+                <span v-if="task.stalled" class="badge danger" style="margin-left: 4px; font-size: 11px">疑似卡死</span>
+              </td>
               <td class="muted">{{ formatTime(task.created_at) }}</td>
-              <td><button class="btn ghost sm" @click="openDetail(task)">详情</button></td>
+              <td>
+                <button class="btn ghost sm" @click="openDetail(task)">详情</button>
+                <template v-if="canRetry">
+                  <button
+                    class="btn ghost sm"
+                    :disabled="controllingId === String(task.id)"
+                    @click="controlTask(task, 'cancel')"
+                  >取消</button>
+                  <button
+                    class="btn ghost sm"
+                    :disabled="controllingId === String(task.id)"
+                    @click="controlTask(task, 'force_cancel')"
+                  >强制终止</button>
+                </template>
+                <span v-else class="muted" style="font-size: 12px">只读</span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -266,6 +333,48 @@ onUnmounted(() => {
           <span class="event-log__msg">{{ ev.message }}</span>
         </li>
       </ul>
+    </template>
+    <template #footer>
+      <button v-if="detailTask" class="btn ghost sm" @click="openDetail(detailTask)">刷新</button>
+      <div class="spacer"></div>
+      <template v-if="canRetry && detailTask">
+        <button
+          v-if="detailStatus === 'failed'"
+          class="btn ghost sm"
+          :disabled="retryingId === String(detailTask.id)"
+          @click="retryTask(detailTask)"
+        >重试</button>
+        <button
+          v-if="detailIsRun && ['queued', 'running'].includes(detailStatus)"
+          class="btn ghost sm"
+          :disabled="controllingId === String(detailTask.id)"
+          @click="controlTask(detailTask, 'pause')"
+        >暂停</button>
+        <button
+          v-if="detailIsRun && ['paused', 'failed'].includes(detailStatus)"
+          class="btn ghost sm"
+          :disabled="controllingId === String(detailTask.id)"
+          @click="controlTask(detailTask, 'resume')"
+        >继续</button>
+        <button
+          v-if="detailLive"
+          class="btn ghost sm"
+          :disabled="controllingId === String(detailTask.id)"
+          @click="controlTask(detailTask, 'requeue')"
+        >重新排队</button>
+        <button
+          v-if="detailLive"
+          class="btn ghost sm"
+          :disabled="controllingId === String(detailTask.id)"
+          @click="controlTask(detailTask, 'cancel')"
+        >取消</button>
+        <button
+          v-if="detailLive"
+          class="btn ghost sm"
+          :disabled="controllingId === String(detailTask.id)"
+          @click="controlTask(detailTask, 'force_cancel')"
+        >强制终止</button>
+      </template>
     </template>
   </Modal>
 </template>

@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict
 
@@ -34,6 +34,8 @@ class SkillContext:
     # 本节点内的模型调用结果（线程内独占，引擎汇总结算）
     usage: list[ModelResult] = field(default_factory=list)
     logs: list[tuple[str, str]] = field(default_factory=list)
+    # 长节点心跳：引擎注入，技能在分批循环中调用，用于刷新 running 时间戳。
+    on_progress: Callable[[], None] | None = None
 
     def log(self, message: str, level: str = "info") -> None:
         self.logs.append((level, message[:500]))

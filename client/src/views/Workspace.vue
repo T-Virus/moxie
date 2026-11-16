@@ -128,7 +128,7 @@
           </Transition>
         </section>
 
-        <TaskCenter :current-id="run.run_id" :status="run.status" />
+        <TaskCenter :current-id="run.run_id" :status="run.status" @changed="onTaskChanged" />
       </div>
 
       <AppDialog :open="deleteOpen" title="删除作品" @close="deleteOpen = false">
@@ -502,11 +502,24 @@ watch(
   () => run.value?.status,
   (status) => {
     if (!status) return
-    // hot 之外 paused 不会自行恢复，停止轮询；恢复后由 startPolling 重新启动。
-    if (TERMINAL.includes(status) || (status === 'paused' && run.value?.mode !== 'hot')) stopPolling()
+    // hot 之外 paused 不会自行恢复，停止轮询；恢复（继续/重试）后必须重新启动，
+    // 否则工作台会一直停在暂停时刻的数据，看起来「状态改不回来」。
+    if (TERMINAL.includes(status) || (status === 'paused' && run.value?.mode !== 'hot')) {
+      stopPolling()
+    } else if (pollTimer === null) {
+      startPolling()
+    }
   },
   { immediate: true },
 )
+
+/** 任务中心停止/继续/取消/重试后同步本页详情与轮询，避免两处状态不一致 */
+async function onTaskChanged(runId?: string): Promise<void> {
+  if (!run.value) return
+  if (runId && runId !== run.value.run_id) return
+  await loadRun(true)
+  if (run.value && !TERMINAL.includes(run.value.status) && pollTimer === null) startPolling()
+}
 
 onBeforeUnmount(() => {
   stopPolling()

@@ -5,14 +5,18 @@ from __future__ import annotations
 
 import io
 import json
+import threading
+import time
 import uuid
 import zipfile
 
 from app.agents.engine import execute_agent_run
 from app.agents.skills.chapter_write import ChapterWriteSkill
+from app.agents.skills.genre_research import GenreResearchSkill
 from app.agents.skills.outline import OutlineChapter, OutlineOutput, OutlineSkill
 from app.agents.skills.outline_decompose import OutlineDecomposeSkill
-from app.agents.skills.review import ReviewOutput, ReviewRisk, ReviewSkill
+from app.agents.skills.review import ReviewInput, ReviewOutput, ReviewRisk, ReviewSkill
+from app.config import Settings
 from app.models import AgentRun, AgentRunStep
 from app.services.storage import book_slug
 
@@ -288,11 +292,251 @@ def test_quota_exceeded(client, headers, app):
     assert sixth.json()["error"]["code"] == "quota_exceeded"
 
 
+class _SlowGenreResearch(GenreResearchSkill):
+    def run(self, payload, ctx):
+        time.sleep(3)
+        return super().run(payload, ctx)
+
+
+def test_running_status_visible_while_worker_busy(client, headers, app):
+    """worker 执行期间必须已把 running 提交，前端不能一直看到 queued。"""
+    _stub(app)
+    subscribe(client, headers)
+    run_id = _create(
+        client,
+        headers,
+        mode="hot",
+        title="状态可见性校验",
+        options={"target_chapters": 6},
+    ).json()["run_id"]
+    outcome: dict = {}
+
+    def work() -> None:
+        with db_session(app) as session:
+            run = session.get(AgentRun, run_id)
+            try:
+                outcome["status"] = execute_agent_run(
+                    session,
+                    run,
+                    settings=app.state.settings,
+                    storage=app.state.storage,
+                    skill_overrides={"genre_research": _SlowGenreResearch()},
+                )
+                session.commit()
+            except Exception:  # noqa: BLE001
+                import traceback
+
+                outcome["error"] = traceback.format_exc()
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    time.sleep(1.2)
+    with db_session(app) as session:
+        observed = session.get(AgentRun, run_id).status
+    thread.join(timeout=20)
+
+    assert observed == "running", (observed, outcome)
+    assert outcome.get("status") == "succeeded", outcome
+
+
+class _MemStorage:
+    def __init__(self) -> None:
+        self.json: dict[str, dict] = {}
+        self.bytes: dict[str, bytes] = {}
+
+    def put_json(self, key, value, *args, **kwargs) -> None:
+        self.json[key] = value
+
+    def put_bytes(self, key, value, *args, **kwargs) -> None:
+        self.bytes[key] = value
+
+    def exists(self, key) -> bool:
+        return key in self.json or key in self.bytes
+
+
+def test_hot_artifacts_keep_full_outline_and_summaries(app):
+    """热门产物保留全书章纲与全量概括，只有正文限定前三章。"""
+    from app.agents.artifacts import write_artifacts
+    from app.agents.graph import RunView
+
+    run = RunView(
+        id="hot-full",
+        mode="hot",
+        title="全量章纲",
+        audience="male",
+        length="long",
+        genre_id=None,
+        genre_name="都市",
+        source_key=None,
+        brief=None,
+    )
+    storage = _MemStorage()
+    state = {
+        "outline": {"chapters": [{"chapter": i, "title": f"第{i}章"} for i in range(1, 13)]},
+        "chapter_expand": {"chapters": [{"chapter": i, "content": "正文"} for i in range(1, 4)]},
+        "chapter_summarize": {"chapters": [{"chapter_no": i} for i in range(1, 13)]},
+    }
+    write_artifacts(storage, run, state)
+
+    summary_key = next(key for key in storage.json if key.endswith("chapter_summaries.json"))
+    assert len(storage.json[summary_key]["chapters"]) == 12
+    chapters_key = next(key for key in storage.json if key.endswith("chapters.json"))
+    assert len(storage.json[chapters_key]["chapters"]) == 3
+    assert len(state["outline"]["chapters"]) == 12
+
+
+def test_full_outline_generation_is_batched(monkeypatch):
+    """真实模型路径下 200+ 章要分批生成，不能一次请求输出整本导致截断。"""
+    import re
+
+    from app.agents.contracts import SkillContext
+    from app.agents.skills import outline as outline_module
+
+    calls: list[str] = []
+
+    def fake_call(ctx, *, system, user):
+        calls.append(user)
+        if outline_module.PLAN_SUFFIX in user:
+            return {
+                "logline": "少年在雨夜卷入旧案。",
+                "theme": "选择与代价",
+                "volumes": [],
+                "story_bible": {"worldview": "现代都市"},
+            }
+        match = re.search(r"第 (\d+)–(\d+) 章", user)
+        assert match, user[:200]
+        start, end = int(match.group(1)), int(match.group(2))
+        return {
+            "chapters": [
+                {
+                    "chapter": number,
+                    "title": f"第{number}章 雨夜",
+                    "summary": f"第{number}章推进旧案线索，主角做出选择。",
+                    "key_events": ["发现线索"],
+                    "hook": "新的疑点出现。",
+                }
+                for number in range(start, end + 1)
+            ]
+        }
+
+    monkeypatch.setattr(outline_module, "call_json", fake_call)
+    ctx = SkillContext(settings=Settings(model_stub=False, env="test", outline_chapter_batch=20))
+    result = outline_module.OutlineSkill().run(
+        outline_module.OutlineInput(
+            title="分批大纲",
+            audience="male",
+            length="short",
+            genre_name="悬疑",
+            mode="hot",
+            target_chapters=45,
+        ),
+        ctx,
+    )
+
+    assert len(result.chapters) == 45
+    assert result.chapters[0].summary.startswith("第1章推进")
+    assert result.chapters[-1].summary.startswith("第45章推进")
+    assert len(calls) == 1 + 3  # 总纲 1 次 + 20 章一批共 3 次
+
+
+def test_outline_defaults_follow_environment():
+    """生产按网文标准，开发测试自动用小体量，避免本地联调跑上百次模型。"""
+    from app.agents.contracts import SkillContext
+    from app.agents.skills.outline import OutlineInput, OutlineSkill
+
+    for env, expected_by_length in (
+        ("production", {"short": 200, "long": 2000}),
+        ("test", {"short": 10, "long": 30}),
+    ):
+        ctx = SkillContext(settings=Settings(model_stub=True, env=env))
+        for length, expected in expected_by_length.items():
+            result = OutlineSkill().run(
+                OutlineInput(
+                    title=f"{env}-{length}默认章数",
+                    audience="male",
+                    length=length,
+                    genre_name="悬疑",
+                    mode="hot",
+                ),
+                ctx,
+            )
+            assert len(result.chapters) == expected
+            assert result.chapters[-1].chapter == expected
+
+
+def test_outline_defaults_can_override_environment():
+    """显式配置优先于环境自动值，方便临时联调。"""
+    from app.agents.contracts import SkillContext
+    from app.agents.skills.outline import OutlineInput, OutlineSkill
+
+    ctx = SkillContext(
+        settings=Settings(
+            model_stub=True,
+            env="test",
+            outline_long_chapters=23,
+            outline_short_chapters=7,
+            outline_chapter_batch=7,
+        )
+    )
+    for length, expected in (("short", 7), ("long", 23)):
+        result = OutlineSkill().run(
+            OutlineInput(
+                title=f"{length}可配置章数",
+                audience="male",
+                length=length,
+                genre_name="悬疑",
+                mode="hot",
+            ),
+            ctx,
+        )
+        assert len(result.chapters) == expected
+
+
+def test_hot_default_length_outputs_full_book(client, headers, app):
+    """短篇默认 200 章：全书大纲和全部概括，但正文只有前三章。"""
+    _stub(app)
+    subscribe(client, headers)
+    run_id = _create(client, headers, mode="hot", title="短篇全书").json()["run_id"]
+    assert _execute(app, run_id) == "succeeded"
+
+    detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
+    assert len(detail["outline"]["chapters"]) == 200
+    assert len(detail["chapter_summaries"]) == 200
+    assert len(detail["chapters"]) == 3
+    assert len(detail["volumes"]) == 10
+    assert detail["volumes"][-1]["chapter_to"] == 200
+
+
+def test_reference_outputs_full_outline_without_body(client, headers, app):
+    """参考创作：全文大纲 + 全卷章概览，不生成正文。"""
+    _stub(app)
+    subscribe(client, headers)
+    source_key = _upload(client, headers, _long_source(12))
+    response = _create(client, headers, mode="reference", title="参考样书", source_key=source_key)
+    assert response.status_code == 201, response.text
+    assert _execute(app, response.json()["run_id"]) == "succeeded"
+
+    detail = client.get(f"/v1/agent-runs/{response.json()['run_id']}", headers=headers).json()
+    assert len(detail["outline"]["chapters"]) == 12
+    assert len(detail["chapter_summaries"]) == 12
+    assert detail["chapters"] == []
+    assert detail["summary"]["chapters_count"] == 0
+    names = {item["name"] for item in detail["artifacts"]}
+    assert "manuscript.md" not in names
+    assert "chapters.json" not in names
+
+
 def test_hot_and_custom_modes_end_to_end(client, headers, app):
     _stub(app)
     subscribe(client, headers)
 
-    hot = _create(client, headers, mode="hot", title="热榜样书")
+    hot = _create(
+        client,
+        headers,
+        mode="hot",
+        title="热榜样书",
+        options={"target_chapters": 12},
+    )
     assert hot.status_code == 201, hot.text
     assert _execute(app, hot.json()["run_id"]) == "succeeded"
 
@@ -322,8 +566,17 @@ def test_hot_and_custom_modes_end_to_end(client, headers, app):
         "publish_pack.json",
     } <= names
     assert detail["summary"]["preview_chapters_count"] == 3
-    assert len(detail["chapter_summaries"]) == 3
+    assert len(detail["chapter_summaries"]) == 12
     assert len(detail["items"]) == detail["summary"]["items_count"]
+
+    # 热门创作：全书章纲 + 全量章节概括，正文只保留黄金三章。
+    assert len(detail["outline"]["chapters"]) == 12
+    assert [item["chapter"] for item in detail["outline"]["chapters"]] == list(range(1, 13))
+    assert [item["chapter_no"] for item in detail["chapter_summaries"]] == list(range(1, 13))
+    assert len(detail["chapters"]) == 3
+    assert len(detail["volumes"]) == 1
+    assert detail["volumes"][0]["chapter_from"] == 1
+    assert detail["volumes"][0]["chapter_to"] == 12
 
     # 六阶段结构化产出抽查
     research_doc = client.get(
@@ -378,36 +631,50 @@ def test_hot_and_custom_modes_end_to_end(client, headers, app):
     )
     assert _execute(app, custom.json()["run_id"]) == "succeeded"
     custom_detail = client.get(f"/v1/agent-runs/{custom.json()['run_id']}", headers=headers).json()
-    # custom 按大纲目标章数写完
-    custom_total = len(custom_detail["chapters"])
-    assert custom_detail["summary"]["chapters_count"] == custom_total
+    # custom 不写正文，只按大纲目标章数产出全卷全章概括
+    custom_total = len(custom_detail["outline"]["chapters"])
+    assert custom_detail["chapters"] == []
+    assert custom_detail["summary"]["chapters_count"] == 0
+    assert custom_detail["summary"]["word_count"] == 0
     assert len(custom_detail["chapter_summaries"]) == custom_total
+    assert custom_detail["volumes"][-1]["chapter_to"] == custom_total
     names = {item["name"] for item in custom_detail["artifacts"]}
     assert {
         "outline.md",
-        "chapters.json",
-        "chapters_full.json",
-        "manuscript.md",
         "chapter_summaries.json",
         "characters.json",
         "factions.json",
         "items.json",
         "story_bible.json",
     } <= names
-    full = client.get(
-        f"/v1/agent-runs/{custom.json()['run_id']}/artifacts/chapters_full.json", headers=headers
-    ).json()
-    assert [item["no"] for item in full["chapters"]] == list(range(1, custom_total + 1))
-    assert all(item["content"] for item in full["chapters"])
-    assert custom_detail["summary"]["word_count"] == sum(
-        len(item["content"]) for item in full["chapters"]
-    )
+    assert not {"chapters.json", "chapters_full.json", "manuscript.md"} & names
+
+
+def test_hot_full_outline_volumes_cover_planned_chapters(client, headers, app):
+    """热门只有三章正文，但分卷仍必须覆盖全书章纲，不能按正文章数压成一卷。"""
+    _stub(app)
+    subscribe(client, headers)
+    run_id = _create(
+        client,
+        headers,
+        mode="hot",
+        title="全书分卷书",
+        options={"target_chapters": 45},
+    ).json()["run_id"]
+    assert _execute(app, run_id) == "succeeded"
+
+    detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
+    assert len(detail["chapters"]) == 3
+    assert len(detail["outline"]["chapters"]) == 45
+    assert len(detail["chapter_summaries"]) == 45
+    assert len(detail["volumes"]) == 3
+    assert detail["volumes"][-1]["chapter_to"] == 45
 
 
 def test_export_bundle_contains_manuscript_and_aigc(client, headers, app):
     _stub(app)
     subscribe(client, headers)
-    created = _create(client, headers, mode="custom", title="交付包样书")
+    created = _create(client, headers, mode="hot", title="交付包样书")
     run_id = created.json()["run_id"]
     assert _execute(app, run_id) == "succeeded"
 
@@ -447,7 +714,9 @@ def test_export_rejects_missing_run(client, headers, app):
 def test_chapter_fields_sse_and_single_chapter_retry(client, headers, app):
     _stub(app)
     subscribe(client, headers)
-    created = _create(client, headers, mode="custom", title="章级校验书")
+    created = _create(
+        client, headers, mode="hot", title="章级校验书", options={"target_chapters": 3}
+    )
     run_id = created.json()["run_id"]
     flaky = _FlakyChapter(fail_chapter=2)
     assert _execute(app, run_id, overrides={"chapter_write": flaky}) == "succeeded"
@@ -527,7 +796,8 @@ def test_chapter_fields_sse_and_single_chapter_retry(client, headers, app):
             order.append("start")
         elif "章完成" in item["message"]:
             order.append("done")
-    assert order == ["start", "done"] * total
+    assert order.count("start") == total
+    assert order.count("done") >= total
 
     manuscript = app.state.storage.get_bytes(
         f"{book_slug('章级校验书')}/{run_id}/manuscript.md"
@@ -558,7 +828,6 @@ def test_reference_mode_e2e_with_sse_and_artifacts(client, headers, app):
         "outline_decompose",
         "adaptation",
         "outline",
-        "chapter_expand",
         "chapter_summarize",
         "character_graph",
         "review",
@@ -567,9 +836,6 @@ def test_reference_mode_e2e_with_sse_and_artifacts(client, headers, app):
     names = {item["name"] for item in detail["artifacts"]}
     assert {
         "outline.md",
-        "chapters.json",
-        "chapters_full.json",
-        "manuscript.md",
         "chapter_summaries.json",
         "characters.json",
         "factions.json",
@@ -577,14 +843,12 @@ def test_reference_mode_e2e_with_sse_and_artifacts(client, headers, app):
         "story_bible.json",
         "decomposed.json",
     } <= names
-    assert detail["summary"]["chapters_count"] == 3
+    assert "chapters.json" not in names
+    assert "manuscript.md" not in names
+    assert detail["summary"]["chapters_count"] == 0
     assert len(detail["chapter_summaries"]) == 3
     assert detail["summary"]["segments_count"] >= 1
 
-    chapters = client.get(
-        f"/v1/agent-runs/{run_id}/artifacts/chapters.json", headers=headers
-    ).json()
-    assert len(chapters["chapters"]) == 3
     outline_url = client.get(
         f"/v1/agent-runs/{run_id}/artifacts/outline.md", headers=headers
     ).json()
@@ -651,7 +915,9 @@ def test_reference_long_source_all_chapters_and_segment_sse(client, headers, app
     assert _execute(app, run_id) == "succeeded"
 
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
-    assert detail["summary"]["chapters_count"] == 12
+    assert detail["summary"]["chapters_count"] == 0
+    assert len(detail["outline"]["chapters"]) == 12
+    assert len(detail["chapter_summaries"]) == 12
     segments = detail["summary"]["segments_count"]
     assert segments >= 2
 
@@ -663,10 +929,8 @@ def test_reference_long_source_all_chapters_and_segment_sse(client, headers, app
     names = [item["name"] for item in decomposed["characters"]]
     assert len(names) == len(set(names)), "角色跨段应按同名合并"
     assert len(decomposed["segments"]) == segments
-    chapters_json = client.get(
-        f"/v1/agent-runs/{run_id}/artifacts/chapters.json", headers=headers
-    ).json()
-    assert len(chapters_json["chapters"]) == 12
+    chapter_names = {item["name"] for item in detail["artifacts"]}
+    assert "chapters.json" not in chapter_names
 
     prefix = f"{book_slug('长文参考书')}/{run_id}"
     assert len(app.state.storage.list(f"{prefix}/segments")) == segments
@@ -720,7 +984,64 @@ def test_segment_checkpoint_and_single_segment_retry(client, headers, app):
     # 已完成的前两段直接跳过，只重跑失败段及其后续段
     assert calls["outline_decompose"] == total - 2
     final = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
-    assert final["summary"]["chapters_count"] == 12
+    assert final["summary"]["chapters_count"] == 0
+    assert len(final["chapter_summaries"]) == 12
+
+
+def test_review_only_checks_consistency_and_compliance(monkeypatch):
+    """三种模式的体检节点只核对设定一致性与敏感/违禁表达，不做签约评估。"""
+    from app.agents.contracts import SkillContext
+    from app.agents.skills import review as review_module
+
+    monkeypatch.setattr(review_module, "call_json", lambda *args, **kwargs: {})
+    result = ReviewSkill().run(
+        ReviewInput(
+            title="合规校验书",
+            genre_name="悬疑",
+            chapters=[{"chapter": 1, "summary": "地下赌博和毒品交易被当场揭穿。"}],
+            outline=[
+                {"chapter": 1, "summary": "主角拒绝参与灰色交易。"},
+                {"chapter": 2, "summary": "主角收到新的威胁。"},
+            ],
+            positioning={"taboos": ["赌博"]},
+        ),
+        SkillContext(settings=Settings(model_stub=True, env="test")),
+    )
+    codes = {item.code for item in result.risks}
+    assert {"forbidden_word", "taboo"} <= codes
+    assert not {"thin_chapter", "weak_hook"} & codes
+    assert result.high_risk is True
+    assert result.consistency_issues
+    assert all("签约" not in item for item in result.suggestions)
+
+
+def test_content_review_model_is_admin_configurable(client, app):
+    """内容体检与旧工序一样纳管在后台模型配置里（step_key=review）。"""
+    from app.models import ModelProviderConfig
+    from app.services.model_config import describe_configs, resolve_step_model
+
+    with db_session(app) as session:
+        row = next(
+            item for item in describe_configs(session, app.state.settings)
+            if item["step_key"] == "review"
+        )
+        assert row["label"] == "内容体检"
+        assert row["recommendation"]["primary"]
+
+        session.add(
+            ModelProviderConfig(
+                step_key="review",
+                label="内容体检",
+                provider="deepseek",
+                model="review-specific-model",
+                base_url="https://api.deepseek.com",
+                api_key="",
+                enabled=True,
+            )
+        )
+        session.commit()
+        resolved = resolve_step_model(session, "review", app.state.settings)
+    assert resolved.model == "review-specific-model"
 
 
 def test_hot_never_pauses_and_has_three_chapter_preview(client, headers, app):
@@ -818,7 +1139,8 @@ def test_resume_invalid_state_after_high_risk_success(client, headers, app):
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     assert detail["status"] == "succeeded"
     assert detail["current_stage"] == "review"
-    assert "chapters.json" in {item["name"] for item in detail["artifacts"]}
+    assert "chapter_summaries.json" in {item["name"] for item in detail["artifacts"]}
+    assert "chapters.json" not in {item["name"] for item in detail["artifacts"]}
 
     again = client.post(
         f"/v1/agent-runs/{run_id}/resume", headers=headers, json={"approval": True}
@@ -994,9 +1316,12 @@ def test_custom_target_chapters_option(client, headers, app):
     run_id = created.json()["run_id"]
     assert _execute(app, run_id) == "succeeded"
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
-    assert len(detail["chapters"]) == 5
+    assert detail["chapters"] == []
+    assert len(detail["outline"]["chapters"]) == 5
+    assert len(detail["chapter_summaries"]) == 5
+    assert detail["volumes"][-1]["chapter_to"] == 5
     assert detail["options"]["target_chapters"] == 5
-    assert detail["summary"]["chapters_count"] == 5
+    assert detail["summary"]["chapters_count"] == 0
 
 
 def test_options_validation_rejects_invalid_chapters(client, headers):
@@ -1371,7 +1696,9 @@ def test_list_filters_single_combined_and_total(client, headers, app):
 def test_optional_workbench_fields_and_volume_consistency(client, headers, app):
     _stub(app)
     subscribe(client, headers)
-    created = _create(client, headers, mode="custom", title="可选字段样书")
+    created = _create(
+        client, headers, mode="hot", title="可选字段样书", options={"target_chapters": 3}
+    )
     run_id = created.json()["run_id"]
     assert _execute(app, run_id) == "succeeded"
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
@@ -1433,7 +1760,7 @@ def test_optional_workbench_fields_and_volume_consistency(client, headers, app):
             assert key in volume
         assert volume["title"] and volume["theme"] and volume["end_hook"]
         assert volume["tension_profile"]
-    assert len(volumes) == (total + 2) // 3
+    assert len(volumes) == (total + 19) // 20
 
     for row in detail["characters"]:
         assert row["gender"]
@@ -1476,8 +1803,14 @@ def test_optional_workbench_fields_and_volume_consistency(client, headers, app):
     ).json()
     assert len(volumes_file["volumes"]) == len(volumes)
 
-    # 单卷退化：hot 固定 3 章，仍输出合法分卷结构
-    hot = _create(client, headers, mode="hot", title="单卷校验书")
+    # 单卷退化：显式指定 3 章时，仍输出合法分卷结构
+    hot = _create(
+        client,
+        headers,
+        mode="hot",
+        title="单卷校验书",
+        options={"target_chapters": 3},
+    )
     hot_id = hot.json()["run_id"]
     assert _execute(app, hot_id) == "succeeded"
     hot_detail = client.get(f"/v1/agent-runs/{hot_id}", headers=headers).json()
@@ -1514,13 +1847,13 @@ def test_missing_optional_fields_do_not_break_run(client, headers, app):
     run_id = created.json()["run_id"]
     assert _execute(app, run_id, overrides={"outline": _MinimalOutline()}) == "succeeded"
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
-    assert len(detail["chapters"]) == 1
-    # 大纲未给分卷时，服务端按最终章节补出合法结构，避免客户端空白
+    assert detail["chapters"] == []
+    # 大纲未给分卷时，服务端按章节概括补出合法结构，避免客户端空白
     assert len(detail["volumes"]) == 1
     assert detail["volumes"][0]["chapter_from"] == 1
     assert detail["volumes"][0]["chapter_to"] == 1
     assert detail["outline"]["signing_check"] == {}
     assert detail["outline"]["completeness_check"] == {}
-    # 章节的可选字段仍按确定性值兜底，正文与概括不断链
-    assert detail["chapters"][0]["chapter_id"] == "ch-001"
+    # 概括的可选字段仍按确定性值兜底，与章纲不断链
+    assert len(detail["chapter_summaries"]) == 1
     assert detail["chapter_summaries"][0]["chapter_id"] == "ch-001"

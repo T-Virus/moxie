@@ -104,6 +104,10 @@ services:
   worker:
     build: .
     restart: unless-stopped
+    # 多个 worker 才能并发消费队列；账号套餐最大并发为 4。
+    # start.sh / start_online.bat 也会用 --scale worker=N 覆盖这里的值。
+    deploy:
+      replicas: ${WORKER_REPLICAS:-4}
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-moxie}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-moxie}
