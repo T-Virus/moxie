@@ -32,6 +32,37 @@ from .store import TERMINAL_STATUSES, append_event, reservation_of
 
 logger = logging.getLogger("moxie.agents")
 
+# 节点失败后「不可恢复」的错误码：即使 retry_policy=auto 也会置 failed 而非 paused
+# 语义：需要外部条件变化才能修复，引擎续跑无意义
+UNRECOVERABLE_ERROR_CODES: frozenset[str] = frozenset({
+    "source_unreadable",
+    "source_not_found",
+    "rights_confirmation_required",
+    "subscription_required",
+    "quota_exceeded",
+    "model_config_missing",
+    "model_key_invalid",
+    "model_gateway_error",
+    "config_error",
+})
+
+
+def _should_pause_on_failure(error_code: str | None, policy: str) -> bool:
+    """给定节点的 retry_policy 和 outcome 的 error_code，判断是否应该置 paused。
+
+    - policy == "fail" → False（直接置 failed）
+    - policy == "soft" → True（即使 error_code 是不可恢复也置 paused，让用户介入）
+    - policy == "auto"（默认）→ error_code 不在 UNRECOVERABLE_ERROR_CODES 里就置 paused
+    """
+    if policy == "fail":
+        return False
+    if policy == "soft":
+        return True
+    # auto 分支
+    if error_code and error_code in UNRECOVERABLE_ERROR_CODES:
+        return False
+    return True
+
 
 @dataclass
 class NodeOutcome:
@@ -788,16 +819,18 @@ def execute_agent_run(
         for key, row in steps.items()
         if row.status == "done" and isinstance(row.output, dict)
     }
-    if not steps:
-        for node in graph.nodes:
+    # 补齐缺失的 step 行：图里新增的节点（如 review 拆分后、reference/custom 加 positioning/settings）
+    # 在数据库里还没有对应 row，resume 时会 KeyError
+    for node in graph.nodes:
+        if node.id not in steps:
             row = AgentRunStep(run_id=run.id, node_key=node.id, status="pending", attempts=0, meta={}, updated_at=now)
             session.add(row)
             steps[node.id] = row
-        session.flush()
+    session.flush()
 
     patched = _apply_resume_input(state, steps, extra.get("resume_input"))
     if patched:
-        append_event(session, run.id, "review", "已应用人工修改的章节内容，将重新执行体检")
+        append_event(session, run.id, "review_merge", "已应用人工修改的章节内容，将重新执行体检")
         session.flush()
 
     quota = QuotaService(session)
@@ -961,6 +994,44 @@ def execute_agent_run(
                     f"{node.label if node else outcome.node_id} 完成（{outcome.duration_ms}ms）",
                 )
             else:
+                # 节点执行失败：按 retry_policy + error_code 决定置 paused（可续跑）还是置 failed（不可恢复）
+                spec = graph.node(outcome.node_id)
+                policy = spec.retry_policy if spec else "auto"
+                if _should_pause_on_failure(outcome.error_code, policy):
+                    # 可续跑失败：置 paused，保留已完成节点 checkpoint，用户可点"继续"从失败节点重跑
+                    row.status = "failed"
+                    row.output = None
+                    row.error = outcome.error
+                    run.meta = {
+                        **dict(run.meta or {}),
+                        "failed_node": outcome.node_id,
+                        "failed_reason": outcome.error,
+                        "failed_code": outcome.error_code or "stage_failed",
+                    }
+                    run.status = "paused"
+                    run.current_stage = None
+                    run.updated_at = finished
+                    append_event(
+                        session,
+                        run.id,
+                        outcome.node_id,
+                        f"{spec.label if spec else outcome.node_id} 失败，已转为可续跑状态：{outcome.error}",
+                        level="warning",
+                    )
+                    # metric 与成功路径共用 increment 逻辑
+                    increment(
+                        "moxie_skill_calls_total",
+                        skill=spec.skill if spec else outcome.node_id,
+                        status="failed",
+                    )
+                    increment(
+                        "moxie_skill_duration_seconds_total",
+                        outcome.duration_ms / 1000,
+                        skill=spec.skill if spec else outcome.node_id,
+                    )
+                    session.flush()
+                    return run.status
+                # 不可恢复失败：沿用原逻辑置 failed
                 failed = True
                 row.status = "failed"
                 row.output = None
@@ -1031,7 +1102,8 @@ def execute_agent_run(
             return run.status
 
     # 审查只记录风险与建议，任何模式都不暂停等待人工确认
-    review = state.get("review") or {}
+    # review 已拆成 consistency_review + compliance_review 并发执行，最终合并到 review_merge
+    review = state.get("review_merge") or state.get("review") or {}
     if review.get("high_risk"):
         run.meta = {
             **dict(run.meta or {}),
@@ -1042,7 +1114,7 @@ def execute_agent_run(
         append_event(
             session,
             run.id,
-            "review",
+            "review_merge",
             "体检发现高危问题，已记录风险与修改建议",
             level="warning",
         )
@@ -1104,10 +1176,21 @@ def _load_source(storage, source_key: str | None) -> str | None:
 
 
 def _apply_resume_input(state: dict, steps: dict, resume_input) -> bool:  # noqa: ANN001
-    """把 resume 携带的章节改写落到产出节点 checkpoint，保证产物与详情一致。"""
+    """把 resume 携带的章节改写落到产出节点 checkpoint，保证产物与详情一致。
+
+    章节节点优先级：chapter_expand（正文） > chapter_write > adaptation（参考改编）
+    > chapter_summarize（兜底）。找到第一个有 chapters 的节点就落。
+    """
     if not resume_input:
         return False
-    chapter_node = "chapter_expand" if "chapter_expand" in state else "adaptation"
+    chapter_nodes = ("chapter_expand", "chapter_write", "adaptation", "chapter_summarize")
+    chapter_node = None
+    for key in chapter_nodes:
+        if key in state:
+            chapter_node = key
+            break
+    if chapter_node is None:
+        return False
     payload = state.get(chapter_node) or {}
     chapters = payload.get("chapters") or []
     chapter_no = resume_input.get("chapter_no")

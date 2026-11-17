@@ -3,7 +3,7 @@ import type { RunMode, RunStatus, StageState } from '@/types'
 export const MODE_LABEL: Record<RunMode, string> = {
   hot: '热门写作',
   reference: '参考写作',
-  custom: '大神写作',
+  custom: '自由写作',
 }
 
 export const STATUS_LABEL: Record<RunStatus, string> = {

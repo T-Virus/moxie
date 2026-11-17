@@ -251,14 +251,16 @@ def resume_run(
             meta.pop("resume_input", None)
         else:
             meta["resume_input"] = {"chapter_no": chapter_no, "content": content}
-            # 重新执行 review 节点，其余已完成节点保持 checkpoint
-            step = session.get(AgentRunStep, (run.id, "review"))
-            if step is not None:
-                step.status = "pending"
-                step.output = None
-                step.error = None
-                step.finished_at = None
-                step.updated_at = now
+            # 重新执行 review 三子节点，其余已完成节点保持 checkpoint
+            # review 已拆为 consistency_review + compliance_review 并发 → review_merge
+            for review_node in ("consistency_review", "compliance_review", "review_merge"):
+                step = session.get(AgentRunStep, (run.id, review_node))
+                if step is not None:
+                    step.status = "pending"
+                    step.output = None
+                    step.error = None
+                    step.finished_at = None
+                    step.updated_at = now
         run.meta = meta
     else:
         # 失败单点重跑：重新预占额度，只重置失败节点，已完成节点保留

@@ -5,18 +5,17 @@ from __future__ import annotations
 
 from .skills.adaptation import AdaptationSkill
 from .skills.base import BaseSkill
-from .skills.chapter_expand import ChapterExpandSkill
 from .skills.chapter_summarize import ChapterSummarizeSkill
-from .skills.chapter_write import ChapterWriteSkill
 from .skills.character_graph import CharacterGraphSkill
+from .skills.compliance_review import ComplianceReviewSkill
+from .skills.consistency_review import ConsistencyReviewSkill
 from .skills.genre_research import GenreResearchSkill
-from .skills.hot_preview import HotPreviewSkill
 from .skills.lore_extract import LoreExtractSkill
 from .skills.outline import OutlineSkill
 from .skills.outline_decompose import OutlineDecomposeSkill
 from .skills.positioning import PositioningSkill
 from .skills.publish_pack import PublishPackSkill
-from .skills.review import ReviewSkill
+from .skills.review_merge import ReviewMergeSkill
 from .skills.settings_pack import SettingsPackSkill
 
 
@@ -59,15 +58,14 @@ def build_registry() -> SkillRegistry:
         OutlineDecomposeSkill(),
         AdaptationSkill(),
         OutlineSkill(),
-        ChapterExpandSkill(),
-        ChapterWriteSkill(),
         ChapterSummarizeSkill(),
-        HotPreviewSkill(),
         CharacterGraphSkill(),
         LoreExtractSkill(),
         PositioningSkill(),
         SettingsPackSkill(),
-        ReviewSkill(),
+        ConsistencyReviewSkill(),
+        ComplianceReviewSkill(),
+        ReviewMergeSkill(),
         PublishPackSkill(),
     ):
         registry.register(skill)

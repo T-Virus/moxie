@@ -132,7 +132,7 @@ const router = useRouter()
 const tabs: SegmentedTab[] = [
   { id: 'hot', label: '热门写作' },
   { id: 'reference', label: '参考写作' },
-  { id: 'custom', label: '大神写作' },
+  { id: 'custom', label: '自由写作' },
 ]
 
 const MODE_DESC: Record<RunMode, string> = {

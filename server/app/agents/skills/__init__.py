@@ -3,34 +3,32 @@
 
 from .adaptation import AdaptationSkill
 from .base import BaseSkill
-from .chapter_expand import ChapterExpandSkill
 from .chapter_summarize import ChapterSummarizeSkill
-from .chapter_write import ChapterWriteSkill
 from .character_graph import CharacterGraphSkill
+from .compliance_review import ComplianceReviewSkill
+from .consistency_review import ConsistencyReviewSkill
 from .genre_research import GenreResearchSkill
-from .hot_preview import HotPreviewSkill
 from .lore_extract import LoreExtractSkill
 from .outline import OutlineSkill
 from .outline_decompose import OutlineDecomposeSkill
 from .positioning import PositioningSkill
 from .publish_pack import PublishPackSkill
-from .review import ReviewSkill
+from .review_merge import ReviewMergeSkill
 from .settings_pack import SettingsPackSkill
 
 __all__ = [
     "AdaptationSkill",
     "BaseSkill",
-    "ChapterExpandSkill",
     "ChapterSummarizeSkill",
-    "ChapterWriteSkill",
     "CharacterGraphSkill",
+    "ComplianceReviewSkill",
+    "ConsistencyReviewSkill",
     "GenreResearchSkill",
-    "HotPreviewSkill",
     "LoreExtractSkill",
     "OutlineSkill",
     "OutlineDecomposeSkill",
     "PositioningSkill",
     "PublishPackSkill",
-    "ReviewSkill",
+    "ReviewMergeSkill",
     "SettingsPackSkill",
 ]

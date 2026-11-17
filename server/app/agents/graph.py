@@ -42,6 +42,9 @@ class NodeSpec:
     depends_on: tuple[str, ...]
     builder: Builder
     retries: int = 1
+    # soft：失败后置 paused 让用户可续跑；fail：直接置 failed（用于不可恢复的前置校验节点）
+    # auto（默认）：engine 按 outcome.error_code 自动推断（不可恢复的 code 仍置 failed）
+    retry_policy: str = "auto"
     # 分段节点：由引擎按 segmenter 规划逐段执行并写段级 checkpoint
     segmented: bool = False
     # 章级节点：由引擎按 builder 给出的 chapters 逐章执行并写章级 checkpoint
@@ -140,40 +143,18 @@ def _hot_settings(run: RunView, state: dict, extra: dict) -> dict:
     }
 
 
-def _hot_publish(run: RunView, state: dict, extra: dict) -> dict:
-    """发布包：三种模式都只基于全书章纲与卷章概览，不产出正文。"""
+def _publish(run: RunView, state: dict, extra: dict) -> dict:
+    """发布包：三种模式通用导出。hot 多带 positioning/settings；reference/custom 这些字段为空 dict。"""
     return {
         "title": run.title,
         "genre_name": run.genre_name,
+        "mode": run.mode,
         "chapters": [],
         "outline": _state(state, "outline").get("chapters") or [],
         "positioning": _state(state, "positioning"),
         "settings": _state(state, "settings"),
-        "review": _state(state, "review"),
-    }
-
-
-def _expand(run: RunView, state: dict, extra: dict) -> dict:
-    outline = _state(state, "outline")
-    chapters = list(outline.get("chapters") or [])
-    if run.mode == "hot":
-        chapters = chapters[:3]
-    return {
-        "title": run.title,
-        "genre_name": run.genre_name,
-        "story_bible": outline.get("story_bible") or {},
-        "chapters": chapters,
-    }
-
-
-def _expand_reference(run: RunView, state: dict, extra: dict) -> dict:
-    adapted = _state(state, "adaptation")
-    outline = _state(state, "outline")
-    return {
-        "title": run.title,
-        "genre_name": run.genre_name,
-        "story_bible": adapted.get("story_bible") or outline.get("story_bible") or {},
-        "chapters": adapted.get("chapters") or [],
+        "adaptation": _state(state, "adaptation"),
+        "review": _state(state, "review_merge"),
     }
 
 
@@ -258,58 +239,84 @@ def _settings_bible(settings: dict) -> dict:
     }
 
 
-def _review_from_expand(run: RunView, state: dict, extra: dict) -> dict:
-    chapters = _state(state, "chapter_expand").get("chapters") or []
-    chapters = _apply_resume_input(chapters, run, state, extra)
+def _review_input(run: RunView, state: dict, extra: dict) -> dict:
+    """review 双路径体检：优先取正文节点的 chapters，没有就用章纲做体检。
+
+    可能的正文来源（按优先级）：
+    - chapter_expand：hot 模式黄金三章
+    - chapter_write：未来章节节点
+    - adaptation：reference 模式改编产出的章节
+    - chapter_summarize：兜底——如果上述都没有，用章节概括作为输入
+    如果上述都没有，最后退化为只看 outline 章纲。
+    """
+    outline_chapters = list(_state(state, "outline").get("chapters") or [])
+    candidate_nodes = ("chapter_expand", "chapter_write", "adaptation", "chapter_summarize")
+    body_chapters: list[dict] | None = None
+    for node_key in candidate_nodes:
+        chapters = list(_state(state, node_key).get("chapters") or [])
+        if chapters:
+            body_chapters = chapters
+            break
     return {
         "title": run.title,
         "genre_name": run.genre_name,
-        "chapters": chapters,
-        "outline": _state(state, "outline").get("chapters") or [],
+        "chapters": body_chapters if body_chapters is not None else outline_chapters,
+        "outline": outline_chapters,
         "positioning": _state(state, "positioning"),
         "settings": _state(state, "settings"),
     }
 
 
-def _review_outline_only(run: RunView, state: dict, extra: dict) -> dict:
-    """不写正文模式（reference/custom）：用全套章纲/卷章概览做体检。"""
-    outline = list(_state(state, "outline").get("chapters") or [])
+def _consistency_input(run: RunView, state: dict, extra: dict) -> dict:
+    """consistency_review 输入：只给设定一致性检查需要的字段。"""
+    return _review_input(run, state, extra)
+
+
+def _compliance_input(run: RunView, state: dict, extra: dict) -> dict:
+    """compliance_review 输入：只给敏感/违禁词检查需要的字段。"""
+    base = _review_input(run, state, extra)
+    # compliance_review 不需要 settings，但需要 positioning（平台/雷区）
+    base.pop("settings", None)
+    return base
+
+
+def _review_merge(run: RunView, state: dict, extra: dict) -> dict:
+    """合并 consistency_review + compliance_review 两个子节点的输出。
+
+    产出结构与原 ReviewOutput 兼容，让下游 publish 包和 artifacts 渲染无需改动。
+    """
+    consistency = _state(state, "consistency_review")
+    compliance = _state(state, "compliance_review")
+    c_issues = consistency.get("consistency_issues") or []
+    c_risks = compliance.get("risks") or []
+    c_issues_flat = compliance.get("compliance_issues") or []
+    high_risk = bool(compliance.get("high_risk"))
+    # 评分：有高危项扣 40，每条 medium 扣 15，每条 consistency issue 扣 10，baseline 90
+    score = 90
+    score -= 40 * sum(1 for r in c_risks if str(r.get("level", "")).lower() == "high")
+    score -= 15 * sum(1 for r in c_risks if str(r.get("level", "")).lower() == "medium")
+    score -= 10 * min(len(c_issues), 3)
+    score = max(0, min(100, score))
+    # suggestions：给一条通用建议
+    suggestions: list[str] = []
+    if high_risk:
+        suggestions.append("存在高危违禁表达，建议先处理高危项再发布。")
+    if c_issues:
+        suggestions.append("对照设定基准统一人物、势力、道具的名称与立场，避免前后冲突。")
+    if c_risks:
+        suggestions.append("复核命中敏感词所在段落，按平台规范弱化或替换。")
+    if not suggestions:
+        suggestions.append("体检通过，建议继续下一章创作。")
     return {
         "title": run.title,
         "genre_name": run.genre_name,
-        "chapters": outline,
-        "outline": outline,
-        "positioning": _state(state, "positioning"),
-        "settings": _state(state, "settings"),
+        "score": score,
+        "risks": c_risks,
+        "suggestions": suggestions,
+        "high_risk": high_risk,
+        "consistency_issues": c_issues,
+        "compliance_issues": c_issues_flat,
     }
-
-
-def _hot_preview(run: RunView, state: dict, extra: dict) -> dict:
-    outline = _state(state, "outline")
-    return {
-        "title": run.title,
-        "genre_name": run.genre_name,
-        "chapters": _state(state, "chapter_expand").get("chapters") or [],
-        "outline": outline.get("chapters") or [],
-        "story_bible": outline.get("story_bible") or {},
-        "research": _state(state, "genre_research"),
-    }
-
-
-def _apply_resume_input(chapters: list[dict], run: RunView, state: dict, extra: dict) -> list[dict]:
-    resume_input = (extra.get("resume_input") if extra else None) or {}
-    chapter_no = resume_input.get("chapter_no")
-    content = resume_input.get("content")
-    if not chapter_no or not content:
-        return chapters
-    patched = []
-    for chapter in chapters:
-        item = dict(chapter)
-        if int(item.get("chapter") or 0) == int(chapter_no):
-            item["content"] = str(content)
-            item["word_count"] = len(str(content))
-        patched.append(item)
-    return patched
 
 
 def _decompose(run: RunView, state: dict, extra: dict) -> dict:
@@ -360,6 +367,8 @@ def _reference_outline(run: RunView, state: dict, extra: dict) -> dict:
         "research": {},
         "decomposition": _state(state, "outline_decompose"),
         "adaptation": _state(state, "adaptation"),
+        "positioning": _state(state, "positioning"),
+        "settings": _state(state, "settings"),
         **_outline_options(extra),
         "mode": run.mode,
     }
@@ -375,6 +384,8 @@ def _custom_outline(run: RunView, state: dict, extra: dict) -> dict:
         "research": {},
         "decomposition": {},
         "adaptation": {},
+        "positioning": _state(state, "positioning"),
+        "settings": _state(state, "settings"),
         **_outline_options(extra),
         "mode": run.mode,
     }
@@ -385,12 +396,12 @@ HOT = Graph(
     nodes=(
         # 阶段1 题材校准：先对月榜 Top10 做结构化分析，不直接生成
         NodeSpec("genre_research", "genre_research", "题材校准", (), _hot_research),
-        # 阶段2 定位卡：用户确认 男/女频、长短篇、目标平台、爽点偏好、雷区
+        # 阶段2 定位卡：由 AI 基于题材校准结论自动推导（主打爽点/情感基调/目标平台），无用户中途介入
         NodeSpec("positioning", "positioning", "定位卡", ("genre_research",), _hot_positioning),
         # 阶段3 设定生成：世界观/力量体系/势力/金手指 → 派生角色卡与功法道具表
         NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),
         # 阶段4 大纲拆解：总纲 → 分卷 → 章纲（冲突/反转/伏笔/结尾钩子）
-        NodeSpec("outline", "outline", "大纲拆解", ("settings",), _hot_outline, serial=True),
+        NodeSpec("outline", "outline", "大纲拆解", ("settings",), _hot_outline, serial=True, retry_policy="soft"),
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
@@ -406,20 +417,34 @@ HOT = Graph(
             ("outline", "chapter_summarize", "settings"),
             _lore,
         ),
-        # 阶段5 质检发布：一致性检查 + 平台合规检查，然后产出发布包
+        # 阶段5 质检发布：consistency + compliance 并发执行，然后 review_merge 聚合
         NodeSpec(
-            "review",
-            "review",
-            "内容体检",
+            "consistency_review",
+            "consistency_review",
+            "设定一致性体检",
             ("outline", "chapter_summarize", "character_graph"),
-            _review_outline_only,
+            _consistency_input,
+        ),
+        NodeSpec(
+            "compliance_review",
+            "compliance_review",
+            "合规体检",
+            ("outline", "chapter_summarize", "character_graph"),
+            _compliance_input,
+        ),
+        NodeSpec(
+            "review_merge",
+            "review_merge",
+            "体检合并",
+            ("consistency_review", "compliance_review"),
+            _review_merge,
         ),
         NodeSpec(
             "publish",
             "publish_pack",
             "发布包",
-            ("review", "outline", "positioning", "settings"),
-            _hot_publish,
+            ("review_merge", "outline", "positioning", "settings"),
+            _publish,
         ),
     ),
 )
@@ -427,6 +452,8 @@ HOT = Graph(
 REFERENCE = Graph(
     mode="reference",
     nodes=(
+        # Layer 0：positioning（无依赖）和 outline_decompose（无依赖）并发
+        NodeSpec("positioning", "positioning", "定位卡", (), _hot_positioning),
         NodeSpec(
             "outline_decompose",
             "outline_decompose",
@@ -434,9 +461,14 @@ REFERENCE = Graph(
             (),
             _decompose,
             segmented=True,
+            retry_policy="soft",
         ),
+        # Layer 1：settings 依赖 positioning；adaptation 依赖 outline_decompose（两者并发）
+        NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),
         NodeSpec("adaptation", "adaptation", "去抄袭改编", ("outline_decompose",), _adaptation),
-        NodeSpec("outline", "outline", "新书大纲", ("adaptation",), _reference_outline, serial=True),
+        # Layer 2：outline 依赖 settings + adaptation
+        NodeSpec("outline", "outline", "新书大纲", ("settings", "adaptation"), _reference_outline, serial=True, retry_policy="soft"),
+        # Layer 3：summarize + lore 并发
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
@@ -449,15 +481,38 @@ REFERENCE = Graph(
             "character_graph",
             "lore_extract",
             "角色/势力/道具功法抽取",
-            ("adaptation", "outline", "chapter_summarize"),
+            ("settings", "adaptation", "outline", "chapter_summarize"),
             _lore,
         ),
+        # Layer 4：consistency + compliance 并发，然后 merge
         NodeSpec(
-            "review",
-            "review",
-            "内容体检",
+            "consistency_review",
+            "consistency_review",
+            "设定一致性体检",
             ("outline", "chapter_summarize", "character_graph"),
-            _review_outline_only,
+            _consistency_input,
+        ),
+        NodeSpec(
+            "compliance_review",
+            "compliance_review",
+            "合规体检",
+            ("outline", "chapter_summarize", "character_graph"),
+            _compliance_input,
+        ),
+        NodeSpec(
+            "review_merge",
+            "review_merge",
+            "体检合并",
+            ("consistency_review", "compliance_review"),
+            _review_merge,
+        ),
+        # Layer 5：publish
+        NodeSpec(
+            "publish",
+            "publish_pack",
+            "发布包",
+            ("review_merge", "outline", "positioning", "settings"),
+            _publish,
         ),
     ),
 )
@@ -465,7 +520,13 @@ REFERENCE = Graph(
 CUSTOM = Graph(
     mode="custom",
     nodes=(
-        NodeSpec("outline", "outline", "大纲规划", (), _custom_outline, serial=True),
+        # Layer 0：positioning
+        NodeSpec("positioning", "positioning", "定位卡", (), _hot_positioning),
+        # Layer 1：settings 依赖 positioning
+        NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),
+        # Layer 2：outline 依赖 settings
+        NodeSpec("outline", "outline", "大纲规划", ("settings",), _custom_outline, serial=True, retry_policy="soft"),
+        # Layer 3：summarize + lore 并发
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
@@ -478,15 +539,38 @@ CUSTOM = Graph(
             "character_graph",
             "lore_extract",
             "角色/势力/道具功法抽取",
-            ("outline", "chapter_summarize"),
+            ("settings", "outline", "chapter_summarize"),
             _lore,
         ),
+        # Layer 4：consistency + compliance 并发，然后 merge
         NodeSpec(
-            "review",
-            "review",
-            "内容体检",
+            "consistency_review",
+            "consistency_review",
+            "设定一致性体检",
             ("outline", "chapter_summarize", "character_graph"),
-            _review_outline_only,
+            _consistency_input,
+        ),
+        NodeSpec(
+            "compliance_review",
+            "compliance_review",
+            "合规体检",
+            ("outline", "chapter_summarize", "character_graph"),
+            _compliance_input,
+        ),
+        NodeSpec(
+            "review_merge",
+            "review_merge",
+            "体检合并",
+            ("consistency_review", "compliance_review"),
+            _review_merge,
+        ),
+        # Layer 5：publish
+        NodeSpec(
+            "publish",
+            "publish_pack",
+            "发布包",
+            ("review_merge", "outline", "positioning", "settings"),
+            _publish,
         ),
     ),
 )

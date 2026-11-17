@@ -133,16 +133,11 @@ img {
   white-space: nowrap;
 }
 
-.brand__mark {
+.brand__icon {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  background: linear-gradient(135deg, var(--color-brand), #0e7490);
+  object-fit: contain;
   box-shadow: 0 6px 14px -8px rgba(13, 148, 136, 0.8);
 }
 

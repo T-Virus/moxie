@@ -3,7 +3,7 @@
     <header class="topbar">
       <div class="topbar__inner">
         <RouterLink to="/" class="brand" aria-label="返回首页">
-          <span class="brand__mark" aria-hidden="true">墨</span>
+          <img class="brand__icon" :src="brandIcon" alt="" aria-hidden="true" />
           <span class="brand__text">墨写</span>
         </RouterLink>
 
@@ -46,6 +46,7 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { logout } from '@/services/authApi'
 import { refreshSession, resetSession, session } from '@/stores/session'
+import brandIcon from '@/assets/brand-icon.png'
 
 const navItems = computed(() =>
   session.account

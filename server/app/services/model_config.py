@@ -45,14 +45,12 @@ EDGEONE_BASE_URL = "https://ai-gateway.edgeone.link/v1"
 STEP_REGISTRY: dict[str, str] = {
     DEFAULT_STEP_KEY: "默认模型网关（兜底）",
     "outline": "大纲规划",
-    "chapter_write": "章节正文",
     "chapter_summarize": "章节概括",
     "lore_extract": "角色/势力/道具抽取",
     "review": "内容体检",
     "genre_research": "同题材调研",
     "outline_decompose": "参考作品拆解",
     "adaptation": "去抄袭改编",
-    "hot_preview": "前三章概览",
     "decompose": "任务拆解（decompose）",
     "adapt": "改编任务（adapt）",
     "review_run": "审查任务（review）",
@@ -201,11 +199,6 @@ STEP_RECOMMENDATIONS: dict[str, StepRecommendation] = {
         "alternatives": ["edgeone:deepseek-v4-pro", "edgeone:kimi-k2.6"],
         "reason": "大纲要一次产出卷/章/钩子等强结构长文本，minimax-m3 的长上下文与角色一致性最能压住结构塌陷、前后矛盾。",
     },
-    "chapter_write": {
-        "primary": "edgeone:hy3",
-        "alternatives": ["edgeone:deepseek-v4.1-flash", "edgeone:minimax-m3"],
-        "reason": "正文最吃文笔与长文连贯性，hy3 中文表达最自然；要压成本或求速度时换 v4.1-flash。",
-    },
     "chapter_summarize": {
         "primary": "edgeone:deepseek-v4-flash",
         "alternatives": ["edgeone:zhuque-text", "edgeone:deepseek-v4.1-flash"],
@@ -235,11 +228,6 @@ STEP_RECOMMENDATIONS: dict[str, StepRecommendation] = {
         "primary": "edgeone:hy3",
         "alternatives": ["edgeone:minimax-m3", "edgeone:deepseek-v4-pro"],
         "reason": "去抄袭改编要求同义重写且保留剧情骨架，hy3 的中文改写最不容易把原意改跑。",
-    },
-    "hot_preview": {
-        "primary": "edgeone:deepseek-v4.1-flash",
-        "alternatives": ["edgeone:zhuque-text", "edgeone:deepseek-v4-flash"],
-        "reason": "概览只做前三章提炼，输入输出都短，用快模型可明显降低等待，且不影响后续生成。",
     },
     "decompose": {
         "primary": "edgeone:kimi-k2.6",
