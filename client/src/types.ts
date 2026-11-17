@@ -218,6 +218,12 @@ export interface OutlineChapter {
   key_events?: string[]
   hook?: string
   arc?: string
+  /** 本章核心冲突（outline 技能产出） */
+  conflict?: string
+  /** 本章反转 */
+  reversal?: string
+  /** 本章伏笔 */
+  foreshadow?: string
 }
 
 /** 卷（可选契约）：服务端未下发时前端按章节聚合为单卷 */
@@ -626,7 +632,7 @@ export interface OutlineContent {
 export interface CollectionField {
   key: string
   label: string
-  type?: 'text' | 'textarea' | 'number' | 'tags' | 'select'
+  type?: 'text' | 'textarea' | 'number' | 'tags' | 'select' | 'list'
   required?: boolean
   placeholder?: string
   presets?: string[]
@@ -641,6 +647,26 @@ export interface CollectionField {
   min?: number
   maxlength?: number
   hint?: string
+  /** list 类型的添加按钮文案（默认"添加一条"） */
+  addLabel?: string
+}
+
+/** 内容体检单条风险（合规体检产出） */
+export interface ReviewRisk {
+  level: 'high' | 'medium' | 'low' | string
+  code?: string
+  message: string
+  chapter?: number
+}
+
+/** 内容体检结果：设定一致性 + 合规检查合并后的只读报告 */
+export interface ReviewContent {
+  score?: number
+  high_risk?: boolean
+  risks?: ReviewRisk[]
+  suggestions?: string[]
+  consistency_issues?: string[]
+  compliance_issues?: string[]
 }
 
 export interface RunDetail {
@@ -675,6 +701,8 @@ export interface RunDetail {
   factions?: FactionContent[]
   items?: ItemContent[]
   outline?: OutlineContent
+  /** 内容体检结果（consistency_review + compliance_review 合并） */
+  review?: ReviewContent
   /** 封面图（配置或产物），缺失时前端用书名首字生成占位封面 */
   cover_url?: string
   /** AI 封面元信息：来源、尺寸、提示词等 */

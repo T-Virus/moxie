@@ -36,9 +36,16 @@ class SkillContext:
     logs: list[tuple[str, str]] = field(default_factory=list)
     # 长节点心跳：引擎注入，技能在分批循环中调用，用于刷新 running 时间戳。
     on_progress: Callable[[], None] | None = None
+    # 日志落地钩子：主线程节点注入后即时写入运行事件流，后台任务日志可实时看到；
+    # 并发线程节点不注入，日志先缓存在 logs，由引擎在本层结束后统一落库。
+    on_log: Callable[[str, str], None] | None = None
 
     def log(self, message: str, level: str = "info") -> None:
-        self.logs.append((level, message[:500]))
+        text = message[:500]
+        if self.on_log is not None:
+            self.on_log(level, text)
+        else:
+            self.logs.append((level, text))
 
 
 def call_json(ctx: SkillContext, *, system: str, user: str) -> dict[str, Any]:

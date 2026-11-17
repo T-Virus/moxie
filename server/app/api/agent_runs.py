@@ -17,6 +17,8 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..agents import ARTIFACT_NAMES, cancel_run, create_run, get_run, pause_run, resume_run, run_to_dict
+from ..agents.skills.chapter_summarize import canonical_chapter
+from ..agents.skills.lore_extract import canonical_character, canonical_faction, canonical_item
 from ..db import get_db
 from ..deps import AuthContext, get_auth
 from ..errors import ApiError
@@ -336,6 +338,103 @@ def update_agent_run_info(
     return run_to_dict(db, run, storage=request.app.state.storage)
 
 
+_RENAME_KEYS = ("characters", "factions", "items")
+
+
+def _item_name(item) -> str:
+    return str(item.get("name") or "").strip() if isinstance(item, dict) else ""
+
+
+def _detect_renames(before: list, after: list) -> dict[str, str]:
+    """按下标配对识别重命名：只有旧名在新集合消失、新名前所未见时才认定是改名。
+
+    增删条目不在这里处理（避免把「删除 A + 新增 B」误判成 A→B 改名）。
+    """
+    if not before or not after or len(before) != len(after):
+        return {}
+    old_names = {_item_name(row) for row in before if _item_name(row)}
+    new_names = {_item_name(row) for row in after if _item_name(row)}
+    renames: dict[str, str] = {}
+    for old_row, new_row in zip(before, after):
+        old_name, new_name = _item_name(old_row), _item_name(new_row)
+        if (
+            old_name
+            and new_name
+            and old_name != new_name
+            and old_name not in new_names
+            and new_name not in old_names
+        ):
+            renames[old_name] = new_name
+    return renames
+
+
+def _renamed(value, renames: dict[str, str]):
+    if not renames or not isinstance(value, str):
+        return value
+    return renames.get(value.strip(), value)
+
+
+def _renamed_list(values, renames: dict[str, str]):
+    """字符串列表或 {target/name,...} 对象列表中的名称统一改名。"""
+    if not renames or not isinstance(values, list):
+        return values
+    out = []
+    for value in values:
+        if isinstance(value, str):
+            out.append(renames.get(value.strip(), value))
+        elif isinstance(value, dict):
+            row = dict(value)
+            for key in ("target", "name"):
+                if isinstance(row.get(key), str):
+                    row[key] = renames.get(row[key].strip(), row[key])
+            out.append(row)
+        else:
+            out.append(value)
+    return out
+
+
+def _apply_renames(
+    collections: dict,
+    char_renames: dict[str, str],
+    faction_renames: dict[str, str],
+    item_renames: dict[str, str],
+) -> None:
+    """把改名同步到章节概览与三类实体的关联字段，保证全库口径一致。"""
+    if not (char_renames or faction_renames or item_renames):
+        return
+
+    for chapter in collections.get("chapter_summaries") or []:
+        if not isinstance(chapter, dict):
+            continue
+        chapter["roles"] = _renamed_list(chapter.get("roles"), char_renames)
+        chapter["factions"] = _renamed_list(chapter.get("factions"), faction_renames)
+        chapter["items"] = _renamed_list(chapter.get("items"), item_renames)
+
+    for character in collections.get("characters") or []:
+        if not isinstance(character, dict):
+            continue
+        for key in ("affiliation", "faction", "faction_name", "factionName"):
+            if key in character:
+                character[key] = _renamed(character.get(key), faction_renames)
+        character["relations"] = _renamed_list(character.get("relations"), char_renames)
+        character["relations"] = _renamed_list(character.get("relations"), faction_renames)
+
+    for faction in collections.get("factions") or []:
+        if not isinstance(faction, dict):
+            continue
+        faction["leader"] = _renamed(faction.get("leader"), char_renames)
+        faction["members"] = _renamed_list(faction.get("members"), char_renames)
+        faction["relations"] = _renamed_list(faction.get("relations"), faction_renames)
+        faction["relations"] = _renamed_list(faction.get("relations"), char_renames)
+
+    for item in collections.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        item["owner"] = _renamed(item.get("owner"), char_renames)
+        item["holder"] = _renamed(item.get("holder"), char_renames)
+        item["faction"] = _renamed(item.get("faction"), faction_renames)
+
+
 @router.patch("/agent-runs/{run_id}/collections")
 def update_agent_run_collections(
     run_id: str,
@@ -356,6 +455,27 @@ def update_agent_run_collections(
     data = sanitize_free_json(payload.model_dump(exclude_none=True))
     if not data:
         raise ApiError(422, "empty_update", "没有需要更新的内容")
+
+    # 客户端提交的是工作台映射后的形状（role/type 对调、relations 为字符串等），
+    # 落库前统一还原成服务端契约，保证反复读写后字段不漂移。
+    if data.get("characters") is not None:
+        data["characters"] = [
+            canonical_character(item) for item in data["characters"] if isinstance(item, dict)
+        ]
+    if data.get("factions") is not None:
+        data["factions"] = [
+            canonical_faction(item) for item in data["factions"] if isinstance(item, dict)
+        ]
+    if data.get("items") is not None:
+        data["items"] = [
+            canonical_item(item) for item in data["items"] if isinstance(item, dict)
+        ]
+    if data.get("chapter_summaries") is not None:
+        data["chapter_summaries"] = [
+            canonical_chapter(item)
+            for item in data["chapter_summaries"]
+            if isinstance(item, dict)
+        ]
 
     for key, label in (("characters", "角色"), ("factions", "势力"), ("items", "道具")):
         for item in data.get(key) or []:
@@ -391,7 +511,28 @@ def update_agent_run_collections(
 
     meta = dict(run.meta or {})
     collections = dict(meta.get("collections") or {})
+    # 改名检测以「当前有效结果」为基线，识别角色/势力/道具名称变更
+    effective = run_to_dict(db, run, include_artifacts=False)
+    renames = {
+        key: _detect_renames(effective.get(key) or [], data.get(key) or [])
+        for key in _RENAME_KEYS
+        if data.get(key) is not None
+    }
     collections.update(data)
+    if any(renames.values()):
+        # 未编辑过的集合先从当前有效结果物化，改名才能同步到章节概览等派生数据
+        for key in ("characters", "factions", "items", "chapter_summaries"):
+            if key not in collections:
+                collections[key] = [
+                    dict(row) if isinstance(row, dict) else row
+                    for row in (effective.get(key) or [])
+                ]
+        _apply_renames(
+            collections,
+            renames.get("characters") or {},
+            renames.get("factions") or {},
+            renames.get("items") or {},
+        )
     meta["collections"] = collections
     run.meta = meta
     write_audit(

@@ -14,12 +14,18 @@ from app.agents.engine import execute_agent_run
 from app.agents.skills.genre_research import GenreResearchSkill
 from app.agents.skills.outline import OutlineChapter, OutlineOutput, OutlineSkill
 from app.agents.skills.outline_decompose import OutlineDecomposeSkill
-from app.agents.skills.review import ReviewInput, ReviewOutput, ReviewRisk, ReviewSkill
+from app.agents.skills.compliance_review import (
+    ComplianceInput,
+    ComplianceOutput,
+    ComplianceReviewSkill,
+    ComplianceRisk,
+)
+from app.agents.skills.consistency_review import ConsistencyInput, ConsistencyReviewSkill
 from app.config import Settings
-from app.models import AgentRun, AgentRunStep
+from app.models import AgentRun, AgentRunEvent, AgentRunStep
 from app.services.storage import book_slug
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .helpers import db_session, subscribe
 
@@ -90,12 +96,20 @@ def _execute(app, run_id: str, *, overrides=None, max_steps=None):
         return status
 
 
-class _HighRiskReview(ReviewSkill):
+class _HighRiskReview(ComplianceReviewSkill):
+    """合规体检桩：始终产出高危风险，验证体检结果只记录不暂停。"""
+
     def run(self, payload, ctx):
-        return ReviewOutput(
-            score=35,
-            risks=[ReviewRisk(level="high", code="policy", message="开篇存在高风险违规表述", chapter=1)],
-            suggestions=["重写第一章敏感表述"],
+        return ComplianceOutput(
+            risks=[
+                ComplianceRisk(
+                    level="high",
+                    code="policy",
+                    message="开篇存在高风险违规表述",
+                    chapter=1,
+                )
+            ],
+            compliance_issues=["[HIGH] 开篇存在高风险违规表述（第 1 章）"],
             high_risk=True,
         )
 
@@ -551,6 +565,13 @@ def test_hot_and_custom_modes_end_to_end(client, headers, app):
     assert len(detail["outline"]["chapters"]) == 12
     assert [item["chapter"] for item in detail["outline"]["chapters"]] == list(range(1, 13))
     assert [item["chapter_no"] for item in detail["chapter_summaries"]] == list(range(1, 13))
+    # 卷章概览的规划字段：大纲阶段透传到概括结果，缺失会显示为空白
+    for chapter in detail["chapter_summaries"]:
+        assert chapter["key_events"] and chapter["key_events"] == chapter["points"]
+        assert chapter["arc"]
+        assert chapter["pov"] == "第三人称"
+        assert chapter["word_target"] > 0
+        assert chapter["chapter_status"] == "待生成"
     assert detail["chapters"] == []
     assert len(detail["volumes"]) == 1
     assert detail["volumes"][0]["chapter_from"] == 1
@@ -699,12 +720,17 @@ def test_reference_mode_e2e_with_sse_and_artifacts(client, headers, app):
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     stages = [item["id"] for item in detail["stages"]]
     assert stages == [
+        "positioning",
         "outline_decompose",
+        "settings",
         "adaptation",
         "outline",
         "chapter_summarize",
         "character_graph",
-        "review",
+        "consistency_review",
+        "compliance_review",
+        "review_merge",
+        "publish",
     ]
     assert all(item["state"] == "succeeded" for item in detail["stages"])
     names = {item["name"] for item in detail["artifacts"]}
@@ -832,7 +858,8 @@ def test_segment_checkpoint_and_single_segment_retry(client, headers, app):
     run_id = created.json()["run_id"]
 
     failing = _FailSegments({3, 4})
-    assert _execute(app, run_id, overrides={"outline_decompose": failing}) == "failed"
+    # outline_decompose 用 auto：普通错误可续跑 → paused；前端「重试」只重跑失败段
+    assert _execute(app, run_id, overrides={"outline_decompose": failing}) == "paused"
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     assert detail["error"]["code"] == "segment_failed"
 
@@ -863,13 +890,16 @@ def test_segment_checkpoint_and_single_segment_retry(client, headers, app):
 
 
 def test_review_only_checks_consistency_and_compliance(monkeypatch):
-    """三种模式的体检节点只核对设定一致性与敏感/违禁表达，不做签约评估。"""
+    """体检拆成两节点后，仍只核对设定一致性与敏感/违禁表达，不做签约评估。"""
     from app.agents.contracts import SkillContext
-    from app.agents.skills import review as review_module
+    from app.agents.skills import compliance_review as compliance_module
+    from app.agents.skills import consistency_review as consistency_module
 
-    monkeypatch.setattr(review_module, "call_json", lambda *args, **kwargs: {})
-    result = ReviewSkill().run(
-        ReviewInput(
+    monkeypatch.setattr(compliance_module, "call_json", lambda *args, **kwargs: {})
+    monkeypatch.setattr(consistency_module, "call_json", lambda *args, **kwargs: {})
+
+    compliance = ComplianceReviewSkill().run(
+        ComplianceInput(
             title="合规校验书",
             genre_name="悬疑",
             chapters=[{"chapter": 1, "summary": "地下赌博和毒品交易被当场揭穿。"}],
@@ -881,31 +911,46 @@ def test_review_only_checks_consistency_and_compliance(monkeypatch):
         ),
         SkillContext(settings=Settings(model_stub=True, env="test")),
     )
-    codes = {item.code for item in result.risks}
+    codes = {item.code for item in compliance.risks}
     assert {"forbidden_word", "taboo"} <= codes
     assert not {"thin_chapter", "weak_hook"} & codes
-    assert result.high_risk is True
-    assert result.consistency_issues
-    assert all("签约" not in item for item in result.suggestions)
+    assert compliance.high_risk is True
+    assert all("签约" not in item for item in compliance.compliance_issues)
+
+    consistency = ConsistencyReviewSkill().run(
+        ConsistencyInput(
+            title="一致性校验书",
+            genre_name="悬疑",
+            chapters=[{"chapter": 1, "summary": "主角拒绝了灰色交易。"}],
+            outline=[
+                {"chapter": 1, "summary": "主角拒绝参与灰色交易。"},
+                {"chapter": 2, "summary": "主角收到新的威胁。"},
+            ],
+        ),
+        SkillContext(settings=Settings(model_stub=True, env="test")),
+    )
+    assert consistency.consistency_issues
+    assert consistency.issues[0].kind == "coverage"
+    assert all("签约" not in item for item in consistency.consistency_issues)
 
 
 def test_content_review_model_is_admin_configurable(client, app):
-    """内容体检与旧工序一样纳管在后台模型配置里（step_key=review）。"""
+    """合规体检纳管在后台模型配置里（step_key=compliance_review）。"""
     from app.models import ModelProviderConfig
     from app.services.model_config import describe_configs, resolve_step_model
 
     with db_session(app) as session:
         row = next(
             item for item in describe_configs(session, app.state.settings)
-            if item["step_key"] == "review"
+            if item["step_key"] == "compliance_review"
         )
-        assert row["label"] == "内容体检"
+        assert row["label"] == "合规体检"
         assert row["recommendation"]["primary"]
 
         session.add(
             ModelProviderConfig(
-                step_key="review",
-                label="内容体检",
+                step_key="compliance_review",
+                label="合规体检",
                 provider="deepseek",
                 model="review-specific-model",
                 base_url="https://api.deepseek.com",
@@ -914,7 +959,7 @@ def test_content_review_model_is_admin_configurable(client, app):
             )
         )
         session.commit()
-        resolved = resolve_step_model(session, "review", app.state.settings)
+        resolved = resolve_step_model(session, "compliance_review", app.state.settings)
     assert resolved.model == "review-specific-model"
 
 
@@ -923,7 +968,7 @@ def test_hot_never_pauses_on_high_risk(client, headers, app):
     subscribe(client, headers)
     created = _create(client, headers, mode="hot", title="自动热榜书")
     run_id = created.json()["run_id"]
-    assert _execute(app, run_id, overrides={"review": _HighRiskReview()}) == "succeeded"
+    assert _execute(app, run_id, overrides={"compliance_review": _HighRiskReview()}) == "succeeded"
 
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     assert detail["status"] == "succeeded"
@@ -941,10 +986,10 @@ def test_reference_high_risk_does_not_pause(client, headers, app):
     source_key = _upload(client, headers)
     created = _create(client, headers, mode="reference", title="参考高危书", source_key=source_key)
     run_id = created.json()["run_id"]
-    assert _execute(app, run_id, overrides={"review": _HighRiskReview()}) == "succeeded"
+    assert _execute(app, run_id, overrides={"compliance_review": _HighRiskReview()}) == "succeeded"
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     assert detail["status"] == "succeeded"
-    assert detail["current_stage"] == "review"
+    assert detail["current_stage"] == "publish"
     assert "decomposed.json" in {item["name"] for item in detail["artifacts"]}
 
     messages = [item["message"] for item in _event_messages(client, headers, run_id)]
@@ -1002,10 +1047,10 @@ def test_resume_invalid_state_after_high_risk_success(client, headers, app):
     assert invalid.status_code == 409
     assert invalid.json()["error"]["code"] == "invalid_state"
 
-    assert _execute(app, run_id, overrides={"review": _HighRiskReview()}) == "succeeded"
+    assert _execute(app, run_id, overrides={"compliance_review": _HighRiskReview()}) == "succeeded"
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     assert detail["status"] == "succeeded"
-    assert detail["current_stage"] == "review"
+    assert detail["current_stage"] == "publish"
     assert "chapter_summaries.json" in {item["name"] for item in detail["artifacts"]}
     assert "chapters.json" not in {item["name"] for item in detail["artifacts"]}
 
@@ -1027,13 +1072,20 @@ def test_checkpoint_resume_continues_from_next_node(client, headers, app):
 
     overrides = {
         name: _Counting(registry.get(name), calls)
-        for name in ("genre_research", "outline", "chapter_summarize", "review")
+        for name in (
+            "genre_research",
+            "outline",
+            "chapter_summarize",
+            "consistency_review",
+            "compliance_review",
+            "review_merge",
+        )
     }
     assert _execute(app, run_id, overrides=overrides, max_steps=2) == "queued"
     steps = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()["stages"]
     assert [s["state"] for s in steps[:2]] == ["succeeded", "succeeded"]
-    # 热门流程：校准 → 定位卡 → 设定生成 → 大纲 → 概括 → 抽取 → 体检 → 发布
-    assert len(steps) == 8
+    # 热门流程：校准 → 定位卡 → 设定生成 → 大纲 → 概括 → 抽取 → 一致性体检 + 合规体检 → 合并 → 发布
+    assert len(steps) == 10
     assert all(s["state"] == "pending" for s in steps[2:])
     assert calls["genre_research"] == 1
     assert "outline" not in calls
@@ -1043,7 +1095,9 @@ def test_checkpoint_resume_continues_from_next_node(client, headers, app):
     assert calls["genre_research"] == before["genre_research"] == 1
     assert calls["outline"] == 1
     assert calls["chapter_summarize"] == 1
-    assert calls["review"] == 1
+    assert calls["consistency_review"] == 1
+    assert calls["compliance_review"] == 1
+    assert calls["review_merge"] == 1
 
 
 def test_node_retry_and_failed_single_node_rerun(client, headers, app):
@@ -1060,8 +1114,10 @@ def test_node_retry_and_failed_single_node_rerun(client, headers, app):
 
     failing = _create(client, headers, mode="hot", title="失败书")
     failed_id = failing.json()["run_id"]
-    assert _execute(app, failed_id, overrides={"outline": _AlwaysFailOutline()}) == "failed"
+    # outline 节点 retry_policy=soft：长耗时节点失败不直接判死，转 paused 供用户续跑
+    assert _execute(app, failed_id, overrides={"outline": _AlwaysFailOutline()}) == "paused"
     detail = client.get(f"/v1/agent-runs/{failed_id}", headers=headers).json()
+    assert detail["status"] == "paused"
     assert detail["error"]["code"] == "stage_failed"
     states = {item["id"]: item["state"] for item in detail["stages"]}
     assert states["genre_research"] == "succeeded"
@@ -1076,6 +1132,9 @@ def test_node_retry_and_failed_single_node_rerun(client, headers, app):
     assert _execute(app, failed_id) == "succeeded"
     final = client.get(f"/v1/agent-runs/{failed_id}", headers=headers).json()
     assert final["status"] == "succeeded"
+    assert final["error"] is None
+    calls = {item["id"]: item["state"] for item in final["stages"]}
+    assert all(state == "succeeded" for state in calls.values())
 
 
 def test_update_run_info_overrides_and_keeps_artifacts(client, headers, app):
@@ -1359,7 +1418,36 @@ def test_update_run_collections_crud(client, headers, app):
         }
     ]
     chapter_summaries = [
-        {"no": 1, "title": "测试第一章", "summary": "测试章节概括"},
+        {
+            "no": 1,
+            "title": "测试第一章",
+            "summary": "测试章节概括",
+            "words": 1800,
+            "key_events": ["事件一", "事件二"],
+            "scene": "码头",
+            "hook_type": "反转",
+            "emotion": "紧张",
+            "tension": 7,
+            "arc": "开局",
+            "chapter_function": "冲突升级",
+            "chapter_goal": "逼主角做出第一次选择",
+            "beat_type": "激励事件",
+            "pov": "主角",
+            "time_span": "当日",
+            "word_target": 2500,
+            "word_actual": 1800,
+            "payoff_type": "打脸",
+            "payoff_owner": "主角",
+            "payoff_intensity": 8,
+            "twist": "对手其实是旧识",
+            "new_characters": ["新角色"],
+            "new_items": ["新道具"],
+            "new_settings": ["新规则"],
+            "foreshadow_ids": ["钥匙的来历", "老管家的身份"],
+            "continuity_check": "通过",
+            "chapter_status": "待修订",
+            "revision_note": "补写环境描写",
+        },
         {"no": 99, "title": "新增章节", "summary": "新增章节概括"},
     ]
 
@@ -1386,6 +1474,19 @@ def test_update_run_collections_crud(client, headers, app):
         "新增章节",
     ]
     assert body["chapter_hidden"] == [1]
+    # 章节集合的新增规划字段：读回时字段齐全，字数与关键事件双向同步
+    first = body["chapter_summaries"][0]
+    assert first["words"] == first["word_count"] == 1800
+    assert first["key_events"] == first["points"] == ["事件一", "事件二"]
+    assert first["scene"] == "码头" and first["hook_type"] == "反转"
+    assert first["emotion"] == "紧张" and first["tension"] == 7
+    assert first["chapter_function"] == "冲突升级" and first["beat_type"] == "激励事件"
+    assert first["chapter_goal"] == "逼主角做出第一次选择" and first["arc"] == "开局"
+    assert first["pov"] == "主角" and first["time_span"] == "当日"
+    assert first["word_target"] == 2500 and first["word_actual"] == 1800
+    assert first["payoff_type"] == "打脸" and first["payoff_intensity"] == 8
+    assert first["foreshadow_ids"] == ["钥匙的来历", "老管家的身份"]
+    assert first["continuity_check"] == "通过" and first["chapter_status"] == "待修订"
 
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
     assert [item["name"] for item in detail["characters"]] == ["新角色"]
@@ -1713,3 +1814,62 @@ def test_missing_optional_fields_do_not_break_run(client, headers, app):
     # 概括的可选字段仍按确定性值兜底，与章纲不断链
     assert len(detail["chapter_summaries"]) == 1
     assert detail["chapter_summaries"][0]["chapter_id"] == "ch-001"
+
+
+def test_run_events_include_skill_execution_logs(client, headers, app):
+    """执行过程要能看到技能内部日志（模型、分批进度、兜底），而不是只有阶段开始/结束。"""
+    _stub(app)
+    subscribe(client, headers)
+    created = _create(
+        client,
+        headers,
+        mode="hot",
+        title="任务日志书",
+        options={"target_chapters": 6},
+    )
+    run_id = created.json()["run_id"]
+    assert _execute(app, run_id) == "succeeded"
+
+    events = _event_messages(client, headers, run_id)
+    messages = [item["message"] for item in events]
+    assert any("调用模型" in message for message in messages)
+    assert any("章节概括完成" in message for message in messages)
+    assert any("发布包完成" in message for message in messages)
+    assert [item["seq"] for item in events] == sorted(item["seq"] for item in events)
+
+
+def test_skill_logs_are_visible_while_node_still_running(client, headers, app):
+    """实时刷新前提：串行节点执行中日志已提交，另一个数据库会话能立刻读到。"""
+    _stub(app)
+    subscribe(client, headers)
+    created = _create(
+        client,
+        headers,
+        mode="hot",
+        title="实时日志书",
+        options={"target_chapters": 4},
+    )
+    run_id = created.json()["run_id"]
+    seen: dict[str, int] = {}
+
+    class _LiveLogOutline(OutlineSkill):
+        def run(self, payload, ctx):  # noqa: ANN001
+            ctx.log("第一批章纲开始生成")
+            # 引擎给串行节点注入了 on_log 钩子，日志应已即时 commit；
+            # 这里另开一个会话读取，模拟后台任务详情在任务未结束时轮询。
+            with app.state.db.session() as session:
+                seen["live"] = int(
+                    session.scalar(
+                        select(func.count())
+                        .select_from(AgentRunEvent)
+                        .where(
+                            AgentRunEvent.run_id == run_id,
+                            AgentRunEvent.message == "第一批章纲开始生成",
+                        )
+                    )
+                    or 0
+                )
+            return super().run(payload, ctx)
+
+    assert _execute(app, run_id, overrides={"outline": _LiveLogOutline()}) == "succeeded"
+    assert seen["live"] == 1

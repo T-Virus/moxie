@@ -182,7 +182,10 @@ export interface TaskRow {
   book?: string | null
   book_id?: number | null
   error_code?: string | null
+  error_message?: string | null
   attempts?: number
+  /** 写作运行的模式（hot/reference/custom），拆解任务为空 */
+  mode?: string | null
   created_at?: string | null
   started_at?: string | null
   finished_at?: string | null
@@ -219,6 +222,19 @@ export interface TaskDetail {
   source: 'task' | 'agent_run'
   detail: Record<string, unknown>
   events: RunEvent[]
+  /** 本次返回的最后一条事件 seq，日志轮询时作为下次的 since */
+  last_seq?: number
+  /** 单次返回达到上限，说明还有更早/更多的日志未展示 */
+  truncated?: boolean
+  [key: string]: unknown
+}
+
+export interface TaskStage {
+  id: string
+  name?: string
+  state: string
+  started_at?: string | null
+  finished_at?: string | null
   [key: string]: unknown
 }
 

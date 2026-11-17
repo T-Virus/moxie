@@ -533,6 +533,10 @@ export const api = {
   taskDashboard() {
     return request<TaskDashboard>('/v1/admin/tasks/dashboard')
   },
+  /** 全部任务记录：status/source/account_id/q + 分页，覆盖排队/运行/暂停/完成/失败/取消。 */
+  taskList(query: Record<string, unknown> = {}) {
+    return request<unknown>('/v1/admin/tasks', { query })
+  },
   taskRetry(id: string) {
     return request<any>(`/v1/admin/tasks/${encodeURIComponent(id)}/retry`, { method: 'POST', body: {} })
   },
@@ -548,9 +552,9 @@ export const api = {
       body: { action, ...(source ? { source } : {}), ...(reason ? { reason } : {}) },
     })
   },
-  taskDetail(id: string, source?: string) {
+  taskDetail(id: string, source?: string, since = 0) {
     return request<TaskDetail>(`/v1/admin/tasks/${encodeURIComponent(id)}`, {
-      query: source ? { source } : {},
+      query: { ...(source ? { source } : {}), ...(since > 0 ? { since } : {}) },
     })
   },
 

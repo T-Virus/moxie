@@ -47,8 +47,11 @@ STEP_REGISTRY: dict[str, str] = {
     "outline": "大纲规划",
     "chapter_summarize": "章节概括",
     "lore_extract": "角色/势力/道具抽取",
-    "review": "内容体检",
+    "consistency_review": "设定一致性体检",
+    "compliance_review": "合规体检",
     "genre_research": "同题材调研",
+    "positioning": "定位卡",
+    "settings_pack": "设定生成",
     "outline_decompose": "参考作品拆解",
     "adaptation": "去抄袭改编",
     "decompose": "任务拆解（decompose）",
@@ -209,10 +212,25 @@ STEP_RECOMMENDATIONS: dict[str, StepRecommendation] = {
         "alternatives": ["edgeone:zhuque-text", "edgeone:kimi-k2.6"],
         "reason": "抽取依赖稳定 JSON 而非深度推理，v4.1-flash 格式更稳且便宜；字段特别多时再换 kimi-k2.6。",
     },
-    "review": {
+    "consistency_review": {
         "primary": "edgeone:deepseek-v4-pro",
         "alternatives": ["edgeone:kimi-k2.6", "edgeone:minimax-m3"],
-        "reason": "内容体检要核对设定一致性并准确区分敏感/违禁表达，误报漏报成本高，适合用推理模型复核。",
+        "reason": "一致性体检要对照设定基准判断命名/立场冲突，误报漏报成本高，适合用推理模型复核。",
+    },
+    "compliance_review": {
+        "primary": "edgeone:deepseek-v4.1-flash",
+        "alternatives": ["edgeone:deepseek-v4-pro", "edgeone:zhuque-text"],
+        "reason": "合规体检以敏感/违禁词与雷区扫描为主，输入长、判断规则明确，flash 足够且更省。",
+    },
+    "positioning": {
+        "primary": "edgeone:deepseek-v4.1-flash",
+        "alternatives": ["edgeone:hy3", "edgeone:kimi-k2.6"],
+        "reason": "定位卡是从调研结论收敛卖点与基调，输出短、结构明确，快模型即可。",
+    },
+    "settings_pack": {
+        "primary": "edgeone:minimax-m3",
+        "alternatives": ["edgeone:deepseek-v4-pro", "edgeone:hy3"],
+        "reason": "设定包要一次产出世界观/力量体系/角色/道具等多组结构，长上下文模型更不容易前后矛盾。",
     },
     "genre_research": {
         "primary": "edgeone:deepseek-v4.1-flash",

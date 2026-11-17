@@ -148,12 +148,10 @@ def _publish(run: RunView, state: dict, extra: dict) -> dict:
     return {
         "title": run.title,
         "genre_name": run.genre_name,
-        "mode": run.mode,
         "chapters": [],
         "outline": _state(state, "outline").get("chapters") or [],
         "positioning": _state(state, "positioning"),
         "settings": _state(state, "settings"),
-        "adaptation": _state(state, "adaptation"),
         "review": _state(state, "review_merge"),
     }
 
@@ -165,6 +163,10 @@ def _summarize(run: RunView, state: dict, extra: dict) -> dict:
     因此以完整章纲为基础合并正文，而不是只截取已写章节。
     """
     outline = list((_state(state, "outline") or {}).get("chapters") or [])
+    outline_data = _state(state, "outline")
+    # 章级规划字段：目标字数与叙事视角来自整书大纲，逐章透传给概括技能
+    default_words = int(outline_data.get("chapter_words_target") or 0)
+    person = text_of(outline_data.get("person"))
     written = list((_state(state, "chapter_expand") or {}).get("chapters") or [])
     written_by_no = {
         int(item.get("chapter") or index): item
@@ -180,6 +182,10 @@ def _summarize(run: RunView, state: dict, extra: dict) -> dict:
         number = int(item.get("chapter") or index)
         row = dict(item)
         row["chapter_no"] = number
+        if default_words and not row.get("word_target"):
+            row["word_target"] = default_words
+        if person and not row.get("pov"):
+            row["pov"] = person
         body = written_by_no.get(number)
         if body:
             row.update(
@@ -461,7 +467,6 @@ REFERENCE = Graph(
             (),
             _decompose,
             segmented=True,
-            retry_policy="soft",
         ),
         # Layer 1：settings 依赖 positioning；adaptation 依赖 outline_decompose（两者并发）
         NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),

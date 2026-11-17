@@ -148,7 +148,9 @@ CHAPTER_PROMPT = """【技能 outline·分卷章纲】
 请只输出第 {start}–{end} 章的章纲，章号必须从 {start} 连续到 {end}，共 {count} 章。
 输出 JSON：
 {{"chapters":[{{"chapter":{start},"title":"","summary":"","key_events":[""],"hook":"","arc":"","conflict":"","reversal":"","foreshadow":""}}]}}
-每章 summary 60-150 字，写清本章事件、冲突、转折与结尾钩子；不要写正文，不要输出其他字段。
+每章 summary 60-150 字，写清本章事件、冲突、转折与结尾钩子；
+key_events 每章不少于 5 条、不超过 8 条，每条 15-30 字；
+不要写正文，不要输出其他字段。
 """
 
 PROMPT = """【技能 outline】
@@ -165,7 +167,8 @@ PROMPT = """【技能 outline】
 改编素材摘要：{material}
 
 请按「总纲 → 分卷 → 章纲」三层拆解：先收敛一句话总纲与设定，再切分卷，
-最后逐章写章纲。每章必须带冲突（conflict）、反转（reversal）、伏笔（foreshadow）、结尾钩子（hook）。
+最后逐章写章纲。每章必须带冲突（conflict）、反转（reversal）、伏笔（foreshadow）、结尾钩子（hook）、
+以及不少于 5 条的关键事件列表（key_events，每条 15-30 字，不超过 8 条）。
 输出 JSON：
 {{"logline":"一句话故事线","theme":"主题","story_bible":{{"synopsis":"","world":"","power":"","protagonist":"","mainline":""}},
  "chapters":[{{"chapter":1,"title":"","summary":"","key_events":[""],"hook":"","arc":"开局","conflict":"","reversal":"","foreshadow":""}}],
@@ -481,7 +484,7 @@ def _fallback(payload: OutlineInput, *, stub: bool = True, settings=None) -> Out
                 chapter=index,
                 title=title[:40],
                 summary=summary[:300],
-                key_events=[text_of(e) for e in (src.get("key_events") or []) if text_of(e)][:4]
+                key_events=[text_of(e) for e in (src.get("key_events") or []) if text_of(e)][:8]
                 or [note],
                 hook=text_of(src.get("hook")) or "新的问题被抛出，答案要等到下一章。",
                 arc=arc,
@@ -697,7 +700,7 @@ def _normalize(
                 or (fb_chapter.title if fb_chapter else f"第{index}章"),
                 summary=text_of(item.get("summary"))
                 or (fb_chapter.summary if fb_chapter else "剧情推进。"),
-                key_events=[text_of(e) for e in (item.get("key_events") or []) if text_of(e)][:6]
+                key_events=[text_of(e) for e in (item.get("key_events") or []) if text_of(e)][:8]
                 or (fb_chapter.key_events if fb_chapter else []),
                 hook=text_of(item.get("hook"))
                 or (fb_chapter.hook if fb_chapter else ""),

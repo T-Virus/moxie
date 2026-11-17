@@ -212,3 +212,48 @@ def test_admin_subscription_extend_visible_to_client_current(client, headers, ap
     after = client.get("/v1/subscriptions/current", headers=headers).json()
     assert after["current_end_at"] > before
 
+
+
+def test_admin_task_log_detail_and_pagination(client, headers, app, account):
+    """后台任务记录：全部状态可查、支持分页/搜索/来源过滤，详情返回完整执行日志。"""
+    subscribe(client, headers)
+    run_id = _create_run(client, headers, title="日志同步书稿")
+    _promote(app, account["account"]["id"])
+
+    page = client.get(
+        "/v1/admin/tasks",
+        headers=headers,
+        params={"page": 1, "page_size": 10, "q": "日志同步"},
+    ).json()
+    assert page["page"] == 1 and page["page_size"] == 10
+    assert page["total"] >= 1
+    assert any(row["id"] == run_id and row["source"] == "agent_run" for row in page["items"])
+
+    runs_only = client.get(
+        "/v1/admin/tasks", headers=headers, params={"source": "agent_run"}
+    ).json()
+    assert runs_only["items"]
+    assert all(row["source"] == "agent_run" for row in runs_only["items"])
+
+    detail = client.get(f"/v1/admin/tasks/{run_id}", headers=headers).json()
+    assert detail["source"] == "agent_run"
+    assert detail["events"]
+    assert detail["last_seq"] == detail["events"][-1]["seq"]
+    assert all(event["at"] for event in detail["events"])
+
+    tail = client.get(
+        f"/v1/admin/tasks/{run_id}", headers=headers, params={"since": detail["last_seq"]}
+    ).json()
+    assert tail["events"] == []
+
+    # 增量刷新：任务继续产生日志时，since 只返回新事件，前端可直接追加而不重复整页
+    with app.state.db.session() as session:
+        from app.agents.store import append_event
+
+        append_event(session, run_id, "publish", "增量刷新验证日志")
+        session.commit()
+    fresh = client.get(
+        f"/v1/admin/tasks/{run_id}", headers=headers, params={"since": detail["last_seq"]}
+    ).json()
+    assert [event["message"] for event in fresh["events"]] == ["增量刷新验证日志"]
+    assert fresh["last_seq"] > detail["last_seq"]

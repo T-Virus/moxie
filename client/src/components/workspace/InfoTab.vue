@@ -402,13 +402,11 @@
             </label>
             <div class="info__form-field info__form-field--full">
               <span class="info__form-label">核心卖点</span>
-              <Combobox
+              <ListInput
                 v-model="sellingTags"
-                :options="presetValues('info_selling_point', [])"
-                :multiple="true"
-                :allow-create="true"
-                :preset-type="'info_selling_point'"
-                placeholder="输入卖点关键词，回车添加"
+                placeholder="描述一个核心卖点"
+                add-label="添加卖点"
+                hint="按优先级填写作品的核心卖点，每条一行"
               />
             </div>
           </div>
@@ -518,6 +516,24 @@
         </div>
       </section>
 
+      <!-- 内容体检：设定一致性 + 合规体检合并结果（只读） -->
+      <section v-if="!editing && reviewItems.length" class="info__section">
+        <div class="info__section-head">
+          <span class="info__section-title">内容体检</span>
+          <span class="info__section-count">{{ reviewItems.length }} 项</span>
+        </div>
+        <div class="info__props">
+          <div
+            v-for="(item, index) in reviewItems"
+            :key="`${item.label}-${index}`"
+            class="info__prop"
+          >
+            <span class="info__prop-label">{{ item.label }}</span>
+            <p class="info__prop-text">{{ item.value }}</p>
+          </div>
+        </div>
+      </section>
+
       <p v-if="hiddenFieldCount" class="info__hint">
         另有 {{ hiddenFieldCount }} 个字段尚未生成，已自动隐藏
       </p>
@@ -543,8 +559,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
-import GenrePicker from '@/components/GenrePicker.vue'
 import Combobox from '@/components/Combobox.vue'
+import GenrePicker from '@/components/GenrePicker.vue'
+import ListInput from '@/components/ListInput.vue'
 import { usePresets } from '@/composables/usePresets'
 import type { Audience, GenreItem, GenreSelection, RunDetail, RunLength } from '@/types'
 import { ApiError } from '@/services/http'
@@ -1119,6 +1136,33 @@ interface InfoItem {
 function hasContent(item: InfoItem): boolean {
   return !!item.value || !!item.tags?.length
 }
+
+/** 内容体检：评分 / 风险 / 设定一致性 / 修改建议（来自 consistency + compliance 合并结果） */
+const reviewItems = computed<InfoItem[]>(() => {
+  const data = props.run.review
+  if (!data) return []
+  const items: InfoItem[] = []
+  if (typeof data.score === 'number') {
+    items.push({ label: '体检评分', value: `${data.score} / 100` })
+    items.push({ label: '风险等级', value: data.high_risk ? '存在高危项' : '未发现高危项' })
+  } else if (data.high_risk !== undefined) {
+    items.push({ label: '风险等级', value: data.high_risk ? '存在高危项' : '未发现高危项' })
+  }
+  for (const risk of data.risks || []) {
+    const level = String(risk.level || '').toUpperCase()
+    items.push({
+      label: risk.chapter ? `风险 · 第 ${risk.chapter} 章` : '风险',
+      value: level ? `[${level}] ${risk.message}` : risk.message,
+    })
+  }
+  for (const text of data.consistency_issues || []) {
+    items.push({ label: '设定一致性', value: text })
+  }
+  for (const text of data.suggestions || []) {
+    items.push({ label: '修改建议', value: text })
+  }
+  return items
+})
 
 /** 核心统计条：只保留数量类指标 */
 const statItems = computed<InfoItem[]>(() => {

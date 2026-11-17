@@ -24,6 +24,7 @@ import type {
   OutlineChapter,
   OutlineContent,
   PlotBlock,
+  ReviewContent,
   RunDetail,
   RunEvent,
   RunLength,
@@ -336,6 +337,43 @@ function mapItemLinks(value: unknown): ItemLink[] {
   }))
 }
 
+function mapReview(value: unknown): ReviewContent | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const item = value as Record<string, unknown>
+  const risks = recordList(item.risks).flatMap((risk) => {
+    const message = str(risk.message)
+    if (!message) return []
+    return [
+      {
+        level: str(risk.level) || 'medium',
+        code: str(risk.code) || undefined,
+        message,
+        chapter: num(risk.chapter) ?? undefined,
+      },
+    ]
+  })
+  const suggestions = listText(item.suggestions)
+  const consistency = listText(item.consistency_issues)
+  const compliance = listText(item.compliance_issues)
+  const review: ReviewContent = {
+    score: num(item.score) ?? undefined,
+    high_risk: typeof item.high_risk === 'boolean' ? item.high_risk : undefined,
+    risks: risks.length ? risks : undefined,
+    suggestions: suggestions.length ? suggestions : undefined,
+    consistency_issues: consistency.length ? consistency : undefined,
+    compliance_issues: compliance.length ? compliance : undefined,
+  }
+  if (
+    review.score === undefined &&
+    review.high_risk === undefined &&
+    !review.risks &&
+    !review.suggestions
+  ) {
+    return undefined
+  }
+  return review
+}
+
 function mapOpening(value: unknown): OpeningInfo | undefined {
   if (!value || typeof value !== 'object') return undefined
   const item = value as Record<string, unknown>
@@ -362,6 +400,9 @@ function mapOutlineChapters(value: unknown): OutlineChapter[] {
         : undefined,
       hook: str(item.hook) || undefined,
       arc: str(item.arc) || undefined,
+      conflict: str(item.conflict) || undefined,
+      reversal: str(item.reversal) || undefined,
+      foreshadow: str(item.foreshadow) || undefined,
     }
   })
 }
@@ -571,6 +612,18 @@ function normalizeRunDetail(raw: RawRun): RunDetail {
         }
       })
 
+      // 服务端势力关系存成 relations=[{target,type,strength,public}]；
+      // 详情页还有「关联势力/关系强度/是否公开」单值行，用第一条关系兜底填充。
+      const firstRelation =
+        relations.find((rel) => rel && typeof rel === 'object') as
+          | Record<string, unknown>
+          | undefined
+      const firstTarget = str(firstRelation?.target)
+      const firstType = str(firstRelation?.type)
+      const firstStrength = num(firstRelation?.strength)
+      const firstPublic =
+        typeof firstRelation?.public === 'boolean' ? firstRelation.public : undefined
+
       return {
         name: str(item.name),
         type: str(item.type) || str(item.category) || undefined,
@@ -588,19 +641,22 @@ function normalizeRunDetail(raw: RawRun): RunDetail {
           str(item.relTo) ||
           str(item.rel_to) ||
           str(item.relationTo) ||
+          firstTarget ||
           undefined,
         rel_type:
           str(item.relType) ||
           str(item.rel_type) ||
           str(item.relationType) ||
+          firstType ||
           undefined,
-        rel_strength: num(item.relStrength) ?? num(item.rel_strength) ?? undefined,
+        rel_strength:
+          num(item.relStrength) ?? num(item.rel_strength) ?? firstStrength ?? undefined,
         rel_public:
           typeof item.relPublic === 'boolean'
             ? item.relPublic
             : typeof item.rel_public === 'boolean'
               ? item.rel_public
-              : undefined,
+              : firstPublic,
         relations: relationLabels(item.relations),
       }
     })
@@ -836,6 +892,7 @@ function normalizeRunDetail(raw: RawRun): RunDetail {
     items,
     volumes: volumes.length ? volumes : raw.volumes,
     outline,
+    review: mapReview((raw as Record<string, unknown>).review),
   }
 }
 

@@ -22,8 +22,12 @@
           >
             <span class="task-center__name">{{ task.title || '未命名作品' }}</span>
           </RouterLink>
-          <span class="badge task-center__badge" :class="STATUS_TONE[task.status]">
-            {{ statusLabel(task.status) }}
+          <span
+            class="badge task-center__badge"
+            :class="taskStatusTone(task)"
+            :title="isNodeFailure(task) ? task.error?.message : undefined"
+          >
+            {{ taskStatusLabel(task) }}
           </span>
           <span class="task-center__time" title="用时">{{ durationText(task) }}</span>
           <button
@@ -40,9 +44,9 @@
               type="button"
               class="task-center__action task-center__action--start"
               :disabled="!!busyId"
-              @click="resume(task)"
+              @click="isNodeFailure(task) ? retry(task) : resume(task)"
             >
-              {{ busyId === task.run_id ? '继续中…' : '继续' }}
+              {{ pausedActionLabel(task) }}
             </button>
             <button
               type="button"
@@ -157,6 +161,26 @@ function canStart(task: RunDetail): boolean {
   return task.status === 'paused'
 }
 
+/** 节点失败会转成 paused（可续跑），此时带 error：语义上是「重试失败节点」而不是「继续」 */
+function isNodeFailure(task: RunDetail): boolean {
+  return task.status === 'paused' && !!task.error
+}
+
+/** 已停止=用户主动暂停；已中断=节点失败转暂停，需要重试 */
+function taskStatusLabel(task: RunDetail): string {
+  return isNodeFailure(task) ? '已中断' : statusLabel(task.status)
+}
+
+function taskStatusTone(task: RunDetail): string {
+  return isNodeFailure(task) ? 'badge--danger' : STATUS_TONE[task.status]
+}
+
+function pausedActionLabel(task: RunDetail): string {
+  const retry = isNodeFailure(task)
+  if (busyId.value === task.run_id) return retry ? '重试中…' : '继续中…'
+  return retry ? '重试' : '继续'
+}
+
 /** 失败运行可重试：服务端要求 retry_failed=true，只重跑失败节点 */
 function canRetryRun(task: RunDetail): boolean {
   return task.status === 'failed'
@@ -168,12 +192,12 @@ function parseTime(iso?: string | null): number | null {
   return Number.isNaN(at) ? null : at
 }
 
+/** 用时统一压成 mm:ss，避免「11 分 21 秒」把标题和操作按钮挤出可视区 */
 function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds))
-  if (total < 60) return `${total} 秒`
   const minutes = Math.floor(total / 60)
   const rest = total % 60
-  return `${minutes} 分 ${String(rest).padStart(2, '0')} 秒`
+  return `${minutes}:${String(rest).padStart(2, '0')}`
 }
 
 /** 只有排队中/生成中才需要秒级刷新，暂停后用时定格 */
@@ -412,7 +436,7 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  padding: 0 6px;
+  padding: 0 4px;
 }
 
 .task-center__state {
@@ -429,15 +453,18 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* 行内「状态 + 用时 + 继续 + 取消」是最宽组合，禁止横向滚动条 */
+  overflow-x: hidden;
 }
 
 .task-center__item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
+  overflow: hidden;
   height: var(--tc-row-h);
-  padding: 0 6px;
+  padding: 0 4px;
 }
 
 .task-center__item + .task-center__item {
@@ -472,20 +499,22 @@ onBeforeUnmount(() => {
 
 .task-center__badge {
   flex: none;
-  height: 20px;
-  padding: 0 7px;
-  font-size: 14px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 .task-center__action {
   flex: none;
-  height: 24px;
-  padding: 0 9px;
+  height: 22px;
+  padding: 0 7px;
   border: 1px solid var(--color-line);
   border-radius: var(--radius-pill);
   background: #fff;
   color: var(--color-text-2);
-  font-size: 14px;
+  font-size: 12px;
   font-family: inherit;
 }
 
@@ -524,8 +553,8 @@ button.task-center__action--danger:hover:not(:disabled) {
 
 .task-center__time {
   flex: none;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 18px;
   color: var(--color-text-3);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;

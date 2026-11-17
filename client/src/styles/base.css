@@ -8,6 +8,7 @@ html,
 body,
 #app {
   height: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -89,6 +90,7 @@ img {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;

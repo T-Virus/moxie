@@ -20,9 +20,9 @@ PROMPT = """【技能 lore_extract】
 请基于设定库、章节正文与大纲抽取角色卡、势力表与道具功法，字段必须齐全。
 无法确定的可选字段留空，不要编造。
 输出 JSON：
-{{"characters":[{{"name":"","alias":"","gender":"","age":null,"role":"主角/配角/反派","affiliation":"","identity":"","personality":"","appearance":"","goal":"","arc":"","arc_detail":{{"type":"","start_state":"","turning_points":[],"end_state":"","final_fate":""}},"pov_chapters":[],"relations":[{{"target":"","type":""}}],"first_chapter":1}}],
- "factions":[{{"name":"","type":"门派/家族/组织/国家","category":"","leader":"","members":[],"territory":"","stance":"正/邪/中立","goal":"","relations":[{{"target":"","type":"","strength":0.5,"public":true}}],"first_chapter":1}}],
- "items":[{{"name":"","category":"道具/功法/武器/丹药/其他","grade":"","owner":"","holder":"","faction":"","effect":"","cost":"","origin":"","payoff":"","chapters":[],"first_chapter":1,"notes":""}}]}}
+{{"characters":[{{"name":"","alias":"","gender":"","age":null,"role":"主角/配角/反派","affiliation":"","identity":"","personality":"","appearance":"","goal":"","race":"","camp":"","speech":"","catchwords":"","weakness":"","quirks":[],"strengths":[],"flaws":[],"core_desire":"","core_fear":"","backstory":"","secret":"","tags":[],"obstacle_methods":[],"exit_reason":"","voice_sample":[],"arc":"","arc_detail":{{"type":"","start_state":"","turning_points":[],"end_state":"","final_fate":""}},"pov_chapters":[],"relations":[{{"target":"","type":""}}],"first_chapter":1}}],
+ "factions":[{{"name":"","type":"门派/家族/组织/国家","category":"","leader":"","members":[],"territory":"","stance":"正/邪/中立","goal":"","description":"","relations":[{{"target":"","type":"","strength":0.5,"public":true}}],"first_chapter":1}}],
+ "items":[{{"name":"","category":"道具/功法/武器/丹药/其他","grade":"","owner":"","holder":"","faction":"","effect":"","cost":"","origin":"","note":"数量/限制","description":"","payoff":"","chapters":[],"first_chapter":1,"notes":""}}]}}
 设定库：{bible}
 角色：{characters}
 势力：{factions}
@@ -56,6 +56,27 @@ def _num(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _strs(*values) -> list[str]:
+    """把字符串/字符串数组/换行分隔文本统一成去空的字符串列表。"""
+    out: list[str] = []
+    for value in values:
+        if isinstance(value, list):
+            out.extend(text_of(item) for item in value if text_of(item))
+        elif text_of(value):
+            for part in text_of(value).replace("\n", "；").replace(";", "；").split("；"):
+                if part.strip():
+                    out.append(part.strip())
+    return out
+
+
+def _opt_int(value) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _stages(text: str) -> list[str]:
@@ -153,6 +174,30 @@ def _normalize_character(
         "pov_chapters": pov_chapters,
         "relations": relations,
         "first_chapter": first,
+        # 工作台角色卡补齐字段：模型缺失时给空值，保证字段齐全可编辑
+        "race": text_of(item.get("race")),
+        "camp": text_of(item.get("camp")) or text_of(item.get("alignment")),
+        "faction_category": text_of(item.get("faction_category"))
+        or text_of(item.get("factionCategory")),
+        "sub_faction": text_of(item.get("sub_faction")) or text_of(item.get("subFaction")),
+        "loyalty": _num(item.get("loyalty"), -1.0) if item.get("loyalty") is not None else None,
+        "join_chapter": _opt_int(item.get("join_chapter") or item.get("joinChapter")),
+        "leave_chapter": _opt_int(item.get("leave_chapter") or item.get("leaveChapter")),
+        "exit_reason": text_of(item.get("exit_reason")) or text_of(item.get("exitReason")),
+        "speech": text_of(item.get("speech")),
+        "catchwords": text_of(item.get("catchwords")),
+        "weakness": text_of(item.get("weakness")),
+        "quirks": _strs(item.get("quirks")),
+        "strengths": _strs(item.get("strengths")),
+        "flaws": _strs(item.get("flaws")),
+        "core_desire": text_of(item.get("core_desire")) or text_of(item.get("coreDesire")),
+        "core_fear": text_of(item.get("core_fear")) or text_of(item.get("coreFear")),
+        "backstory": text_of(item.get("backstory")),
+        "secret": text_of(item.get("secret")),
+        "tags": _strs(item.get("tags")),
+        "obstacle_methods": _strs(item.get("obstacle_methods")),
+        "voice_sample": _strs(item.get("voice_sample")),
+        "description": text_of(item.get("description")) or text_of(item.get("desc")),
     }
 
 
@@ -197,6 +242,7 @@ def _normalize_faction(
         "goal": text_of(item.get("goal")) or "维持或改变现有秩序",
         "relations": relations,
         "first_chapter": _first_chapter(item),
+        "description": text_of(item.get("description")) or text_of(item.get("desc")),
     }
 
 
@@ -227,6 +273,89 @@ def _normalize_item(
         "chapters": chapter_list,
         "first_chapter": first,
         "notes": text_of(item.get("notes")) or "首次出现即与主线冲突相关",
+        # 工作台道具卡补齐字段：数量/限制与简介分开存，避免与 notes 混用
+        "note": text_of(item.get("note")) or text_of(item.get("limit")),
+        "description": text_of(item.get("description")) or text_of(item.get("desc")),
+    }
+
+
+ROLE_TOKENS = {
+    "主角", "男主", "女主", "配角", "男配", "女配", "反派", "正派", "群像",
+    "工具人", "导师", "挚友", "宿敌", "卧底", "旁观者", "路人", "反派配角", "龙套",
+}
+
+
+def _relations_in(value) -> list[dict]:
+    """把工作台提交的「名字（类型）」字符串或对象统一成 {target,type} 列表。"""
+    out: list[dict] = []
+    for rel in value or []:
+        if isinstance(rel, dict):
+            target = text_of(rel.get("target")) or text_of(rel.get("name")) or text_of(rel.get("to"))
+            if not target:
+                continue
+            item = dict(rel)
+            item["target"] = target
+            item["type"] = text_of(rel.get("type")) or "关联"
+            out.append(item)
+        elif text_of(rel):
+            raw = text_of(rel)
+            target, kind = raw, ""
+            for left, right in (("（", "）"), ("(", ")")):
+                if left in raw and right in raw:
+                    target = raw.split(left, 1)[0].strip()
+                    kind = raw.split(left, 1)[1].rsplit(right, 1)[0].strip()
+                    break
+            if target:
+                out.append({"target": target, "type": kind or "关联"})
+    return out
+
+
+def canonical_character(item: dict) -> dict:
+    """把工作台提交的角色对象还原成服务端契约字段（不注入默认值）。
+
+    客户端「剧情功能」存 type、「身份背景」存 role/identity、「所属势力」存 faction，
+    服务端契约是 role / identity / affiliation，这里做一次无损对调，避免反复编辑后错位。
+    """
+    raw = dict(item or {})
+    role_raw = text_of(raw.get("role"))
+    type_raw = text_of(raw.get("type"))
+    identity_raw = text_of(raw.get("identity"))
+    if type_raw:
+        role = type_raw
+        identity = identity_raw or (role_raw if role_raw not in ROLE_TOKENS else "")
+    else:
+        role = role_raw
+        identity = identity_raw
+    return {
+        **raw,
+        "name": text_of(raw.get("name")),
+        "role": role,
+        "identity": identity,
+        "affiliation": text_of(raw.get("affiliation"))
+        or text_of(raw.get("faction"))
+        or text_of(raw.get("faction_name"))
+        or text_of(raw.get("factionName")),
+        "relations": _relations_in(raw.get("relations")),
+    }
+
+
+def canonical_faction(item: dict) -> dict:
+    raw = dict(item or {})
+    return {
+        **raw,
+        "name": text_of(raw.get("name")),
+        "description": text_of(raw.get("description")) or text_of(raw.get("desc")),
+        "relations": _relations_in(raw.get("relations")),
+    }
+
+
+def canonical_item(item: dict) -> dict:
+    raw = dict(item or {})
+    return {
+        **raw,
+        "name": text_of(raw.get("name")),
+        "note": text_of(raw.get("note")),
+        "description": text_of(raw.get("description")) or text_of(raw.get("desc")),
     }
 
 

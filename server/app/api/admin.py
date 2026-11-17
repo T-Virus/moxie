@@ -873,13 +873,16 @@ def _task_brief(task: Task) -> dict:
         "status": task.status,
         "progress": task.progress,
         "error_code": task.error_code,
+        "error_message": None,
         "attempts": task.attempts,
         "lease_until": task.lease_until.isoformat() if task.lease_until else None,
         "started_at": task.started_at.isoformat() if task.started_at else None,
+        "finished_at": task.finished_at.isoformat() if task.finished_at else None,
         "created_at": task.created_at.isoformat(),
         "last_activity_at": last_activity.isoformat() if last_activity else None,
         "stalled": _stalled(task.status, last_activity),
         "source": "task",
+        "mode": None,
         "title": None,
     }
 
@@ -893,13 +896,16 @@ def _agent_run_brief(run: AgentRun) -> dict:
         "status": run.status,
         "progress": run.progress,
         "error_code": run.error_code,
+        "error_message": run.error_message,
         "attempts": run.attempts,
         "lease_until": None,
         "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
         "created_at": run.created_at.isoformat(),
         "last_activity_at": last_activity.isoformat() if last_activity else None,
         "stalled": _stalled(run.status, last_activity),
         "source": "agent_run",
+        "mode": run.mode,
         "title": run.title,
     }
 
@@ -1099,11 +1105,15 @@ def control_task(
     }
 
 
+EVENT_PAGE_LIMIT = 2000
+
+
 @admin_router.get("/tasks/{task_id}")
 def admin_task_detail(
     task_id: str,
     request: Request,
     source: str | None = Query(default=None, pattern="^(task|agent_run)$"),
+    since: int = Query(default=0, ge=0),
     admin: Account = Depends(require_staff),
     db: Session = Depends(get_db),
 ):
@@ -1111,10 +1121,12 @@ def admin_task_detail(
 
     执行过程事件已完整落库（task_events / agent_run_events），此前只由用户端 SSE 暴露，
     运营后台看不到；这里补齐管理端读取入口，便于排查「章节缺失 / 卡死」等问题。
+    `since` 用于日志轮询：只返回该 seq 之后的新事件，前端可增量追加。
     """
     events: list[dict] = []
     detail: dict = {}
     resolved_source: str | None = None
+    truncated = False
 
     if source in (None, "agent_run"):
         run = db.get(AgentRun, task_id)
@@ -1123,10 +1135,11 @@ def admin_task_detail(
             detail = run_to_dict(db, run, storage=request.app.state.storage)
             rows = db.scalars(
                 select(AgentRunEvent)
-                .where(AgentRunEvent.run_id == run.id)
+                .where(AgentRunEvent.run_id == run.id, AgentRunEvent.seq > since)
                 .order_by(AgentRunEvent.seq.asc())
-                .limit(500)
+                .limit(EVENT_PAGE_LIMIT + 1)
             ).all()
+            truncated = len(rows) > EVENT_PAGE_LIMIT
             events = [
                 {
                     "seq": row.seq,
@@ -1135,42 +1148,78 @@ def admin_task_detail(
                     "message": row.message,
                     "at": row.created_at.isoformat() if row.created_at else None,
                 }
-                for row in rows
+                for row in rows[:EVENT_PAGE_LIMIT]
             ]
     if resolved_source is None and source in (None, "task"):
         task = db.get(Task, task_id)
         if task is not None:
             resolved_source = "task"
             detail = task_to_dict(task)
+            steps = db.scalars(
+                select(TaskStep)
+                .where(TaskStep.task_id == task.id)
+                .order_by(TaskStep.updated_at.asc())
+            ).all()
+            detail["steps"] = [
+                {
+                    "step_key": row.step_key,
+                    "status": row.status,
+                    "output_ref": row.output_ref,
+                    "meta": row.meta,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                }
+                for row in steps
+            ]
             rows = db.scalars(
                 select(TaskEvent)
-                .where(TaskEvent.task_id == task.id)
+                .where(TaskEvent.task_id == task.id, TaskEvent.seq > since)
                 .order_by(TaskEvent.seq.asc())
-                .limit(500)
+                .limit(EVENT_PAGE_LIMIT + 1)
             ).all()
+            truncated = len(rows) > EVENT_PAGE_LIMIT
             events = [
                 {
                     "seq": row.seq,
                     "stage": "(task)",
                     "level": row.level,
                     "message": row.message,
-                    "at": None,
+                    "at": row.created_at.isoformat() if row.created_at else None,
                 }
-                for row in rows
+                for row in rows[:EVENT_PAGE_LIMIT]
             ]
     if resolved_source is None:
         raise ApiError(404, "task_not_found", "任务不存在")
-    return {"source": resolved_source, "detail": detail, "events": events}
+    max_seq = events[-1]["seq"] if events else since
+    return {
+        "source": resolved_source,
+        "detail": detail,
+        "events": events,
+        "last_seq": max_seq,
+        "truncated": truncated,
+    }
 
 
 @admin_router.get("/tasks")
 def admin_tasks(
     status: str | None = Query(default=None, max_length=16),
+    source: str | None = Query(default=None, pattern="^(task|agent_run)$"),
     account_id: int | None = Query(default=None, ge=1),
-    limit: int = Query(default=50, ge=1, le=200),
+    q: str | None = Query(default=None, max_length=64),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    limit: int | None = Query(default=None, ge=1, le=200),
     _staff: Account = Depends(require_staff),
     db: Session = Depends(get_db),
 ):
+    """后台任务记录：合并 tasks 与 agent_runs，支持状态/来源/账号/关键词过滤与分页。
+
+    所有任务（排队、运行、暂停、完成、失败、取消）都按创建时间倒序返回，
+    点击任意一条即可通过 /tasks/{id} 查看完整执行日志。
+    """
+    # 兼容旧调用：早期只传 limit，等价于第一页
+    if limit is not None and page_size == 50:
+        page_size = limit
+
     task_query = select(Task)
     run_query = select(AgentRun)
     if status:
@@ -1179,11 +1228,50 @@ def admin_tasks(
     if account_id:
         task_query = task_query.where(Task.account_id == account_id)
         run_query = run_query.where(AgentRun.account_id == account_id)
-    tasks = db.scalars(task_query.order_by(Task.created_at.desc()).limit(limit)).all()
-    runs = db.scalars(run_query.order_by(AgentRun.created_at.desc()).limit(limit)).all()
-    items = [_task_brief(t) for t in tasks] + [_agent_run_brief(r) for r in runs]
-    items.sort(key=lambda row: row["created_at"], reverse=True)
-    return {"items": items[:limit]}
+    text = (q or "").strip()
+    if text:
+        like = f"%{text}%"
+        task_filters = [Task.id.ilike(like), Task.type.ilike(like)]
+        run_filters = [
+            AgentRun.id.ilike(like),
+            AgentRun.title.ilike(like),
+            AgentRun.mode.ilike(like),
+        ]
+        if text.isdigit():
+            task_filters.append(Task.account_id == int(text))
+            run_filters.append(AgentRun.account_id == int(text))
+        task_query = task_query.where(or_(*task_filters))
+        run_query = run_query.where(or_(*run_filters))
+
+    offset = _offset(page, page_size)
+    # 两张表各取「前 offset+page_size 条」后合并排序，再切出当前页，
+    # 避免为了分页把全量任务读进内存。
+    window = offset + page_size
+    total = 0
+    items: list[dict] = []
+    if source in (None, "task"):
+        total += _total(db, task_query)
+        items += [
+            _task_brief(row)
+            for row in db.scalars(
+                task_query.order_by(Task.created_at.desc()).limit(window)
+            ).all()
+        ]
+    if source in (None, "agent_run"):
+        total += _total(db, run_query)
+        items += [
+            _agent_run_brief(row)
+            for row in db.scalars(
+                run_query.order_by(AgentRun.created_at.desc()).limit(window)
+            ).all()
+        ]
+    items.sort(key=lambda row: row["created_at"] or "", reverse=True)
+    return {
+        "items": items[offset : offset + page_size],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 # ---- 告警 / 通知 -------------------------------------------------------------

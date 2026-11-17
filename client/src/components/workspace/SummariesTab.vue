@@ -389,6 +389,7 @@ const VOLUME_FIELDS: CollectionField[] = [
 const CHAPTER_FIELDS: CollectionField[] = [
   { key: 'no', label: '章号', type: 'number', required: true, min: 1 },
   { key: 'title', label: '章节标题', required: true, placeholder: '章节名称' },
+  { key: 'chapter_id', label: '章节标识', placeholder: '如 ch-001' },
   { key: 'words', label: '字数', type: 'number', min: 0 },
   { key: 'summary', label: '章节概括', type: 'textarea', rows: 3 },
   { key: 'conflict', label: '核心冲突', type: 'textarea', rows: 2 },
@@ -398,10 +399,35 @@ const CHAPTER_FIELDS: CollectionField[] = [
   { key: 'emotion', label: '情绪主线', placeholder: '如 压抑 → 爆发' },
   { key: 'tension', label: '张力值（0-10）', type: 'number', min: 0 },
   { key: 'chapter_status', label: '章节状态', placeholder: '如 已生成 / 待修订' },
-  { key: 'key_events', label: '关键事件', type: 'tags' },
+  { key: 'key_events', label: '关键事件', type: 'list', placeholder: '描述一个关键事件', hint: '按发生顺序填写关键事件，每条一行', addLabel: '添加事件' },
   { key: 'roles', label: '出场角色', type: 'tags' },
   { key: 'factions', label: '涉及势力', type: 'tags' },
   { key: 'items', label: '涉及道具', type: 'tags' },
+  // 剧情结构
+  { key: 'payoff', label: '本章兑现', type: 'textarea', rows: 2 },
+  { key: 'setup', label: '本章铺垫', type: 'textarea', rows: 2 },
+  { key: 'arc', label: '章节阶段', placeholder: '如 开局 / 转折 / 收束' },
+  { key: 'chapter_function', label: '本章功能', placeholder: '如 铺垫 / 冲突升级 / 高潮' },
+  { key: 'chapter_goal', label: '本章目的', placeholder: '一句话说明本章要完成什么' },
+  { key: 'beat_type', label: '节拍类型', placeholder: '如 激励事件 / 反转 / 揭秘' },
+  // 人物与设定增量
+  { key: 'new_characters', label: '新登场角色', type: 'tags' },
+  { key: 'new_items', label: '新道具', type: 'tags' },
+  { key: 'new_settings', label: '新设定', type: 'tags' },
+  { key: 'foreshadow_ids', label: '关联伏笔', type: 'tags' },
+  // 写作数据
+  { key: 'pov', label: '叙事视角', placeholder: '如 主角 / 第三人称' },
+  { key: 'time_span', label: '时间跨度', placeholder: '如 当日 / 三日后' },
+  { key: 'word_target', label: '目标字数', type: 'number', min: 0 },
+  { key: 'word_actual', label: '实际字数', type: 'number', min: 0 },
+  { key: 'payoff_type', label: '爽点类型', placeholder: '如 打脸 / 升级 / 揭晓' },
+  { key: 'payoff_owner', label: '爽点归属', placeholder: '角色名' },
+  { key: 'payoff_intensity', label: '爽点强度（0-10）', type: 'number', min: 0 },
+  { key: 'tear_point', label: '泪点' },
+  { key: 'sweet_point', label: '甜点' },
+  { key: 'twist', label: '反转', placeholder: '本章反转内容' },
+  { key: 'continuity_check', label: '连续性校验', placeholder: '如 通过 / 冲突：…' },
+  { key: 'revision_note', label: '修订说明' },
 ]
 
 const canEdit = computed(
@@ -489,7 +515,12 @@ function clone<T>(value: T): T {
 function blankValue(fields: CollectionField[]): Record<string, any> {
   const blank: Record<string, any> = {}
   for (const field of fields) {
-    blank[field.key] = field.type === 'tags' ? [] : field.type === 'number' ? undefined : ''
+    blank[field.key] =
+      field.type === 'tags' || field.type === 'list'
+        ? []
+        : field.type === 'number'
+          ? undefined
+          : ''
   }
   return blank
 }
@@ -1121,8 +1152,7 @@ const detailGroups = computed(() => {
         { label: '概括', value: c.summary || '' },
         { label: '核心冲突', value: c.conflict || '' },
         { label: '章末钩子', value: c.hook || '' },
-        { label: '关键事件', value: listValue(c.key_events) },
-        { label: '情节要点', value: listValue(c.points) },
+        { label: '关键事件', value: listValue(c.key_events?.length ? c.key_events : c.points) },
         { label: '本章铺垫', value: c.setup || '' },
         { label: '本章兑现', value: c.payoff || '' },
         { label: '章节阶段', value: c.arc || '' },

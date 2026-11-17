@@ -1,120 +1,311 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { api, errorMessage } from '../api'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { api, errorMessage, normalizeList } from '../api'
 import { can } from '../roles'
 import { getRole } from '../session'
 import { pushToast } from '../toast'
-import type { TaskDashboard, TaskRow } from '../types'
+import type { RunEvent, TaskDashboard, TaskDetail, TaskRow, TaskStage } from '../types'
 import { formatNumber, formatTime } from '../ui'
 import Icon from '../components/Icon.vue'
 import PageHeader from '../components/PageHeader.vue'
+import Pager from '../components/Pager.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import Modal from '../components/Modal.vue'
-import type { TaskDetail } from '../types'
 
 const role = getRole()
-const canRetry = computed(() => can(role, 'tasks:write'))
+const canWrite = computed(() => can(role, 'tasks:write'))
 
 const dashboard = ref<TaskDashboard | null>(null)
+const tasks = ref<TaskRow[]>([])
+const total = ref<number | null>(null)
 const loading = ref(false)
 const error = ref('')
 const autoRefresh = ref(true)
-const retryingId = ref('')
-const controllingId = ref('')
+const tick = ref(Date.now())
 
+const statusFilter = ref('all')
+const sourceFilter = ref('all')
+const keyword = ref('')
+const page = ref(1)
+const pageSize = 20
+
+const FILTERS = [
+  { key: 'all', label: '全部' },
+  { key: 'running', label: '运行中' },
+  { key: 'queued', label: '排队中' },
+  { key: 'paused', label: '已暂停' },
+  { key: 'succeeded', label: '已完成' },
+  { key: 'failed', label: '失败' },
+  { key: 'canceled', label: '已取消' },
+] as const
+
+const queueDepth = computed(() => dashboard.value?.queue_depth ?? null)
+const runningCount = computed(() => dashboard.value?.running_count ?? 0)
+const failedCount = computed(() => dashboard.value?.failed_count ?? 0)
+const retryableCount = computed(() => dashboard.value?.retryable_count ?? 0)
+
+const liveCount = computed(
+  () => tasks.value.filter((item) => ['queued', 'running'].includes(item.status)).length,
+)
+
+/* ---- 列表 -------------------------------------------------------------- */
+async function loadDashboard() {
+  try {
+    dashboard.value = await api.taskDashboard()
+  } catch (e) {
+    if (!dashboard.value) error.value = errorMessage(e)
+  }
+}
+
+async function loadList(silent = false) {
+  if (!silent) loading.value = true
+  try {
+    const query: Record<string, unknown> = { page: page.value, page_size: pageSize }
+    if (statusFilter.value !== 'all') query.status = statusFilter.value
+    if (sourceFilter.value !== 'all') query.source = sourceFilter.value
+    if (keyword.value.trim()) query.q = keyword.value.trim()
+    const list = normalizeList<TaskRow>(await api.taskList(query))
+    tasks.value = list.items
+    total.value = list.total
+    error.value = ''
+  } catch (e) {
+    error.value = errorMessage(e)
+    tasks.value = []
+    total.value = null
+  } finally {
+    loading.value = false
+  }
+}
+
+async function refreshAll(silent = true) {
+  await Promise.all([loadDashboard(), loadList(silent)])
+}
+
+function setStatus(key: string) {
+  statusFilter.value = key
+  page.value = 1
+  void loadList()
+}
+
+function submitSearch() {
+  page.value = 1
+  void loadList()
+}
+
+function gotoPage(next: number) {
+  page.value = next
+  void loadList()
+}
+
+/* ---- 展示辅助 ---------------------------------------------------------- */
+function shortId(id: unknown): string {
+  return String(id || '')
+}
+
+function formatClock(value?: string | null): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}:${pad(date.getSeconds())}`
+}
+
+function durationText(task: TaskRow): string {
+  const start = task.started_at || task.created_at
+  if (!start) return '—'
+  const startAt = new Date(start).getTime()
+  if (Number.isNaN(startAt)) return '—'
+  const live = ['queued', 'running'].includes(task.status)
+  const endAt = live
+    ? tick.value
+    : new Date(task.finished_at || task.last_activity_at || start).getTime()
+  const seconds = Math.max(0, Math.floor((endAt - startAt) / 1000))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function sourceLabel(task: TaskRow): string {
+  return task.source === 'agent_run' ? '写作运行' : '拆解任务'
+}
+
+function typeLabel(task: TaskRow): string {
+  const mode = String(task.mode || '')
+  const names: Record<string, string> = { hot: '热门创作', reference: '参考创作', custom: '自定义创作' }
+  if (mode && names[mode]) return names[mode]
+  return task.type || '—'
+}
+
+function isNodeFailure(task: TaskRow): boolean {
+  return task.status === 'paused' && !!task.error_code
+}
+
+function statusLabelOf(task: TaskRow): string | undefined {
+  return isNodeFailure(task) ? '已中断' : undefined
+}
+
+function isLive(task?: TaskRow | null): boolean {
+  return !!task && ['queued', 'running', 'paused'].includes(task.status)
+}
+
+/* ---- 详情与日志 -------------------------------------------------------- */
 const detailTask = ref<TaskRow | null>(null)
 const detail = ref<TaskDetail | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
-
-const detailMeta = computed<[string, unknown][]>(() => {
-  const d = (detail.value?.detail || {}) as Record<string, unknown>
-  const summary = (d.summary as Record<string, unknown>) || {}
-  const chapters = Array.isArray(d.chapters) ? (d.chapters as unknown[]) : []
-  const summaries = Array.isArray(d.chapter_summaries) ? (d.chapter_summaries as unknown[]) : []
-  const volumes = Array.isArray(d.volumes) ? (d.volumes as unknown[]) : []
-  return [
-    ['状态', d.status],
-    ['进度', typeof d.progress === 'number' ? `${d.progress}%` : undefined],
-    ['错误码', d.error_code],
-    ['尝试次数', d.attempts],
-    ['正文章数', ((summary.chapters_count as number) ?? chapters.length) || undefined],
-    ['概括章数', summaries.length || undefined],
-    ['卷数', volumes.length || undefined],
-    ['创建时间', d.created_at],
-    ['开始时间', d.started_at],
-    ['结束时间', d.finished_at],
-  ].filter(([, v]) => v !== undefined && v !== null && v !== '') as [string, unknown][]
-})
+const logEl = ref<HTMLElement | null>(null)
+let detailTimer: number | null = null
 
 const detailStatus = computed(() => {
   const d = (detail.value?.detail || {}) as Record<string, unknown>
   return String(d.status || detailTask.value?.status || '')
 })
-const detailIsRun = computed(() => detailTask.value?.source === 'agent_run')
-const detailLive = computed(() => ['queued', 'running', 'paused'].includes(detailStatus.value))
+const detailIsRun = computed(() => detail.value?.source === 'agent_run')
+const detailLive = computed(() => ['queued', 'running'].includes(detailStatus.value))
+
+const stages = computed<TaskStage[]>(() => {
+  const value = (detail.value?.detail || {}) as Record<string, unknown>
+  return Array.isArray(value.stages) ? (value.stages as TaskStage[]) : []
+})
+const stageNames = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {}
+  for (const stage of stages.value) {
+    map[stage.id] = stage.name || stage.id
+  }
+  return map
+})
+const taskSteps = computed<{ step_key: string; status: string; updated_at?: string | null }[]>(() => {
+  const value = (detail.value?.detail || {}) as Record<string, unknown>
+  return Array.isArray(value.steps)
+    ? (value.steps as { step_key: string; status: string; updated_at?: string | null }[])
+    : []
+})
+const events = computed<RunEvent[]>(() => detail.value?.events || [])
+
+const detailMeta = computed<[string, unknown][]>(() => {
+  const d = (detail.value?.detail || {}) as Record<string, unknown>
+  const error = (d.error as Record<string, unknown>) || null
+  return [
+    ['状态', detailStatus.value],
+    ['进度', typeof d.progress === 'number' ? `${d.progress}%` : undefined],
+    ['来源', detailIsRun.value ? '写作运行' : '拆解任务'],
+    ['模式', d.mode],
+    ['错误码', error?.code || d.error_code],
+    ['失败原因', error?.message || d.error_message],
+    ['尝试次数', d.attempts],
+    ['创建时间', d.created_at],
+    ['开始时间', d.started_at],
+    ['结束时间', d.finished_at],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== '') as [
+    string,
+    unknown,
+  ][]
+})
+
+function scrollLogToBottom(force = false) {
+  const el = logEl.value
+  if (!el) return
+  const near = el.scrollHeight - el.scrollTop - el.clientHeight < 90
+  if (!force && !near) return
+  nextTick(() => {
+    if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
+  })
+}
 
 async function openDetail(task: TaskRow) {
   detailTask.value = task
   detail.value = null
   detailError.value = ''
   detailLoading.value = true
+  stopDetailTimer()
   try {
     detail.value = await api.taskDetail(String(task.id), task.source)
+    scrollLogToBottom(true)
   } catch (e) {
     detailError.value = errorMessage(e)
   } finally {
     detailLoading.value = false
   }
+  syncDetailTimer()
+}
+
+async function refreshDetail() {
+  const task = detailTask.value
+  if (!task) return
+  try {
+    detail.value = await api.taskDetail(String(task.id), task.source)
+    detailError.value = ''
+    scrollLogToBottom()
+  } catch (e) {
+    detailError.value = errorMessage(e)
+  }
+  syncDetailTimer()
+}
+
+/** 任务在跑就保持 4 秒轮询；从弹窗里点「继续/重试」后也会自动接上刷新。 */
+function syncDetailTimer() {
+  if (detailLive.value) startDetailTimer()
+  else stopDetailTimer()
 }
 
 function closeDetail() {
+  stopDetailTimer()
   detailTask.value = null
+  detail.value = null
+  detailError.value = ''
 }
 
-function taskList(key: 'running' | 'failed'): TaskRow[] {
-  const data = dashboard.value
-  if (!data) return []
-  const direct = data[key] as TaskRow[] | undefined
-  if (Array.isArray(direct)) return direct
-  const prefixed = data[`${key}_tasks`] as TaskRow[] | undefined
-  if (Array.isArray(prefixed)) return prefixed
-  const nested = (data.tasks as Record<string, unknown> | undefined)?.[key]
-  return Array.isArray(nested) ? nested as TaskRow[] : []
+function startDetailTimer() {
+  stopDetailTimer()
+  detailTimer = window.setInterval(() => void refreshDetail(), 4000)
 }
 
-const runningTasks = computed(() => taskList('running'))
-const failedTasks = computed(() => taskList('failed'))
-
-const queueDepth = computed(() => dashboard.value?.queue_depth ?? null)
-const runningCount = computed(() => dashboard.value?.running_count ?? runningTasks.value.length)
-const failedCount = computed(() => dashboard.value?.failed_count ?? failedTasks.value.length)
-const stalledCount = computed(() => runningTasks.value.filter((task) => task.stalled).length)
-const retryableCount = computed(() => {
-  if (typeof dashboard.value?.retryable_count === 'number') return dashboard.value.retryable_count
-  return failedTasks.value.filter(item => ['failed', 'retry_pending', 'queued'].includes(String(item.status))).length
-})
-
-async function load() {
-  loading.value = true
-  error.value = ''
-  try {
-    dashboard.value = await api.taskDashboard()
-  } catch (e) {
-    dashboard.value = null
-    error.value = errorMessage(e)
-  } finally {
-    loading.value = false
+function stopDetailTimer() {
+  if (detailTimer !== null) {
+    window.clearInterval(detailTimer)
+    detailTimer = null
   }
 }
+
+const logText = computed(() =>
+  events.value
+    .map((ev) => `#${ev.seq} ${formatClock(ev.at)} [${ev.stage}] ${ev.message}`)
+    .join('\n'),
+)
+
+async function copyLog() {
+  try {
+    await navigator.clipboard.writeText(logText.value)
+    pushToast('日志已复制')
+  } catch {
+    pushToast('复制失败，请手动选择文本', 'error')
+  }
+}
+
+function stageStateText(state: string): string {
+  const map: Record<string, string> = {
+    pending: '待开始',
+    running: '进行中',
+    succeeded: '已完成',
+    failed: '失败',
+  }
+  return map[state] || state
+}
+
+/* ---- 操作 -------------------------------------------------------------- */
+const retryingId = ref('')
+const controllingId = ref('')
 
 async function retryTask(task: TaskRow) {
   retryingId.value = String(task.id)
   try {
     await api.taskRetry(String(task.id))
     pushToast(`任务 ${task.id} 已重新入队`)
-    await load()
+    await refreshAll(false)
+    if (detailTask.value && String(detailTask.value.id) === String(task.id)) {
+      await refreshDetail()
+    }
   } catch (e) {
     pushToast(errorMessage(e), 'error')
   } finally {
@@ -132,7 +323,6 @@ const CONTROL_LABEL: Record<ControlAction, string> = {
 }
 
 async function controlTask(task: TaskRow, action: ControlAction) {
-  const label = CONTROL_LABEL[action]
   if (action === 'force_cancel') {
     const ok = window.confirm(
       `确认强制终止任务 ${task.id}？\n该操作会让任务立即落 canceled 终态并释放预占额度，正在执行的 worker 结果将被丢弃。`,
@@ -148,10 +338,10 @@ async function controlTask(task: TaskRow, action: ControlAction) {
   controllingId.value = String(task.id)
   try {
     const res = await api.taskControl(String(task.id), action, task.source)
-    pushToast(`任务 ${task.id} ${label}成功${res?.status ? `（当前状态：${res.status}）` : ''}`)
-    await load()
+    pushToast(`任务 ${task.id} ${CONTROL_LABEL[action]}成功${res?.status ? `（当前状态：${res.status}）` : ''}`)
+    await refreshAll(false)
     if (detailTask.value && String(detailTask.value.id) === String(task.id)) {
-      await openDetail(detailTask.value)
+      await refreshDetail()
     }
   } catch (e) {
     pushToast(errorMessage(e), 'error')
@@ -160,25 +350,30 @@ async function controlTask(task: TaskRow, action: ControlAction) {
   }
 }
 
-let timer: number | null = null
+let listTimer: number | null = null
+let clockTimer: number | null = null
 onMounted(() => {
-  void load()
-  // 运行中任务状态变化快，30 秒刷新一次在排查卡死时会误判，改为 10 秒
-  timer = window.setInterval(() => {
-    if (autoRefresh.value) void load()
+  void refreshAll(false)
+  listTimer = window.setInterval(() => {
+    if (autoRefresh.value) void refreshAll(true)
   }, 10_000)
+  clockTimer = window.setInterval(() => {
+    tick.value = Date.now()
+  }, 1000)
 })
 onUnmounted(() => {
-  if (timer !== null) window.clearInterval(timer)
+  if (listTimer !== null) window.clearInterval(listTimer)
+  if (clockTimer !== null) window.clearInterval(clockTimer)
+  stopDetailTimer()
 })
 </script>
 
 <template>
-  <PageHeader title="任务看板" desc="聚合拆解/改编任务与创作页触发的写作运行，查看队列深度、运行中与失败任务，并可直接取消、暂停、继续、重新排队或强制终止。页面每 10 秒自动刷新。">
+  <PageHeader title="任务看板" desc="所有用户任务的完整记录（排队 / 运行 / 暂停 / 完成 / 失败 / 取消）。点击任意任务即可查看执行过程与任务日志，支持取消、暂停、继续、重新排队与强制终止。页面每 10 秒自动刷新。">
     <label class="badge muted" style="cursor: pointer">
       <input v-model="autoRefresh" type="checkbox" style="margin-right: 5px" />自动刷新
     </label>
-    <button class="btn ghost sm" :disabled="loading" @click="load">
+    <button class="btn ghost sm" :disabled="loading" @click="refreshAll(false)">
       <Icon name="refresh" :size="14" />{{ loading ? '刷新中…' : '立即刷新' }}
     </button>
   </PageHeader>
@@ -192,7 +387,7 @@ onUnmounted(() => {
     <div class="stat-card">
       <div class="stat-label">运行中</div>
       <div class="stat-value">{{ formatNumber(runningCount) }}</div>
-      <div class="stat-desc">{{ stalledCount ? `${stalledCount} 条疑似卡死，建议强制终止` : '当前持有租约的任务' }}</div>
+      <div class="stat-desc">{{ liveCount ? `当前页 ${liveCount} 条活跃` : '当前持有租约的任务' }}</div>
     </div>
     <div class="stat-card red">
       <div class="stat-label">失败任务</div>
@@ -206,114 +401,148 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <div v-if="loading && !dashboard && !error" class="card">
-    <StateBlock kind="loading" title="正在加载任务看板…" />
-  </div>
-
-  <div v-else-if="error" class="card">
-    <StateBlock kind="error" title="任务看板加载失败" :message="error" retry-label="重试" @retry="load" />
-  </div>
-
-  <template v-else-if="dashboard">
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">运行中任务<span class="sub">{{ runningTasks.length }} 条</span></div>
-        <div class="spacer"></div>
-        <span class="muted" style="font-size: 11.5px">看板生成时间 {{ formatTime(dashboard.generated_at) }}</span>
-      </div>
-      <div v-if="runningTasks.length" class="table-wrap">
-        <table class="data-table">
-          <thead><tr><th>任务 ID</th><th>账号</th><th>来源 / 类型</th><th>作品</th><th>状态</th><th class="num">进度</th><th>开始时间</th><th>最近活动</th><th>创建时间</th><th>操作</th></tr></thead>
-          <tbody>
-            <tr v-for="task in runningTasks" :key="task.id">
-              <td class="mono truncate" :title="String(task.id)">{{ task.id }}</td>
-              <td>{{ task.account_id ? `#${task.account_id}` : '—' }}</td>
-              <td>
-                <span class="badge muted" style="font-size: 11px">{{ task.source === 'agent_run' ? '写作运行' : '拆解任务' }}</span>
-                {{ task.type || '—' }}
-              </td>
-              <td class="truncate" :title="task.title || ''">{{ task.title || '—' }}</td>
-              <td><StatusBadge :value="task.status" dot /></td>
-              <td class="num">{{ task.progress ?? 0 }}%</td>
-              <td class="muted">{{ formatTime(task.started_at) }}</td>
-              <td class="muted">
-                {{ formatTime(task.last_activity_at || task.started_at) }}
-                <span v-if="task.stalled" class="badge danger" style="margin-left: 4px; font-size: 11px">疑似卡死</span>
-              </td>
-              <td class="muted">{{ formatTime(task.created_at) }}</td>
-              <td>
-                <button class="btn ghost sm" @click="openDetail(task)">详情</button>
-                <template v-if="canRetry">
-                  <button
-                    class="btn ghost sm"
-                    :disabled="controllingId === String(task.id)"
-                    @click="controlTask(task, 'cancel')"
-                  >取消</button>
-                  <button
-                    class="btn ghost sm"
-                    :disabled="controllingId === String(task.id)"
-                    @click="controlTask(task, 'force_cancel')"
-                  >强制终止</button>
-                </template>
-                <span v-else class="muted" style="font-size: 12px">只读</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <StateBlock v-else kind="empty" title="当前没有运行中的任务" message="队列空闲或任务尚未被 worker 领取。" />
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">任务记录<span class="sub">{{ total === null ? '' : `${formatNumber(total)} 条` }}</span></div>
+      <div class="spacer"></div>
+      <span class="muted" style="font-size: 11.5px">
+        看板生成时间 {{ formatTime(dashboard?.generated_at) }}
+      </span>
     </div>
 
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">失败任务<span class="sub">{{ failedTasks.length }} 条</span></div>
-        <div class="spacer"></div>
-        <span v-if="!canRetry" class="badge muted">support 只读</span>
-      </div>
-      <div v-if="failedTasks.length" class="table-wrap">
+    <div class="filter-row">
+      <button
+        v-for="item in FILTERS"
+        :key="item.key"
+        type="button"
+        class="filter-chip"
+        :class="{ on: statusFilter === item.key }"
+        @click="setStatus(item.key)"
+      >
+        {{ item.label }}
+      </button>
+      <span class="spacer"></span>
+      <select v-model="sourceFilter" class="input mini" @change="submitSearch">
+        <option value="all">全部来源</option>
+        <option value="agent_run">写作运行</option>
+        <option value="task">拆解任务</option>
+      </select>
+      <input
+        v-model="keyword"
+        class="input mini"
+        placeholder="任务ID / 作品名 / 账号ID"
+        @keyup.enter="submitSearch"
+      />
+      <button class="btn sm" :disabled="loading" @click="submitSearch">
+        {{ loading ? '查询中…' : '查询' }}
+      </button>
+    </div>
+
+    <div v-if="loading && !tasks.length" class="card">
+      <StateBlock kind="loading" title="正在加载任务记录…" />
+    </div>
+    <div v-else-if="error" class="card">
+      <StateBlock kind="error" title="任务记录加载失败" :message="error" retry-label="重试" @retry="refreshAll(false)" />
+    </div>
+    <template v-else>
+      <div v-if="tasks.length" class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>任务 ID</th><th>账号</th><th>来源 / 类型</th><th>作品</th><th>状态</th><th>错误码</th><th class="num">尝试</th><th>创建时间</th><th style="width: 90px">操作</th></tr>
+            <tr>
+              <th>任务 ID</th>
+              <th>账号</th>
+              <th>来源 / 类型</th>
+              <th>作品</th>
+              <th>状态</th>
+              <th class="num">进度</th>
+              <th>创建时间</th>
+              <th class="num">用时</th>
+              <th>最近活动</th>
+              <th>操作</th>
+            </tr>
           </thead>
           <tbody>
-            <tr v-for="task in failedTasks" :key="task.id">
-              <td class="mono truncate" :title="String(task.id)">{{ task.id }}</td>
+            <tr v-for="task in tasks" :key="`${task.source}-${task.id}`" class="row-click" @click="openDetail(task)">
+              <td class="mono truncate" :title="shortId(task.id)">{{ shortId(task.id) }}</td>
               <td>{{ task.account_id ? `#${task.account_id}` : '—' }}</td>
               <td>
-                <span class="badge muted" style="font-size: 11px">{{ task.source === 'agent_run' ? '写作运行' : '拆解任务' }}</span>
-                {{ task.type || '—' }}
+                <span class="badge muted" style="font-size: 11px">{{ sourceLabel(task) }}</span>
+                {{ typeLabel(task) }}
               </td>
               <td class="truncate" :title="task.title || ''">{{ task.title || '—' }}</td>
-              <td><StatusBadge :value="task.status" dot /></td>
-              <td class="mono">{{ task.error_code || '—' }}</td>
-              <td class="num">{{ task.attempts ?? '—' }}</td>
-              <td class="muted">{{ formatTime(task.created_at) }}</td>
               <td>
-                <button class="btn ghost sm" @click="openDetail(task)">详情</button>
-                <button v-if="canRetry" class="btn ghost sm" :disabled="retryingId === String(task.id)" @click="retryTask(task)">
-                  {{ retryingId === String(task.id) ? '提交中…' : '重试' }}
-                </button>
-                <span v-else class="muted" style="font-size: 12px">只读</span>
+                <StatusBadge :value="task.status" :label="statusLabelOf(task)" dot />
+                <span v-if="task.stalled" class="badge danger" style="margin-left: 4px; font-size: 11px">疑似卡死</span>
+              </td>
+              <td class="num">{{ task.progress ?? 0 }}%</td>
+              <td class="muted">{{ formatTime(task.created_at) }}</td>
+              <td class="num muted">{{ durationText(task) }}</td>
+              <td class="muted">{{ formatTime(task.last_activity_at || task.started_at) }}</td>
+              <td>
+                <div class="actions">
+                  <button class="btn ghost sm" @click.stop="openDetail(task)">日志</button>
+                  <template v-if="canWrite">
+                    <button
+                      v-if="task.status === 'failed'"
+                      class="btn ghost sm"
+                      :disabled="retryingId === String(task.id)"
+                      @click.stop="retryTask(task)"
+                    >
+                      {{ retryingId === String(task.id) ? '提交中…' : '重试' }}
+                    </button>
+                    <button
+                      v-if="task.status === 'paused' && task.source === 'agent_run'"
+                      class="btn ghost sm"
+                      :disabled="controllingId === String(task.id)"
+                      @click.stop="controlTask(task, 'resume')"
+                    >继续</button>
+                    <button
+                      v-if="task.status === 'running' && task.source === 'agent_run'"
+                      class="btn ghost sm"
+                      :disabled="controllingId === String(task.id)"
+                      @click.stop="controlTask(task, 'pause')"
+                    >暂停</button>
+                    <button
+                      v-if="['queued', 'running', 'paused'].includes(task.status)"
+                      class="btn ghost sm"
+                      :disabled="controllingId === String(task.id)"
+                      @click.stop="controlTask(task, 'force_cancel')"
+                    >终止</button>
+                  </template>
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-      <StateBlock v-else kind="empty" title="没有失败任务" message="最近没有需要处理的失败任务。" />
-    </div>
-  </template>
+      <StateBlock
+        v-else
+        kind="empty"
+        title="没有匹配的任务"
+        message="所有用户任务都会记录在这里；换一个状态筛选或清空关键词再看看。"
+      />
+      <Pager
+        v-if="total !== null"
+        :page="page"
+        :page-size="pageSize"
+        :total="total"
+        :loading="loading"
+        @update:page="gotoPage"
+      />
+    </template>
+  </div>
 
   <Modal
     v-if="detailTask"
-    :title="`任务详情 ${detailTask.id}`"
-    :subtitle="`${detailTask.source === 'agent_run' ? '写作运行' : '拆解任务'} · ${detailTask.title || '未命名作品'}`"
+    :title="`任务日志 ${detailTask.id}`"
+    :subtitle="`${sourceLabel(detailTask)} · ${detailTask.title || typeLabel(detailTask)}`"
     size="wide"
     @close="closeDetail"
   >
-    <div v-if="detailLoading" class="card">
+    <div v-if="detailLoading && !detail" class="card">
       <StateBlock kind="loading" title="加载执行过程…" />
     </div>
-    <div v-else-if="detailError" class="card">
+    <div v-else-if="detailError && !detail" class="card">
       <StateBlock kind="error" :message="detailError" />
     </div>
     <template v-else-if="detail">
@@ -323,21 +552,70 @@ onUnmounted(() => {
           <span class="detail-meta__value">{{ value }}</span>
         </div>
       </div>
-      <h4 class="event-title">执行过程（{{ detail.events.length }} 条）</h4>
-      <div v-if="!detail.events.length" class="muted">暂无执行过程事件。</div>
-      <ul v-else class="event-log">
-        <li v-for="ev in detail.events" :key="ev.seq" :class="['event-log__item', `lvl-${ev.level}`]">
-          <span class="event-log__seq">#{{ ev.seq }}</span>
-          <span class="event-log__stage">{{ ev.stage }}</span>
-          <span class="event-log__at muted">{{ formatTime(ev.at) }}</span>
-          <span class="event-log__msg">{{ ev.message }}</span>
-        </li>
-      </ul>
+
+      <template v-if="stages.length">
+        <h4 class="event-title">阶段进度</h4>
+        <div class="stage-track">
+          <span
+            v-for="stage in stages"
+            :key="stage.id"
+            class="stage-chip"
+            :class="`stage-${stage.state}`"
+            :title="`${stage.started_at || ''} → ${stage.finished_at || ''}`"
+          >
+            <i class="stage-dot"></i>{{ stage.name || stage.id }}
+            <em>{{ stageStateText(stage.state) }}</em>
+          </span>
+        </div>
+      </template>
+      <template v-else-if="taskSteps.length">
+        <h4 class="event-title">任务步骤</h4>
+        <div class="stage-track">
+          <span
+            v-for="step in taskSteps"
+            :key="step.step_key"
+            class="stage-chip"
+            :class="`stage-${step.status === 'done' ? 'succeeded' : step.status}`"
+            :title="step.updated_at || ''"
+          >
+            <i class="stage-dot"></i>{{ step.step_key }}
+            <em>{{ stageStateText(step.status === 'done' ? 'succeeded' : step.status) }}</em>
+          </span>
+        </div>
+      </template>
+
+      <div class="log-head">
+        <h4 class="event-title">任务日志<span class="sub">{{ events.length }} 条</span></h4>
+        <span class="spacer"></span>
+        <span v-if="detailLive" class="badge info" style="font-size: 11px">运行中 · 自动刷新</span>
+        <span v-if="detail.truncated" class="badge warn" style="font-size: 11px">日志过多，仅展示最近 2000 条</span>
+        <button class="btn ghost sm" @click="copyLog">
+          <Icon name="copy" :size="13" />复制日志
+        </button>
+        <button class="btn ghost sm" @click="refreshDetail">刷新</button>
+      </div>
+
+      <div ref="logEl" class="task-log">
+        <div v-if="!events.length" class="task-log__empty">暂无执行日志。</div>
+        <template v-else>
+          <div
+            v-for="ev in events"
+            :key="ev.seq"
+            class="task-log__line"
+            :class="`lvl-${ev.level}`"
+          >
+            <span class="task-log__seq">#{{ ev.seq }}</span>
+            <span class="task-log__at">{{ formatClock(ev.at) }}</span>
+            <span class="task-log__stage" :title="ev.stage">{{ stageNames[ev.stage] || ev.stage }}</span>
+            <span class="task-log__msg">{{ ev.message }}</span>
+          </div>
+        </template>
+      </div>
     </template>
+
     <template #footer>
-      <button v-if="detailTask" class="btn ghost sm" @click="openDetail(detailTask)">刷新</button>
       <div class="spacer"></div>
-      <template v-if="canRetry && detailTask">
+      <template v-if="canWrite && detailTask">
         <button
           v-if="detailStatus === 'failed'"
           class="btn ghost sm"
@@ -345,7 +623,7 @@ onUnmounted(() => {
           @click="retryTask(detailTask)"
         >重试</button>
         <button
-          v-if="detailIsRun && ['queued', 'running'].includes(detailStatus)"
+          v-if="detailIsRun && detailStatus === 'running'"
           class="btn ghost sm"
           :disabled="controllingId === String(detailTask.id)"
           @click="controlTask(detailTask, 'pause')"
@@ -357,19 +635,19 @@ onUnmounted(() => {
           @click="controlTask(detailTask, 'resume')"
         >继续</button>
         <button
-          v-if="detailLive"
+          v-if="isLive(detailTask)"
           class="btn ghost sm"
           :disabled="controllingId === String(detailTask.id)"
           @click="controlTask(detailTask, 'requeue')"
         >重新排队</button>
         <button
-          v-if="detailLive"
+          v-if="isLive(detailTask)"
           class="btn ghost sm"
           :disabled="controllingId === String(detailTask.id)"
           @click="controlTask(detailTask, 'cancel')"
         >取消</button>
         <button
-          v-if="detailLive"
+          v-if="isLive(detailTask)"
           class="btn ghost sm"
           :disabled="controllingId === String(detailTask.id)"
           @click="controlTask(detailTask, 'force_cancel')"
@@ -380,6 +658,44 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 0 12px;
+}
+.filter-row .spacer {
+  flex: 1;
+}
+.filter-chip {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  background: #fff;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.filter-chip:hover {
+  border-color: var(--brand, #0d9488);
+  color: var(--brand, #0d9488);
+}
+.filter-chip.on {
+  background: var(--brand, #0d9488);
+  border-color: var(--brand, #0d9488);
+  color: #fff;
+}
+.input.mini {
+  width: 150px;
+  height: 28px;
+  font-size: 12px;
+}
+.row-click {
+  cursor: pointer;
+}
+
 .detail-meta {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -398,52 +714,135 @@ onUnmounted(() => {
 .detail-meta__value {
   font-size: 13px;
   font-weight: 600;
+  word-break: break-word;
 }
+
 .event-title {
   margin: 0 0 8px;
   font-size: 13px;
   font-weight: 700;
 }
-.event-log {
-  max-height: 420px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid var(--color-line, #e6e8ec);
-  border-radius: 8px;
+.event-title .sub {
+  margin-left: 6px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-3);
 }
-.event-log__item {
-  display: grid;
-  grid-template-columns: 44px 120px 132px 1fr;
+
+.stage-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: #f2f5f4;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.stage-chip em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.stage-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.stage-running {
+  background: var(--blue-bg, #e8f1ff);
+  color: var(--blue, #2563eb);
+}
+.stage-succeeded {
+  background: var(--green-bg, #e8f7ef);
+  color: var(--green, #15803d);
+}
+.stage-failed {
+  background: var(--red-bg, #fdecec);
+  color: var(--red, #dc2626);
+}
+
+.log-head {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.log-head .spacer {
+  flex: 1;
+}
+.log-head .event-title {
+  margin: 0;
+}
+
+.task-log {
+  max-height: 460px;
+  min-height: 160px;
+  overflow: auto;
+  padding: 10px 12px;
+  background: #0f1622;
+  border-radius: 10px;
+  color: #c6d3e6;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.task-log__empty {
+  color: #6c7c93;
+}
+.task-log__line {
+  display: grid;
+  grid-template-columns: 52px 108px 130px 1fr;
+  gap: 10px;
   align-items: baseline;
-  padding: 7px 12px;
-  font-size: 12.5px;
-  border-bottom: 1px solid var(--color-line, #e6e8ec);
+  padding: 1px 0;
 }
-.event-log__item:last-child {
-  border-bottom: none;
+.task-log__line:hover {
+  background: rgba(255, 255, 255, 0.04);
 }
-.event-log__seq {
-  color: var(--color-text-3, #8a94a6);
+.task-log__seq {
+  color: #64748b;
   font-variant-numeric: tabular-nums;
 }
-.event-log__stage {
-  font-weight: 600;
-  color: var(--color-brand, #0d9488);
-}
-.event-log__at {
+.task-log__at {
+  color: #8ba0bb;
   font-variant-numeric: tabular-nums;
 }
-.event-log__msg {
+.task-log__stage {
+  color: #5fd39a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-log__msg {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.event-log__item.lvl-warning .event-log__msg {
-  color: #b45309;
+.task-log__line.lvl-warning .task-log__msg {
+  color: #fbbf24;
 }
-.event-log__item.lvl-error .event-log__msg {
-  color: #dc2626;
+.task-log__line.lvl-error .task-log__msg {
+  color: #ff8b7d;
+}
+@media (max-width: 760px) {
+  .task-log__line {
+    grid-template-columns: 44px 1fr;
+  }
+  .task-log__stage,
+  .task-log__at {
+    display: none;
+  }
+  .input.mini {
+    width: 120px;
+  }
 }
 </style>

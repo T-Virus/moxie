@@ -389,8 +389,8 @@ function startPolling(): void {
   stopPolling()
   pollTimer = window.setInterval(() => {
     if (!run.value) return
-    // 热门写作即使异常返回 paused 也继续轮询，等待服务端自动完成
-    const blocked = run.value.status === 'paused' && run.value.mode !== 'hot'
+    // paused 不会自行恢复（用户停止或节点失败），统一停轮询；继续/重试后由 onTaskChanged 重启
+    const blocked = run.value.status === 'paused'
     if (TERMINAL.includes(run.value.status) || blocked) return
     void loadRun(true)
   }, 1800)
@@ -502,9 +502,9 @@ watch(
   () => run.value?.status,
   (status) => {
     if (!status) return
-    // hot 之外 paused 不会自行恢复，停止轮询；恢复（继续/重试）后必须重新启动，
+    // paused 不会自行恢复（用户停止或节点失败），停止轮询；恢复（继续/重试）后必须重新启动，
     // 否则工作台会一直停在暂停时刻的数据，看起来「状态改不回来」。
-    if (TERMINAL.includes(status) || (status === 'paused' && run.value?.mode !== 'hot')) {
+    if (TERMINAL.includes(status) || status === 'paused') {
       stopPolling()
     } else if (pollTimer === null) {
       startPolling()

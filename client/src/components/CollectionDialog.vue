@@ -8,7 +8,7 @@
           class="collect-form__field"
           :class="{
             'collect-form__field--full':
-              field.full || field.type === 'textarea' || field.type === 'tags',
+              field.full || field.type === 'textarea' || field.type === 'tags' || field.type === 'list',
           }"
         >
           <span class="collect-form__label">
@@ -16,6 +16,7 @@
             <i v-if="field.required">*</i>
           </span>
 
+          <!-- list 类型：编号+输入框+删除+添加，类似剧情节拍的列表输入 -->
           <!-- 多选：标签类字段（角色/势力/道具/章节的关联项）统一用可搜索、可自定义、支持虚拟滚动的下拉 -->
           <Combobox
             v-if="field.type === 'tags'"
@@ -36,6 +37,14 @@
             :placeholder="field.placeholder || '请选择或输入'"
             :allow-create="field.allowCreate ?? true"
             :preset-type="field.presetType"
+          />
+          <!-- 列表式：编号+输入框+删除+添加，类似剧情节拍 -->
+          <ListInput
+            v-else-if="field.type === 'list'"
+            v-model="form[field.key]"
+            :placeholder="field.placeholder || '输入一条'"
+            :add-label="field.addLabel || '添加一条'"
+            :hint="field.hint || ''"
           />
           <textarea
             v-else-if="field.type === 'textarea'"
@@ -83,6 +92,7 @@
 import { reactive, ref, watch } from 'vue'
 import AppDialog from '@/components/AppDialog.vue'
 import Combobox from '@/components/Combobox.vue'
+import ListInput from '@/components/ListInput.vue'
 import type { CollectionField } from '@/types'
 
 const props = withDefaults(
@@ -123,7 +133,7 @@ watch(
     if (!open) return
     for (const field of props.fields) {
       const raw = props.value?.[field.key]
-      if (field.type === 'tags') {
+      if (field.type === 'tags' || field.type === 'list') {
         form[field.key] = Array.isArray(raw) ? raw.map((item: any) => String(item)) : []
       } else if (field.type === 'number') {
         form[field.key] = typeof raw === 'number' && Number.isFinite(raw) ? raw : ''
@@ -156,7 +166,7 @@ function submit(): void {
   for (const field of props.fields) {
     const value = form[field.key]
     const empty =
-      field.type === 'tags'
+      field.type === 'tags' || field.type === 'list'
         ? !Array.isArray(value) || value.length === 0
         : field.type === 'number'
           ? typeof value !== 'number' || !Number.isFinite(value)
@@ -180,7 +190,7 @@ function submit(): void {
   const payload: Record<string, any> = {}
   for (const field of props.fields) {
     const value = form[field.key]
-    if (field.type === 'tags') {
+    if (field.type === 'tags' || field.type === 'list') {
       payload[field.key] = (Array.isArray(value) ? value : [])
         .map((item: any) => String(item).trim())
         .filter(Boolean)

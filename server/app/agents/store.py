@@ -225,6 +225,28 @@ def pause_run(
     return True
 
 
+def _reset_failed_steps(session: Session, run_id: str, now: datetime) -> None:
+    """把失败的节点 checkpoint 重置为 pending，让引擎从失败节点重跑。"""
+    for step in session.scalars(
+        select(AgentRunStep).where(AgentRunStep.run_id == run_id, AgentRunStep.status == "failed")
+    ).all():
+        step.status = "pending"
+        step.output = None
+        step.error = None
+        step.finished_at = None
+        step.updated_at = now
+
+
+def _re_reserve(session: Session, run: AgentRun, now: datetime) -> None:
+    """失败单点重跑前重新预占额度；已完成节点的额度不会被重复消耗。"""
+    reservation = QuotaService(session).reserve(
+        run.account_id, run.reserved_metric or "books_month", 1, now=now
+    )
+    run.reserved_quantity = reservation.quantity
+    run.reserved_plan_quantity = reservation.plan_quantity
+    run.reserved_pack_items = [dict(item) for item in reservation.pack_items]
+
+
 def resume_run(
     session: Session,
     run: AgentRun,
@@ -246,6 +268,17 @@ def resume_run(
             meta.pop("pause_reason", None)
             meta.pop("pause_requested", None)
             run.meta = meta
+        elif meta.get("failed_node"):
+            # 节点失败导致的暂停（retry_policy=soft 或 auto+可恢复错误）：
+            # 需要显式重试，只重置失败节点并重新预占额度，已完成节点复用 checkpoint
+            if not (retry_failed or approval):
+                raise ApiError(409, "invalid_state", "节点失败暂停的运行需 retry_failed=true 才能重跑失败节点")
+            _re_reserve(session, run, now)
+            _reset_failed_steps(session, run.id, now)
+            for key in ("failed_node", "failed_reason", "failed_code"):
+                meta.pop(key, None)
+            run.meta = meta
+            append_event(session, run.id, "run", "节点失败已重新预占额度，将只重跑失败节点")
         elif approval:
             meta["approved"] = True
             meta.pop("resume_input", None)
@@ -266,20 +299,19 @@ def resume_run(
         # 失败单点重跑：重新预占额度，只重置失败节点，已完成节点保留
         if not (retry_failed or approval):
             raise ApiError(409, "invalid_state", "失败运行需显式 retry_failed=true 才能重跑失败节点")
-        reservation = QuotaService(session).reserve(run.account_id, run.reserved_metric or "books_month", 1, now=now)
-        run.reserved_quantity = reservation.quantity
-        run.reserved_plan_quantity = reservation.plan_quantity
-        run.reserved_pack_items = [dict(item) for item in reservation.pack_items]
-        for step in session.scalars(
-            select(AgentRunStep).where(AgentRunStep.run_id == run.id, AgentRunStep.status == "failed")
-        ).all():
-            step.status = "pending"
-            step.output = None
-            step.error = None
-            step.finished_at = None
-            step.updated_at = now
+        _re_reserve(session, run, now)
+        _reset_failed_steps(session, run.id, now)
+        meta = dict(run.meta or {})
+        for key in ("failed_node", "failed_reason", "failed_code"):
+            meta.pop(key, None)
+        run.meta = meta
         append_event(session, run.id, "run", "失败运行已重新预占额度，将只重跑失败节点")
 
+    # 恢复后清掉上次失败标记，避免「已中断/失败原因」在后续暂停时被误读成新错误
+    meta = dict(run.meta or {})
+    for key in ("failed_node", "failed_reason", "failed_code"):
+        meta.pop(key, None)
+    run.meta = meta
     run.status = "queued"
     run.cancel_requested = False
     run.error_code = None
@@ -498,6 +530,8 @@ def run_to_dict(
         or []
     )
     summaries = (outputs.get("chapter_summarize") or {}).get("chapters") or []
+    # 内容体检：由 consistency_review + compliance_review 合并而来；兼容旧图的单 review 节点
+    review = outputs.get("review_merge") or outputs.get("review") or {}
     decomposed = outputs.get("outline_decompose") or {}
     seg_rows = [row for key, row in steps.items() if key.startswith("outline_decompose:seg:")]
     segments_count = int(
@@ -691,6 +725,8 @@ def run_to_dict(
         "factions": factions,
         "items": items,
         "chapter_summaries": summaries,
+        # 内容体检结果（评分/高危标记/风险/建议/一致性与合规问题）
+        "review": review,
         # 卷章概览中被手工删除的章号（仅隐藏概览，不影响正文）
         "chapter_hidden": list(
             collections.get("chapter_hidden")
@@ -717,10 +753,19 @@ def run_to_dict(
             "preview_chapters_count": len(preview.get("chapters") or []),
             "updated_at": updated_at,
         },
+        # 终态失败/取消回吐错误码；节点失败转 paused（可续跑）时也要给出原因，
+        # 否则前端只能显示「已停止」，用户不知道是哪一步失败、为什么。
         "error": (
             {"code": run.error_code, "message": run.error_message or ""}
             if run.error_code and run.status in ("failed", "canceled")
-            else None
+            else (
+                {
+                    "code": str((run.meta or {}).get("failed_code") or "stage_failed"),
+                    "message": str((run.meta or {}).get("failed_reason") or ""),
+                }
+                if run.status == "paused" and (run.meta or {}).get("failed_node")
+                else None
+            )
         ),
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "started_at": run.started_at.isoformat() if run.started_at else None,

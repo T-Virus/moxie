@@ -20,7 +20,7 @@ from ..db import utcnow
 from ..errors import ApiError
 from ..metrics import increment
 from ..models import AgentRun, AgentRunStep, AuditLog, UsageEvent
-from ..services.model_config import resolve_step_model
+from ..services.model_config import StepModel, resolve_step_model
 from ..services.model_gateway import ModelResult
 from ..services.quota import QuotaService
 from .artifacts import prefix_of, write_artifacts
@@ -37,6 +37,7 @@ logger = logging.getLogger("moxie.agents")
 UNRECOVERABLE_ERROR_CODES: frozenset[str] = frozenset({
     "source_unreadable",
     "source_not_found",
+    "source_too_large",
     "rights_confirmation_required",
     "subscription_required",
     "quota_exceeded",
@@ -103,10 +104,12 @@ def _run_node(
     skill,
     settings: Settings,
     *,
-    session: Session,
+    session: Session | None,
     api_key: str,
     byok: bool,
     on_progress=None,
+    resolved: StepModel | None = None,
+    on_log=None,
 ) -> NodeOutcome:
     attempts = max(1, node.retries + 1)
     records: list[tuple[int, ModelResult]] = []
@@ -114,7 +117,15 @@ def _run_node(
     error: str | None = None
     error_code: str | None = None
     started = time.perf_counter()
-    resolved = resolve_step_model(session, node.skill, settings, api_key=api_key or None)
+    # 并发线程里不能碰 session（SQLite 连接非线程安全）：由主线程预解析后传入
+    resolved = resolved or resolve_step_model(
+        session, node.skill, settings, api_key=api_key or None
+    )
+    model_line = f"调用模型 {resolved.model}（{resolved.provider}/{resolved.source}）"
+    if on_log is not None:
+        on_log("info", model_line)
+    else:
+        logs.append(("info", model_line))
     for attempt in range(1, attempts + 1):
         ctx = SkillContext(
             settings=settings,
@@ -123,6 +134,7 @@ def _run_node(
             byok=byok,
             base_url=resolved.base_url,
             on_progress=on_progress,
+            on_log=on_log,
         )
         try:
             payload = node.builder(view, state, extra)
@@ -253,7 +265,6 @@ def _run_segmented_node(
         artifact_key = f"{prefix}/segments/seg-{index:03d}.json"
         row = rows.get(step_key)
         if row is not None and row.status == "done" and storage.exists(artifact_key):
-            logs.append(("info", f"第 {index}/{total} 段已完成，断点续跑跳过"))
             append_event(session, run.id, node.id, f"第 {index}/{total} 段已完成，断点续跑跳过")
             continue
 
@@ -311,7 +322,9 @@ def _run_segmented_node(
                 if skill.output_model:
                     skill.output_model(**data)
                 part = data
+                logs.extend(ctx.logs)
             except Exception as exc:  # noqa: BLE001 - 只重试当前段
+                logs.extend(ctx.logs)
                 last_error = f"{type(exc).__name__}: {exc}"[:240]
                 last_code = getattr(exc, "code", None) or "segment_failed"
                 logger.warning(
@@ -555,7 +568,6 @@ def _run_chaptered_node(
         row = rows.get(step_key)
         if row is not None and row.status == "done" and isinstance(row.output, dict):
             parts.append(row.output)
-            logs.append(("info", f"第 {index}/{total} 章已完成，断点续跑跳过"))
             append_event(session, run.id, node.id, f"第 {index}/{total} 章已完成，断点续跑跳过")
             continue
         if row is None:
@@ -885,17 +897,26 @@ def execute_agent_run(
                 extra,
                 skill,
                 settings,
-                session=session,
+                session=None,
                 api_key=api_key,
                 byok=byok,
+                resolved=parallel_models.get(node.skill),
             )
+
+        parallel_models = {
+            node.skill: resolve_step_model(session, node.skill, settings, api_key=api_key or None)
+            for node in pending
+            if not node.segmented and not node.chaptered and not node.serial
+        }
 
         outcomes: list[NodeOutcome] = []
         paused_mid = False
         # 分段/章级/显式串行节点在主线程执行（需要写子级 checkpoint 或复用 session），
-        # 其余节点同层并发。
+        # 其余节点同层并发；并发节点的模型配置先在主线程解析好，工作线程不再访问 session。
+        parallel = []
         for node in pending:
             if not node.segmented and not node.chaptered and not node.serial:
+                parallel.append(node)
                 continue
             skill = overrides.get(node.skill) or registry.get(node.skill)
             if node.segmented:
@@ -932,6 +953,12 @@ def execute_agent_run(
                     run.updated_at = utcnow()
                     session.commit()
 
+                def _log_line(level: str, message: str) -> None:
+                    # 串行节点在主线程执行，日志可即时落库并通过 SSE/后台实时看到
+                    append_event(session, run.id, node.id, message, level=level)
+                    run.updated_at = utcnow()
+                    session.commit()
+
                 outcome = _run_node(
                     node,
                     view,
@@ -943,16 +970,14 @@ def execute_agent_run(
                     api_key=api_key,
                     byok=byok,
                     on_progress=_heartbeat,
+                    on_log=_log_line,
                 )
             outcomes.append(outcome)
             if outcome.paused:
                 # 用户请求停止：不再启动本层剩余节点，落 paused 保留进度
                 paused_mid = True
                 break
-        parallel = [] if paused_mid else [
-            node for node in pending if not node.segmented and not node.chaptered and not node.serial
-        ]
-        if parallel:
+        if parallel and not paused_mid:
             workers = min(4, len(parallel))
             with ThreadPoolExecutor(max_workers=max(1, workers), thread_name_prefix="agent-node") as pool:
                 outcomes.extend(list(pool.map(_invoke, parallel)))
@@ -969,6 +994,9 @@ def execute_agent_run(
             row.updated_at = finished
             executed += 1
             _record_usage(session, run, outcome, now=finished)
+            # 技能内部日志（模型兜底、分批进度、抽取数量等）此前只留在内存，
+            # 后台任务详情看不到具体执行过程；这里统一落到运行事件流。
+            _flush_node_logs(session, run.id, outcome.node_id, outcome.logs)
             if outcome.canceled:
                 canceled = True
                 row.status = "pending"
@@ -1229,6 +1257,15 @@ def _failed_nodes(steps: dict[str, AgentRunStep]) -> str:
         if base not in keys:
             keys.append(base)
     return ",".join(keys[:4]) or "unknown"
+
+
+def _flush_node_logs(
+    session: Session, run_id: str, node_id: str, logs: list[tuple[str, str]]
+) -> None:
+    """把节点内缓存的技能日志逐条写入运行事件流（并发线程节点在本层结束后调用）。"""
+    for level, message in logs:
+        append_event(session, run_id, node_id, message, level=level)
+    logs.clear()
 
 
 def _record_usage_item(
