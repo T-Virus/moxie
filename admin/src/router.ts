@@ -28,6 +28,11 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '用户管理', permission: 'users:read' },
       },
       {
+        path: 'account-deletions',
+        component: () => import('./views/AccountDeletions.vue'),
+        meta: { title: '注销申请', permission: 'users:read' },
+      },
+      {
         path: 'subscriptions',
         component: () => import('./views/Subscriptions.vue'),
         meta: { title: '订阅与权益', permission: 'subscriptions:read' },
@@ -48,9 +53,19 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '对账', permission: 'reconcile:read' },
       },
       {
+        path: 'four-ledger',
+        component: () => import('./views/FourLedger.vue'),
+        meta: { title: '四账对账', permission: 'reconcile:read' },
+      },
+      {
         path: 'tasks',
         component: () => import('./views/TaskBoard.vue'),
         meta: { title: '任务看板', permission: 'tasks:read' },
+      },
+      {
+        path: 'task-dead-letters',
+        component: () => import('./views/TaskDeadLetters.vue'),
+        meta: { title: '死信与重放', permission: 'tasks:read' },
       },
       {
         path: 'alerts',

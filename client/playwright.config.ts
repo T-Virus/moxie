@@ -31,13 +31,13 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: 'npm run dev',
+      command: 'npm run dev -- --host 127.0.0.1',
       url: CLIENT,
       reuseExistingServer: true,
       timeout: 120_000,
     },
     {
-      command: 'npm --prefix ../admin run dev',
+      command: 'npm --prefix ../admin run dev -- --host 127.0.0.1',
       url: ADMIN,
       reuseExistingServer: true,
       timeout: 120_000,

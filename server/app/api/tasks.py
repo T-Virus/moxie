@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db, utcnow
 from ..deps import AuthContext, get_auth
 from ..errors import ApiError
+from ..rate_limit import check_tenant_limit
 from ..models import TaskEvent
 from ..runners.decompose import validate_source_params
 from ..schemas import (
@@ -37,6 +38,7 @@ def create(
     db: Session = Depends(get_db),
 ):
     settings = request.app.state.settings
+    check_tenant_limit(request, auth.account.id)
     params = dict(payload.params or {})
     rights_summary: dict = {"rights_confirmed": False, "consent_recorded": False}
     if settings.legal_gate_enabled and payload.type in ("decompose", "adapt"):

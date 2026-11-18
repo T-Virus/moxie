@@ -51,7 +51,7 @@ from .logging_setup import (
     request_id_ctx,
     set_trace_id,
 )
-from .metrics import increment, render as render_metrics
+from .metrics import increment, observe, render as render_metrics
 from .models import AgentRun, Task
 from .payload_middleware import PayloadCryptoMiddleware
 from .redis_client import RateLimiter, build_redis
@@ -299,7 +299,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["traceparent"] = f"00-{trace_id}-{span_id}-01"
             return response
         finally:
-            elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+            elapsed = time.perf_counter() - started
+            elapsed_ms = round(elapsed * 1000, 1)
+            route = request.scope.get("route")
+            metric_path = getattr(route, "path", None) or "unmatched"
+            if metric_path != "/metrics":
+                observe(
+                    "moxie_http_request_duration_seconds",
+                    elapsed,
+                    method=request.method,
+                    path=metric_path,
+                    status=str(status_code),
+                )
             logger.info(
                 "http_request",
                 extra={

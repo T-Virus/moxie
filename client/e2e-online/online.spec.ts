@@ -12,6 +12,13 @@ const root = path.resolve(here, '../..')
 type ApiOpts = { method?: string; body?: unknown; anonymous?: boolean }
 
 async function callApi<T>(page: Page, pathname: string, opts: ApiOpts = {}): Promise<T> {
+  const normalized: ApiOpts = {
+    ...opts,
+    body:
+      opts.body !== undefined && typeof opts.body !== 'string'
+        ? JSON.stringify(opts.body)
+        : opts.body,
+  }
   return page.evaluate(
     async ({ pathname, opts }) => {
       const mod = (await import('/src/services/http.ts')) as {
@@ -19,7 +26,7 @@ async function callApi<T>(page: Page, pathname: string, opts: ApiOpts = {}): Pro
       }
       return mod.apiFetch<T>(pathname, opts)
     },
-    { pathname, opts },
+    { pathname, opts: normalized },
   )
 }
 
@@ -53,8 +60,8 @@ test('online main chain: register → subscribe → run → export → delete �
     .poll(() => page.evaluate(() => !!sessionStorage.getItem('mx_access_token')), { timeout: 15_000 })
     .toBe(true)
 
-  const me = await callApi<{ account: { id: number } }>(page, '/auth/me')
-  expect(me.account.id).toBeGreaterThan(0)
+  const me = await callApi<{ id: number; email: string }>(page, '/auth/me')
+  expect(me.id).toBeGreaterThan(0)
 
   await page.goto('/plans')
   await expect(page.getByText(/套餐|方案/).first()).toBeVisible()
@@ -115,26 +122,11 @@ test('online main chain: register → subscribe → run → export → delete �
   await page.getByRole('button', { name: '登录', exact: true }).click()
   await expect(page).toHaveURL(/#\/overview/, { timeout: 15_000 })
 
-  const adminToken = await page.evaluate(() => {
-    const raw = sessionStorage.getItem('moxie_admin_session') || '{}'
-    return (JSON.parse(raw) as { access_token?: string }).access_token || ''
-  })
-  expect(adminToken).toBeTruthy()
-
-  const listResp = await page.request.get(`${ADMIN}/v1/admin/account-deletions?status=pending`, {
-    headers: { Authorization: `Bearer ${adminToken}` },
-  })
-  expect(listResp.ok()).toBeTruthy()
-  const list = (await listResp.json()) as {
-    items: Array<{ id: number; account_id: number; status: string }>
-  }
-  const found = list.items.find((item) => item.account_id === me.account.id)
-  expect(found, `deletion request for account ${me.account.id} not found`).toBeTruthy()
-
-  const purgeResp = await page.request.post(
-    `${ADMIN}/v1/admin/account-deletions/${found!.id}/purge`,
-    { headers: { Authorization: `Bearer ${adminToken}` } },
-  )
-  expect(purgeResp.ok()).toBeTruthy()
-  expect((await purgeResp.json()).deleted).toBe(true)
+  await page.goto(`${ADMIN}/#/account-deletions`)
+  await expect(
+    page.locator('tbody tr td:nth-child(2)', { hasText: `#${me.id}` }).first(),
+  ).toBeVisible({ timeout: 15_000 })
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '立即清除' }).first().click()
+  await expect(page.getByText('账号数据已清除')).toBeVisible({ timeout: 15_000 })
 })

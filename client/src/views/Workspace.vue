@@ -101,6 +101,7 @@
               @jump="jumpToChapter"
               @updated="loadRun(true)"
             />
+            <HealthReportTab v-else-if="activeTab === 'health'" :run="run" />
             <BodyTab v-else :run="run" :chapter="selectedChapter" @select="selectChapter" />
           </div>
           <Transition name="fade">
@@ -159,6 +160,7 @@ import AppDialog from '@/components/AppDialog.vue'
 import BodyTab from '@/components/workspace/BodyTab.vue'
 import CharactersTab from '@/components/workspace/CharactersTab.vue'
 import FactionsTab from '@/components/workspace/FactionsTab.vue'
+import HealthReportTab from '@/components/workspace/HealthReportTab.vue'
 import InfoTab from '@/components/workspace/InfoTab.vue'
 import ItemsTab from '@/components/workspace/ItemsTab.vue'
 import OutlineTab from '@/components/workspace/OutlineTab.vue'
@@ -282,6 +284,7 @@ type WorkspaceTab =
   | 'factions'
   | 'items'
   | 'summaries'
+  | 'health'
   | 'body'
 
 const WORKSPACE_TABS: Array<{ id: WorkspaceTab; label: string }> = [
@@ -291,6 +294,7 @@ const WORKSPACE_TABS: Array<{ id: WorkspaceTab; label: string }> = [
   { id: 'factions', label: '势力阵营' },
   { id: 'items', label: '道具功法' },
   { id: 'summaries', label: '卷章概览' },
+  { id: 'health', label: '体检报告' },
   { id: 'body', label: '作品正文' },
 ]
 const route = useRoute()
@@ -341,6 +345,7 @@ function tabHasData(tab: WorkspaceTab): boolean {
   if (tab === 'factions') return !!detail.factions?.length
   if (tab === 'items') return !!detail.items?.length
   if (tab === 'summaries') return !!detail.chapters?.length
+  if (tab === 'health') return true
   return !!detail.chapters?.some((chapter) => chapter.content)
 }
 

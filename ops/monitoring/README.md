@@ -8,6 +8,7 @@
 
 | 指标 | 类型 | 标签 |
 | --- | --- | --- |
+| `moxie_http_request_duration_seconds` | histogram | `method`, `path`（路由模板）, `status` |
 | `moxie_queue_depth` / `moxie_agent_queue_depth` | gauge | — |
 | `moxie_tasks_total` | counter | `status`（succeeded/failed/canceled） |
 | `moxie_tasks_requeued_total` / `moxie_task_retries_total` | counter | — |

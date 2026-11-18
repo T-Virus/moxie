@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
+from app import metrics
 from app.db import utcnow
 from app.models import Account, AuditLog, Device, InvoiceRequest, Order, Subscription
 from app.services.quota import QuotaService
@@ -424,3 +425,16 @@ def test_admin_dashboard_and_tasks(client, headers, app, account):
 
     account_list = client.get("/v1/admin/users", headers=headers)
     assert account_list.status_code == 200
+
+
+def test_admin_performance_snapshot(client, headers, app, account):
+    _promote(app, account["account"]["id"], "admin")
+    metrics.reset()
+    assert client.get("/healthz").status_code == 200
+
+    response = client.get("/v1/admin/performance", headers=headers)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["requests"] >= 1
+    assert "p95_ms" in data and "p99_ms" in data
+    assert isinstance(data["routes"], list)

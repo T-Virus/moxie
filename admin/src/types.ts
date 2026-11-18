@@ -198,6 +198,55 @@ export interface TaskRow {
   [key: string]: unknown
 }
 
+export interface AccountDeletionRequestView {
+  id: number
+  account_id: number
+  status: string
+  reason: string | null
+  requested_at: string | null
+  purge_at: string | null
+  cancelled_at: string | null
+}
+
+export interface AccountDeletionListResponse {
+  items: AccountDeletionRequestView[]
+  total: number
+}
+
+export interface FourLedgerAnomaly {
+  order_id: number
+  order_no: string
+  account_id: number
+  code: string
+  severity: string
+  detail: string
+}
+
+export interface FourLedgerGroup {
+  order_id: number
+  order_no: string
+  external_order_no: string | null
+  account_id: number
+  kind: string
+  provider: string
+  amount_cents: number
+  created_at: string | null
+  paid_at: string | null
+  payment: Record<string, unknown>
+  quota: Record<string, unknown>
+  invoice: Record<string, unknown>
+  refund: Record<string, unknown>
+  anomalies: string[]
+}
+
+export interface FourLedgerReconcileReport {
+  total: number
+  window: { start_at: string | null; end_at: string | null }
+  summary: { orders: number; anomaly_total: number; by_code: Record<string, number> }
+  groups: FourLedgerGroup[]
+  anomalies: FourLedgerAnomaly[]
+}
+
 export interface TaskDashboard {
   queue_depth?: number
   running_count?: number
@@ -210,6 +259,41 @@ export interface TaskDashboard {
   running_tasks?: TaskRow[]
   failed_tasks?: TaskRow[]
   [key: string]: unknown
+}
+
+export interface AdminPerformanceRoute {
+  path: string
+  count: number
+  p95_ms: number | null
+  p99_ms: number | null
+  error_rate: number
+}
+
+export interface AdminDeadLettersResponse {
+  items: TaskRow[]
+  total: number
+}
+
+export interface AdminTaskReplayResult {
+  task_id: string
+  ok: boolean
+  source?: string | null
+  code?: string | null
+}
+
+export interface AdminTaskReplayBatchResponse {
+  items: AdminTaskReplayResult[]
+  succeeded: number
+  failed: number
+}
+
+export interface AdminPerformance {
+  generated_at: string
+  requests: number
+  p95_ms: number | null
+  p99_ms: number | null
+  error_rate: number
+  routes: AdminPerformanceRoute[]
 }
 
 export interface RunEvent {

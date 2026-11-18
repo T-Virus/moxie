@@ -142,7 +142,48 @@ jobs:
             (cd "$d" && npm audit --omit=dev --audit-level=high)
           done
 
-  # 离线桌面端 E2E（Playwright）：目前 e2e/ 只覆盖本地模式
+  # 在线版主链 E2E（Playwright）：client + server + admin，三端范围内唯一新增 E2E
+  online-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - name: Install server dependencies
+        run: python -m pip install --upgrade pip && pip install -r server/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+        working-directory: client
+      - run: npm ci
+        working-directory: admin
+      - run: npx playwright install --with-deps chromium
+        working-directory: client
+      - name: Run online main-chain E2E
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm run test:e2e
+        working-directory: client
+      - name: Archive online E2E report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: online-e2e-report
+          path: |
+            client/playwright-report
+            client/test-results
+          if-no-files-found: ignore
+
+  # 离线桌面端 E2E（Playwright）：存量 job，仅保留历史能力，不再新增用例
   e2e-desktop:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -182,13 +223,32 @@ jobs:
           path: e2e/artifacts/report
           if-no-files-found: ignore
 
+  # 配置治理：阻止真实环境配置与私钥入库
+  config-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject tracked env files and private keys
+        run: |
+          set -eu
+          bad=$(git ls-files | grep -E '(^|/)\.env$|(^|/)[^/]*private[^/]*\.pem$|(^|/)[^/]*key[^/]*\.pem$' || true)
+          if [ -n "$bad" ]; then
+            echo "以下文件不得入库："
+            echo "$bad"
+            exit 1
+          fi
+          echo "config guard passed"
+
   # 失败汇总：写入 Job Summary；配置 CI_FAILURE_WEBHOOK 时额外推送到值班群机器人
   ci-failure-notice:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
-    needs: [server-tests, migration-check, web-apps, dependency-audit, e2e-desktop]
+    needs: [server-tests, migration-check, web-apps, dependency-audit, online-e2e, config-guard, e2e-desktop]
     if: failure()
     steps:
       - name: Write failure summary

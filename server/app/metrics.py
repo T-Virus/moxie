@@ -12,8 +12,14 @@ from collections import defaultdict
 
 _LOCK = threading.Lock()
 _COUNTERS: dict[tuple[str, tuple[tuple[str, str], ...]], float] = defaultdict(float)
+HISTOGRAM_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
+_HISTOGRAMS: dict[
+    tuple[str, tuple[tuple[str, str], ...]],
+    tuple[list[int], float, int],
+] = {}
 
 HELP = {
+    "moxie_http_request_duration_seconds": "HTTP 请求耗时（method/path/status）",
     "moxie_tasks_total": "任务最终状态计数（succeeded/failed/canceled）",
     "moxie_tasks_requeued_total": "租约超时后重新入队的任务数",
     "moxie_task_retries_total": "任务执行失败后回到队列重试的次数",
@@ -41,6 +47,19 @@ def increment(name: str, value: float = 1.0, **labels: str) -> None:
     key = (name, tuple(sorted((k, str(v)) for k, v in labels.items())))
     with _LOCK:
         _COUNTERS[key] += value
+
+
+def observe(name: str, value: float, **labels: str) -> None:
+    """记录直方图观测值；桶边界固定，避免动态标签造成时间序列爆炸。"""
+    key = (name, tuple(sorted((k, str(v)) for k, v in labels.items())))
+    with _LOCK:
+        buckets, total, count = _HISTOGRAMS.setdefault(
+            key, ([0] * len(HISTOGRAM_BUCKETS), 0.0, 0)
+        )
+        for index, bound in enumerate(HISTOGRAM_BUCKETS):
+            if value <= bound:
+                buckets[index] += 1
+        _HISTOGRAMS[key] = (buckets, total + value, count + 1)
 
 
 def _fmt(value: float) -> str:
@@ -79,6 +98,20 @@ def render(extra_samples: dict[str, float] | None = None) -> str:
         lines.append(f"# TYPE {name} counter")
         for labels, value in sorted(names[name]):
             lines.append(f"{name}{_label_text(labels)} {_fmt(value)}")
+    for name in sorted({key[0] for key in _HISTOGRAMS}):
+        lines.append(f"# HELP {name} {HELP.get(name, name)}")
+        lines.append(f"# TYPE {name} histogram")
+        for (h_name, labels), (buckets, total, count) in sorted(
+            ((key, value) for key, value in _HISTOGRAMS.items() if key[0] == name),
+            key=lambda item: item[0],
+        ):
+            for bound, bucket_count in zip(HISTOGRAM_BUCKETS, buckets):
+                le_labels = tuple(sorted((*labels, ("le", str(bound)))))
+                lines.append(f"{h_name}_bucket{_label_text(le_labels)} {bucket_count}")
+            inf_labels = tuple(sorted((*labels, ("le", "+Inf"))))
+            lines.append(f"{h_name}_bucket{_label_text(inf_labels)} {count}")
+            lines.append(f"{h_name}_sum{_label_text(labels)} {_fmt(total)}")
+            lines.append(f"{h_name}_count{_label_text(labels)} {count}")
     for name, value in sorted((extra_samples or {}).items()):
         lines.append(f"# HELP {name} 数据库派生指标")
         lines.append(f"# TYPE {name} gauge")
@@ -88,7 +121,18 @@ def render(extra_samples: dict[str, float] | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def histogram_snapshot(name: str) -> list[tuple[dict[str, str], list[int], float, int]]:
+    """返回直方图快照，供管理端做 P95/P99 汇总；调用方不得修改返回值。"""
+    with _LOCK:
+        return [
+            (dict(labels), list(buckets), total, count)
+            for (metric_name, labels), (buckets, total, count) in _HISTOGRAMS.items()
+            if metric_name == name
+        ]
+
+
 def reset() -> None:
     """仅供测试：清空进程内计数。"""
     with _LOCK:
         _COUNTERS.clear()
+        _HISTOGRAMS.clear()

@@ -686,6 +686,24 @@ export interface ReviewContent {
   compliance_issues?: string[]
 }
 
+export interface AgentRunHealthReport {
+  run_id: string
+  title: string | null
+  status: string
+  review: ReviewContent
+  continuity: Record<string, unknown> | null
+  polish: Record<string, unknown> | null
+  cover_plan: Record<string, unknown> | null
+  chapters: Array<{ chapter: number | null; title: string | null; word_count: number }>
+  summary: {
+    chapters_count: number
+    word_count: number
+    checks_count: number
+    conflict_count: number | string | null
+  }
+  missing_artifacts: string[]
+}
+
 export interface RunDetail {
   run_id: string
   mode: RunMode

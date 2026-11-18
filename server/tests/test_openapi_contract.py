@@ -435,6 +435,28 @@ def test_batch13_admin_contracts(client):
         _contract_op(client, path, method, model)
 
 
+def test_health_report_contract(client):
+    _contract_op(
+        client,
+        "/v1/agent-runs/{run_id}/health-report",
+        "get",
+        "AgentRunHealthReportResponse",
+    )
+
+
+def test_dead_letter_contract(client):
+    _contract_op(client, "/v1/admin/tasks/dead-letters", "get", "AdminDeadLettersResponse")
+
+
+def test_four_ledger_contract(client):
+    _contract_op(
+        client,
+        "/v1/admin/payments/four-ledger-reconcile",
+        "get",
+        "FourLedgerReconcileResponse",
+    )
+
+
 def test_batch13_notification_batch_contracts(client):
     cases = [
         ("/v1/admin/notifications/batch", "post", "AdminNotificationBatchResponse"),

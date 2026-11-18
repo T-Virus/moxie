@@ -25,6 +25,7 @@ import type {
   OutlineContent,
   PlotBlock,
   ReviewContent,
+  AgentRunHealthReport,
   RunDetail,
   RunEvent,
   RunFeedEvent,
@@ -905,6 +906,12 @@ function normalizeRunDetail(raw: RawRun): RunDetail {
 export async function getRun(runId: string): Promise<RunDetail> {
   const raw = await apiFetch<RawRun>(`/agent-runs/${encodeURIComponent(runId)}`)
   return normalizeRunDetail(raw)
+}
+
+export async function getHealthReport(runId: string): Promise<AgentRunHealthReport> {
+  return apiFetch<AgentRunHealthReport>(
+    `/agent-runs/${encodeURIComponent(runId)}/health-report`,
+  )
 }
 
 export interface RunInfoUpdatePayload {

@@ -846,6 +846,19 @@ class CreateAgentRunResponse(_Base):
     enqueued: bool
 
 
+class AgentRunHealthReportResponse(_Base):
+    run_id: str
+    title: str | None
+    status: str
+    review: dict[str, Any]
+    continuity: dict[str, Any] | None
+    polish: dict[str, Any] | None
+    cover_plan: dict[str, Any] | None
+    chapters: list[dict[str, Any]]
+    summary: dict[str, Any]
+    missing_artifacts: list[str]
+
+
 class AgentRunActionResponse(_Base):
     run_id: str
     status: str
@@ -1035,6 +1048,34 @@ class AdminTasksDashboardResponse(_Base):
     by_status: dict[str, int]
 
 
+class AdminDeadLettersResponse(_Base):
+    items: list[TaskBriefView]
+    total: int
+
+
+class AdminTaskReplayRequest(_Base):
+    reason: str | None = Field(default=None, max_length=500)
+    reset_attempts: bool = True
+
+
+class AdminTaskReplayResult(_Base):
+    task_id: str
+    ok: bool
+    source: str | None = None
+    code: str | None = None
+
+
+class AdminTaskReplayBatchRequest(_Base):
+    task_ids: list[str] = Field(default_factory=list, max_length=100)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class AdminTaskReplayBatchResponse(_Base):
+    items: list[AdminTaskReplayResult]
+    succeeded: int
+    failed: int
+
+
 class AdminDashboardTaskView(_Base):
     """兼容旧看板路径的紧凑状态计数。"""
 
@@ -1051,6 +1092,25 @@ class AdminDashboardResponse(_Base):
     alerts: AdminAlertsResponse
     pending_refunds: int
     paid_orders_24h: int
+
+
+class AdminPerformanceRouteView(_Base):
+    path: str
+    count: int
+    p95_ms: float | None
+    p99_ms: float | None
+    error_rate: float
+
+
+class AdminPerformanceResponse(_Base):
+    """进程内 HTTP 延迟快照；多 worker 部署时由 Prometheus 聚合更有意义。"""
+
+    generated_at: str
+    requests: int
+    p95_ms: float | None
+    p99_ms: float | None
+    error_rate: float
+    routes: list[AdminPerformanceRouteView]
 
 
 class DeliveryMetaSummary(_Base):
@@ -1157,6 +1217,51 @@ class AdminSkillsCatalogResponse(_Base):
 # —— 第十三批：对账/额度调整/预设/退款/发票稳定出参契约 -----------------------
 # 约定：结构固定的字段显式声明；summary/meta 等由业务演进的动态 JSON 保留 Any，
 # 避免 response_model 把真实字段裁掉（历史多次踩坑，见 test_openapi_contract）。
+
+
+class FourLedgerWindowView(_Base):
+    start_at: str | None
+    end_at: str | None
+
+
+class FourLedgerSummaryView(_Base):
+    orders: int
+    anomaly_total: int
+    by_code: dict[str, int]
+
+
+class FourLedgerAnomalyView(_Base):
+    order_id: int
+    order_no: str
+    account_id: int
+    code: str
+    severity: str
+    detail: str
+
+
+class FourLedgerGroupView(_Base):
+    order_id: int
+    order_no: str
+    external_order_no: str | None
+    account_id: int
+    kind: str
+    provider: str
+    amount_cents: int
+    created_at: str | None
+    paid_at: str | None
+    payment: dict[str, Any]
+    quota: dict[str, Any]
+    invoice: dict[str, Any]
+    refund: dict[str, Any]
+    anomalies: list[str]
+
+
+class FourLedgerReconcileResponse(_Base):
+    total: int
+    window: FourLedgerWindowView
+    summary: FourLedgerSummaryView
+    groups: list[FourLedgerGroupView]
+    anomalies: list[FourLedgerAnomalyView]
 
 
 class AdminReconcileReportView(_Base):

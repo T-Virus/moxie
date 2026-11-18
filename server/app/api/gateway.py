@@ -22,6 +22,7 @@ from starlette.background import BackgroundTask
 from ..db import get_db, utcnow
 from ..deps import AuthContext, get_auth
 from ..errors import ApiError
+from ..rate_limit import check_tenant_limit
 from ..metrics import increment
 from ..models import UsageEvent
 from ..services.model_config import resolve_step_model
@@ -95,6 +96,7 @@ async def chat_completions(
 ):
     settings = request.app.state.settings
     limiter = request.app.state.limiter
+    check_tenant_limit(request, auth.account.id)
     allowed, retry_after = limiter.check(
         f"gateway:{auth.account.id}", settings.gateway_rate_limit_per_minute, 60
     )

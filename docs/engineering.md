@@ -17,6 +17,7 @@
 | `server-tests` | Python 3.12，SQLite + fakeredis，`pytest -m "not live"`，JUnit XML + coverage XML，覆盖率低于 70% 失败（本地实测 79.44%） | 失败输出 + `server-pytest-report` / `server-coverage` |
 | `migration-check` | 临时 SQLite `alembic upgrade head` + `alembic check`（迁移与模型零漂移） | 步骤日志 |
 | `web-apps` | Node 22，matrix=`client,admin`：`npm ci` → typecheck → lint → test → build，归档 `dist` | 按 app 区分步骤 + `<app>-dist` 制品 |
+| `online-e2e` | Playwright 在线主链：注册→订阅→创作运行→数据导出→注销申请→admin 立即清除；client/server/admin 三端联跑 | `online-e2e-report` 制品 |
 | `dependency-audit` | `pip-audit -r server/requirements.txt --strict` + 三端 `npm audit --omit=dev --audit-level=high` | 步骤日志 |
 | `e2e-desktop` | 存量 job：依赖 web-apps，构建 web/dist + Playwright Chromium 跑离线冒烟；后续不再新增用例或能力 | trace / 截图 / HTML 报告 |
 | `ci-failure-notice` | 任一必需 job 失败时写 Job Summary；配置 `CI_FAILURE_WEBHOOK` 后推送值班机器人 | GitHub Actions run 摘要 / 群消息 |
@@ -33,6 +34,7 @@ Tag 形如 `v*` 触发：重新构建 client/admin 与 server 源码包 → 生�
 server pytest（全量,-m "not live"）: 422 passed，coverage 79.44%
 alembic upgrade head + check: No new upgrade operations detected
 client: typecheck OK · lint 0 error / 1 warning · test 57 passed · build OK
+online-e2e: 1 passed（注册→订阅→运行→导出→注销→admin purge）
 admin:  typecheck OK · lint 0 error · test 18 passed · build OK
 scripts/check_skills.py --check: 硬校验 10 项通过，漂移 0
 workflow / monitoring YAML: 4 个文件 PyYAML 解析通过
@@ -170,6 +172,7 @@ ops/backup/                     Postgres / MinIO / SQLite 演练与恢复文档
 ops/monitoring/                 Prometheus 抓取 + 告警规则 + SLO + Grafana 看板
 ops/reports/                    依赖审计报告、压测 CSV
 docs/security-checklist.md      安全核对项与待办
+docs/环境配置治理.md            dev/staging/prod 配置基线、密钥清单与回滚约定
 docs/engineering.md             本文档
 ```
 

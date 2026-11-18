@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { apiBaseLabel, getHealth, getReady, probeEndpoint, type ProbeOutcome } from '../api'
+import { apiBaseLabel, getAdminPerformance, getHealth, getReady, probeEndpoint, type ProbeOutcome } from '../api'
 import { can, hiddenNavLabels, ROLE_LABEL, type Permission } from '../roles'
 import { getAccount, getRole } from '../session'
+import type { AdminPerformance } from '../types'
 import { formatTime } from '../ui'
 import Icon from '../components/Icon.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -59,6 +60,7 @@ const health = ref<{ state: 'checking' | 'ok' | 'bad'; body: any }>({ state: 'ch
 const ready = ref<{ state: 'checking' | 'ok' | 'degraded' | 'bad'; httpStatus: number; body: any }>({
   state: 'checking', httpStatus: 0, body: {},
 })
+const performance = ref<AdminPerformance | null>(null)
 
 const readyCount = computed(() => PROBES.filter(item => probes[item.key]?.state === 'ready').length)
 const missingCount = computed(() => PROBES.filter(item => probes[item.key]?.state === 'missing').length)
@@ -101,8 +103,17 @@ async function loadService() {
   ready.value = { state: readyState, httpStatus: r.httpStatus, body: r.body }
 }
 
+async function loadPerformance() {
+  try {
+    performance.value = await getAdminPerformance()
+  } catch {
+    performance.value = null
+  }
+}
+
 onMounted(() => {
   void loadService()
+  void loadPerformance()
   void runProbes()
 })
 </script>
@@ -178,6 +189,39 @@ onMounted(() => {
         </div>
       </div>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">API 性能快照<span class="sub">进程内统计，刷新页面重新读取</span></div>
+      <div class="spacer"></div>
+      <button class="btn ghost sm" @click="loadPerformance">
+        <Icon name="refresh" :size="14" />刷新
+      </button>
+    </div>
+    <div v-if="!performance" class="muted">暂无性能数据或接口不可用。</div>
+    <template v-else>
+      <div class="kv-grid">
+        <div class="kv"><span class="k">请求数</span><span class="v mono">{{ performance.requests }}</span></div>
+        <div class="kv"><span class="k">P95</span><span class="v mono">{{ performance.p95_ms ?? '—' }} ms</span></div>
+        <div class="kv"><span class="k">P99</span><span class="v mono">{{ performance.p99_ms ?? '—' }} ms</span></div>
+        <div class="kv"><span class="k">5xx 错误率</span><span class="v mono">{{ (performance.error_rate * 100).toFixed(2) }}%</span></div>
+      </div>
+      <div v-if="performance.routes.length" class="table-wrap" style="margin-top: 12px">
+        <table class="data-table">
+          <thead><tr><th>路由</th><th>请求数</th><th>P95</th><th>P99</th><th>错误率</th></tr></thead>
+          <tbody>
+            <tr v-for="row in performance.routes" :key="row.path">
+              <td class="mono truncate">{{ row.path }}</td>
+              <td class="mono">{{ row.count }}</td>
+              <td class="mono">{{ row.p95_ms ?? '—' }} ms</td>
+              <td class="mono">{{ row.p99_ms ?? '—' }} ms</td>
+              <td class="mono">{{ (row.error_rate * 100).toFixed(2) }}%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
   </div>
 
   <div class="card">

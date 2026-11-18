@@ -17,6 +17,7 @@ from ..db import get_db
 from ..deps import AuthContext, get_auth, client_ip
 from ..errors import ApiError
 from ..metrics import increment
+from ..rate_limit import check_tenant_limit
 from ..services.audit import write_audit
 from ..services.uploads import delete_upload, save_upload
 
@@ -32,6 +33,7 @@ def upload_source(
 ):
     settings = request.app.state.settings
     limiter = request.app.state.limiter
+    check_tenant_limit(request, auth.account.id)
     allowed, retry_after = limiter.check(
         f"upload:{auth.account.id}", settings.upload_rate_limit_per_minute, 60
     )

@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db, utcnow
 from ..deps import require_admin, require_staff
 from ..errors import ApiError
+from ..metrics import HISTOGRAM_BUCKETS, histogram_snapshot
 from ..models import (
     Account,
     AccountDeletionRequest,
@@ -54,8 +55,14 @@ from ..schemas import (
     AccountDeletionRequestView,
     AdminAlertsResponse,
     AdminDashboardResponse,
+    AdminDeadLettersResponse,
     AdminModelConfigDeleteResponse,
     AdminModelConfigTestResponse,
+    AdminPerformanceResponse,
+    AdminTaskReplayBatchRequest,
+    AdminTaskReplayBatchResponse,
+    AdminTaskReplayRequest,
+    AdminTaskReplayResult,
     AdminTasksDashboardResponse,
     BackupCreateResponse,
     BackupDeleteResponse,
@@ -1008,6 +1015,147 @@ def tasks_dashboard(
     }
 
 
+def _is_dead_letter(task: Task, settings) -> bool:
+    return task.status == "failed" and task.attempts >= settings.task_max_attempts
+
+
+def _requeue_failed_task(
+    task: Task,
+    request: Request,
+    admin: Account,
+    db: Session,
+    *,
+    action: str = "task.retry",
+    reason: str | None = None,
+    reset_attempts: bool = True,
+) -> dict:
+    task.status = "queued"
+    task.cancel_requested = False
+    task.error_code = None
+    task.lease_until = None
+    task.next_retry_at = None
+    task.heartbeat_at = utcnow()
+    if reset_attempts:
+        task.attempts = 0
+    for step in db.scalars(select(TaskStep).where(TaskStep.task_id == task.id)).all():
+        if step.status in ("failed", "running"):
+            step.status = "pending"
+    meta = {"reason": reason} if reason else None
+    write_audit(
+        db,
+        actor_id=admin.id,
+        action=action,
+        request=request,
+        target_type="task",
+        target_id=task.id,
+        meta=meta,
+    )
+    db.commit()
+    from ..worker import enqueue_task
+
+    enqueue_task(request.app.state.settings, task.id)
+    return {"ok": True, "task_id": task.id, "source": "task", "status": task.status}
+
+
+@admin_router.get("/tasks/dead-letters", response_model=AdminDeadLettersResponse)
+def list_dead_letters(
+    request: Request,
+    account_id: int | None = Query(default=None, ge=1),
+    q: str | None = Query(default=None, max_length=120),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    _staff: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    settings = request.app.state.settings
+    query = select(Task).where(
+        Task.status == "failed", Task.attempts >= settings.task_max_attempts
+    )
+    if account_id is not None:
+        query = query.where(Task.account_id == account_id)
+    if q:
+        keyword = f"%{q.strip()}%"
+        query = query.where(or_(Task.id.contains(keyword), Task.error_code.contains(keyword)))
+    total = _total(db, query)
+    rows = db.scalars(
+        query.order_by(Task.finished_at.desc())
+        .offset(_offset(page, page_size))
+        .limit(page_size)
+    ).all()
+    return {"items": [_task_brief(row) for row in rows], "total": total}
+
+
+@admin_router.post("/tasks/{task_id}/replay", response_model=AdminTaskReplayResult)
+def replay_dead_letter(
+    task_id: str,
+    payload: AdminTaskReplayRequest,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    task = db.get(Task, task_id)
+    if task is None:
+        raise ApiError(404, "task_not_found", "任务不存在")
+    if not _is_dead_letter(task, request.app.state.settings):
+        raise ApiError(409, "task_not_dead_letter", "仅重试耗尽的死信任务可重放")
+    return _requeue_failed_task(
+        task,
+        request,
+        admin,
+        db,
+        action="task.replay",
+        reason=payload.reason,
+        reset_attempts=payload.reset_attempts,
+    )
+
+
+@admin_router.post(
+    "/tasks/dead-letters/replay-batch",
+    response_model=AdminTaskReplayBatchResponse,
+)
+def replay_dead_letters_batch(
+    payload: AdminTaskReplayBatchRequest,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    results: list[dict] = []
+    succeeded = 0
+    for task_id in payload.task_ids:
+        task = db.get(Task, task_id)
+        if task is None:
+            results.append({"task_id": task_id, "ok": False, "code": "task_not_found"})
+            continue
+        if not _is_dead_letter(task, request.app.state.settings):
+            results.append({"task_id": task_id, "ok": False, "code": "task_not_dead_letter"})
+            continue
+        _requeue_failed_task(
+            task,
+            request,
+            admin,
+            db,
+            action="task.replay_batch",
+            reason=payload.reason,
+            reset_attempts=True,
+        )
+        results.append({"task_id": task_id, "ok": True, "source": "task"})
+        succeeded += 1
+    write_audit(
+        db,
+        actor_id=admin.id,
+        action="task.replay_batch_summary",
+        request=request,
+        target_type="task",
+        meta={"count": succeeded, "requested": len(payload.task_ids), "reason": payload.reason},
+    )
+    db.commit()
+    return {
+        "items": results,
+        "succeeded": succeeded,
+        "failed": len(payload.task_ids) - succeeded,
+    }
+
+
 @admin_router.post("/tasks/{task_id}/retry")
 def retry_task(
     task_id: str,
@@ -1019,24 +1167,7 @@ def retry_task(
     if task is not None:
         if task.status not in ("failed", "canceled"):
             raise ApiError(409, "task_not_retryable", f"当前状态不可重试：{task.status}")
-        task.status = "queued"
-        task.cancel_requested = False
-        task.error_code = None
-        task.lease_until = None
-        task.heartbeat_at = utcnow()
-        task.attempts = 0
-        for step in db.scalars(select(TaskStep).where(TaskStep.task_id == task_id)).all():
-            if step.status in ("failed", "running"):
-                step.status = "pending"
-        write_audit(db, actor_id=admin.id, action="task.retry", request=request,
-                    target_type="task", target_id=task_id)
-        db.commit()
-        # 必须立即投递：只改状态不投递时任务会一直停在 queued，
-        # 只能等调度器判定「卡住的排队任务」后才被拾起，运营以为重试无效。
-        from ..worker import enqueue_task
-
-        enqueue_task(request.app.state.settings, task.id)
-        return {"ok": True, "task_id": task_id, "source": "task", "status": task.status}
+        return _requeue_failed_task(task, request, admin, db)
 
     # 写作运行：复用编排侧 resume 语义（重新预占额度、只重跑失败节点），
     # 与用户端 /agent-runs/{id}/resume 保持一致，避免看板重试造成额度/状态漂移。
@@ -1789,6 +1920,74 @@ def admin_notification_receipts_export(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename=receipts-{d.id}.csv; filename*=UTF-8''{quote(filename)}"},
     )
+
+
+def _histogram_quantile_ms(buckets: list[int], count: int, quantile: float) -> float | None:
+    if count <= 0:
+        return None
+    target = count * quantile
+    cumulative = 0
+    for bound, bucket_count in zip(HISTOGRAM_BUCKETS, buckets):
+        cumulative += bucket_count
+        if cumulative >= target:
+            return round(bound * 1000, 1)
+    return None
+
+
+@admin_router.get("/performance", response_model=AdminPerformanceResponse)
+def performance(_staff: Account = Depends(require_staff)):
+    """进程内 HTTP 延迟快照；多 worker 部署请优先看 Prometheus 聚合。"""
+    rows = histogram_snapshot("moxie_http_request_duration_seconds")
+    total_buckets = [0] * len(HISTOGRAM_BUCKETS)
+    total_count = 0
+    total_errors = 0
+    by_path: dict[
+        str, dict[str, object]
+    ] = {}
+
+    for labels, buckets, _total, count in rows:
+        path = labels.get("path", "unmatched")
+        status = labels.get("status", "")
+        entry = by_path.setdefault(
+            path,
+            {"buckets": [0] * len(HISTOGRAM_BUCKETS), "count": 0, "errors": 0},
+        )
+        entry_buckets = entry["buckets"]
+        assert isinstance(entry_buckets, list)
+        for index, bucket_count in enumerate(buckets):
+            entry_buckets[index] += bucket_count
+            total_buckets[index] += bucket_count
+        entry["count"] = int(entry["count"]) + count
+        total_count += count
+        if status.startswith("5"):
+            entry["errors"] = int(entry["errors"]) + count
+            total_errors += count
+
+    routes = []
+    for path, entry in sorted(
+        by_path.items(), key=lambda item: int(item[1]["count"]), reverse=True
+    )[:20]:
+        buckets = entry["buckets"]
+        assert isinstance(buckets, list)
+        count = int(entry["count"])
+        routes.append(
+            {
+                "path": path,
+                "count": count,
+                "p95_ms": _histogram_quantile_ms(buckets, count, 0.95),
+                "p99_ms": _histogram_quantile_ms(buckets, count, 0.99),
+                "error_rate": round(int(entry["errors"]) / count, 4) if count else 0.0,
+            }
+        )
+
+    return {
+        "generated_at": utcnow().isoformat(),
+        "requests": total_count,
+        "p95_ms": _histogram_quantile_ms(total_buckets, total_count, 0.95),
+        "p99_ms": _histogram_quantile_ms(total_buckets, total_count, 0.99),
+        "error_rate": round(total_errors / total_count, 4) if total_count else 0.0,
+        "routes": routes,
+    }
 
 
 # ---- 兼容旧看板路径 / 汇总 ----------------------------------------------------

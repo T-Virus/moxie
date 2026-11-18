@@ -200,6 +200,9 @@ class Settings(BaseSettings):
     auth_rate_limit_per_minute: int = 60
     # 前端错误上报独立限流（防止错误风暴挤占业务配额 / 被用作日志洪泛）
     client_error_rate_limit_per_minute: int = 30
+    # 租户级限流：按 account_id 统计模型/上传/任务创建等重操作；0 表示关闭。
+    # 与接口自身限流并行，不替换既有 gateway/upload 等维度。
+    tenant_rate_limit_per_minute: int = 0
     # 登录失败锁定：窗口内连续失败达到上限后拒绝，防止密码暴力破解
     login_failure_limit: int = 5
     login_failure_window_seconds: int = 900

@@ -11,7 +11,7 @@ import {
   type PayloadSession,
 } from './payloadCrypto'
 import type {
-  AdminFeedEvent, AlertRow, AuditRow, BackupRestoreResult, BackupRow, ListResult, LoginResponse, ModelUsageSummary, NotificationDetail, NotificationRow, OrderRow,
+  AccountDeletionListResponse, AccountDeletionRequestView, AdminDeadLettersResponse, AdminFeedEvent, AdminPerformance, AdminTaskReplayBatchResponse, AdminTaskReplayResult, AlertRow, AuditRow, BackupRestoreResult, BackupRow, FourLedgerReconcileReport, ListResult, LoginResponse, ModelUsageSummary, NotificationDetail, NotificationRow, OrderRow,
   NotificationBatchResult, PlanRow, PushReceiptHistory, ReconcileReport, RefundRow, RunEvent, SkillsCatalog,
   SubscriptionRow, TaskDashboard, TaskDetail, TaskRow, TelemetryCanary, TelemetryConfig,
   UserDetail, UserRow,
@@ -264,7 +264,7 @@ async function rawRequest(path: string, options: RequestOptions = {}): Promise<R
   }
 }
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const raw = await rawRequest(path, options)
   const rawText = await readResponseText(raw)
   const response = raw.response
@@ -382,6 +382,10 @@ export async function getReady(): Promise<{ httpStatus: number; body: any }> {
   }
 }
 
+export async function getAdminPerformance(): Promise<AdminPerformance> {
+  return request<AdminPerformance>('/v1/admin/performance')
+}
+
 export async function downloadBlob(path: string, fallbackName: string): Promise<void> {
   const raw = await rawRequest(path)
   const response = raw.response
@@ -440,6 +444,21 @@ export const api = {
   },
   deleteUser(id: number) {
     return request<any>(`/v1/admin/users/${id}`, { method: 'DELETE' })
+  },
+  accountDeletions(status = '', page = 1, pageSize = 50) {
+    return request<AccountDeletionListResponse>('/v1/admin/account-deletions', {
+      query: { status: status || undefined, page, page_size: pageSize },
+    })
+  },
+  cancelAccountDeletion(id: number) {
+    return request<AccountDeletionRequestView>(`/v1/admin/account-deletions/${id}/cancel`, {
+      method: 'POST',
+    })
+  },
+  purgeAccountDeletion(id: number) {
+    return request<{ deleted: boolean }>(`/v1/admin/account-deletions/${id}/purge`, {
+      method: 'POST',
+    })
   },
   skills() {
     return request<SkillsCatalog>('/v1/admin/skills')
@@ -566,9 +585,30 @@ export const api = {
       `reconcile-${provider}-${bizDate}.csv`,
     )
   },
+  fourLedgerReconcile(query: Record<string, unknown> = {}) {
+    return request<FourLedgerReconcileReport>(
+      '/v1/admin/payments/four-ledger-reconcile',
+      { query },
+    )
+  },
 
   taskDashboard() {
     return request<TaskDashboard>('/v1/admin/tasks/dashboard')
+  },
+  deadLetters(query: Record<string, unknown> = {}) {
+    return request<AdminDeadLettersResponse>('/v1/admin/tasks/dead-letters', { query })
+  },
+  replayDeadLetter(id: string, reason: string) {
+    return request<AdminTaskReplayResult>(`/v1/admin/tasks/${id}/replay`, {
+      method: 'POST',
+      body: { reason },
+    })
+  },
+  replayDeadLettersBatch(taskIds: string[], reason: string) {
+    return request<AdminTaskReplayBatchResponse>('/v1/admin/tasks/dead-letters/replay-batch', {
+      method: 'POST',
+      body: { task_ids: taskIds, reason },
+    })
   },
   /** 全部任务记录：status/source/account_id/q + 分页，覆盖排队/运行/暂停/完成/失败/取消。 */
   taskList(query: Record<string, unknown> = {}) {

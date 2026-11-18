@@ -7,6 +7,19 @@
 
       <ComplianceGate ref="rightsGate" :source="gateSource" />
 
+      <section class="onboarding" aria-label="新手引导">
+        <div>
+          <strong>第一次使用？</strong>
+          <span>3 步完成一本可体检的示例书稿。</span>
+        </div>
+        <ol>
+          <li>填入示例书名与题材</li>
+          <li>点击开始创作，等待章纲与正文生成</li>
+          <li>在作品「体检报告」页查看风险与修改建议</li>
+        </ol>
+        <button type="button" class="onboarding__action" @click="useSampleProject">填入示例项目</button>
+      </section>
+
       <form class="composer" :aria-busy="submitting" @submit.prevent="submit">
         <div class="composer__title-row">
           <input
@@ -171,6 +184,17 @@ const customAllowed = ref(true)
 const touched = ref(false)
 const submitting = ref(false)
 const titleInput = ref<HTMLInputElement | null>(null)
+
+function useSampleProject(): void {
+  mode.value = 'hot'
+  title.value = '示例：七日通关计划'
+  audience.value = 'male'
+  length.value = 'short'
+  genre.value = { id: DEFAULT_GENRE_ID, name: DEFAULT_GENRE_NAME }
+  touched.value = true
+  titleInput.value?.focus()
+}
+
 /* 合规闸门：参考改编提交前必须采集结构化权利声明；取消则中止提交 */
 const rightsGate = ref<InstanceType<typeof ComplianceGate> | null>(null)
 const gateSource = computed(() => file.value?.name || '')
@@ -683,5 +707,37 @@ onMounted(async () => {
   .home__tabs {
     margin-bottom: var(--space-4);
   }
+}
+
+.onboarding {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--surface-2, #fafafa);
+  font-size: 13px;
+}
+.onboarding > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.onboarding ol {
+  margin: 0;
+  padding-left: 18px;
+  flex: 1;
+  min-width: 260px;
+}
+.onboarding__action {
+  border: 1px solid var(--brand, #4f46e5);
+  background: transparent;
+  color: var(--brand, #4f46e5);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
 }
 </style>

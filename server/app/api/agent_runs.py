@@ -21,6 +21,7 @@ from ..agents.skills.lore_extract import canonical_character, canonical_faction,
 from ..db import get_db
 from ..deps import AuthContext, get_auth
 from ..errors import ApiError
+from ..rate_limit import check_tenant_limit
 from ..models import AgentRun, AgentRunEvent, AgentRunStep, Preset
 from ..security import sanitize_free_json
 from ..schemas import (
@@ -32,6 +33,7 @@ from ..schemas import (
     AgentRunCoverResponse,
     AgentRunCreateRequest,
     AgentRunDeleteResponse,
+    AgentRunHealthReportResponse,
     AgentResumeRequest,
     CreateAgentRunResponse,
     GenresResponse,
@@ -96,6 +98,7 @@ def create_agent_run(
     db: Session = Depends(get_db),
 ):
     settings = request.app.state.settings
+    check_tenant_limit(request, auth.account.id)
     rights_summary: dict = {"rights_confirmed": False, "consent_recorded": False}
     if payload.mode == "reference":
         if not (payload.source_key or "").strip():
@@ -902,6 +905,90 @@ def delete_agent_run(
     db.delete(run)
     db.commit()
     return {"run_id": run_id, "deleted": True, "title": title}
+
+
+@router.get(
+    "/agent-runs/{run_id}/health-report",
+    response_model=AgentRunHealthReportResponse,
+)
+def agent_run_health_report(
+    run_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """聚合体检结论与关键产物摘要，给前端渲染可读体检报告。"""
+    run = get_run(db, auth.account.id, run_id)
+    detail = run_to_dict(db, run, include_artifacts=False)
+    from ..agents.artifacts import read_artifact
+    from ..agents.graph import RunView
+
+    view = RunView(
+        id=run.id,
+        mode=run.mode,
+        title=run.title,
+        audience=run.audience,
+        length=run.length,
+        genre_id=run.genre_id,
+        genre_name=run.genre_name,
+        source_key=run.source_key,
+        brief=run.brief,
+        meta=dict(run.meta or {}),
+    )
+    storage = request.app.state.storage
+
+    def load(name: str):
+        try:
+            return read_artifact(storage, view, name)
+        except ApiError:
+            return None
+
+    continuity = load("continuity_check.json")
+    polish = load("polish_report.json")
+    cover_plan = load("cover_plan.json")
+    chapters_doc = load("chapters.json")
+
+    chapters: list[dict] = []
+    total_words = 0
+    for chapter in (chapters_doc or {}).get("chapters", []):
+        content = str(chapter.get("content") or "")
+        words = len(content)
+        total_words += words
+        chapters.append(
+            {
+                "chapter": chapter.get("chapter"),
+                "title": chapter.get("title"),
+                "word_count": words,
+            }
+        )
+
+    missing = [
+        name
+        for name, value in (
+            ("continuity_check.json", continuity),
+            ("polish_report.json", polish),
+            ("cover_plan.json", cover_plan),
+            ("chapters.json", chapters_doc),
+        )
+        if value is None
+    ]
+    return {
+        "run_id": run.id,
+        "title": run.title,
+        "status": run.status,
+        "review": detail.get("review") or {},
+        "continuity": continuity,
+        "polish": polish,
+        "cover_plan": cover_plan,
+        "chapters": chapters,
+        "summary": {
+            "chapters_count": len(chapters),
+            "word_count": total_words,
+            "checks_count": len((continuity or {}).get("checks", [])),
+            "conflict_count": (continuity or {}).get("conflict_count", 0),
+        },
+        "missing_artifacts": missing,
+    }
 
 
 @router.get("/agent-runs/{run_id}/artifacts/{name}")

@@ -7,7 +7,8 @@
 
 | SLI | 计算口径 | 目标 | 对应告警 |
 | --- | --- | --- | --- |
-| API 可用性 | `1 - (5xx 响应数 / 总响应数)`，由反代访问日志统计 | ≥ 99.5% / 周 | `MoxieApiDown` |
+| API 可用性 | `1 - (5xx 响应数 / 总响应数)`，由 `moxie_http_request_duration_seconds_count{status}` 统计 | ≥ 99.5% / 周 | `MoxieApiDown` / `MoxieErrorBudgetBurnRateHigh` |
+| API 延迟 P95 | `histogram_quantile(0.95, rate(moxie_http_request_duration_seconds_bucket[5m]))` | ≤ 500ms / 5 分钟 | `MoxieApiLatencyHigh` |
 | 任务成功率 | `1 - sum(rate(moxie_tasks_total{status="failed"})) / sum(rate(moxie_tasks_total))` | ≥ 95% / 周 | `MoxieTaskFailureRateHigh` |
 | 队列健康 | `moxie_queue_depth` 与 `moxie_agent_queue_depth` 同时低于 100 | 持续满足 | `MoxieQueueBacklog`、`MoxieStuckTasksRequeued` |
 | 支付回调可靠性 | `1 - webhook_failures / webhook_total`（渠道侧 + 本地审计） | ≥ 99.9% / 周 | `MoxieWebhookFailures` |
@@ -33,5 +34,5 @@
 
 ## 已知缺口
 
-- API 延迟 P95/P99 尚未从服务端直接暴露，需由反向代理访问日志或 Grafana 数据源补充；试点期先用压测基线（`ops/loadtest/RESULTS.md`）作为参考。
+- P99 面板尚未单独拆出；当前按 P95 设门禁，P99 由 Grafana 直接从同一 histogram 查询，暂不单独告警。
 - 告警投递通道当前通过 CI 失败 webhook 与运维值班群手工接入；生产建议接入 Alertmanager 并配置抑制/静默规则。

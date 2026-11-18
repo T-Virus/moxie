@@ -27,10 +27,12 @@ from ..schemas import (
     InvoiceListResponse,
     InvoiceUpdateRequest,
     InvoiceVoidRequest,
+    FourLedgerReconcileResponse,
     ReconcileRequest,
     RefundListResponse,
 )
 from ..payments import get_provider
+from ..services import four_ledger as fourledgersvc
 from ..services import invoicing as invoicesvc
 from ..services import orders as ordersvc
 from ..services import reconcile as reconcilesvc
@@ -507,6 +509,43 @@ def export_reconcile(
         headers={
             "Content-Disposition": f'attachment; filename="reconcile-{provider}-{biz_date}.csv"'
         },
+    )
+
+
+def _parse_window_dt(value: str | None, name: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ApiError(400, "invalid_datetime", f"{name} 必须是 ISO 8601 时间")
+
+
+@router.get(
+    "/admin/payments/four-ledger-reconcile",
+    response_model=FourLedgerReconcileResponse,
+)
+def four_ledger_reconcile(
+    order_no: str | None = Query(default=None, max_length=64),
+    external_order_no: str | None = Query(default=None, max_length=64),
+    account_id: int | None = Query(default=None, ge=1),
+    start_at: str | None = Query(default=None, max_length=40),
+    end_at: str | None = Query(default=None, max_length=40),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    _staff=Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """以订单为枢纽聚合支付、额度、发票、退款四账，并输出异常明细。"""
+    return fourledgersvc.reconcile(
+        db,
+        order_no=order_no,
+        external_order_no=external_order_no,
+        account_id=account_id,
+        start_at=_parse_window_dt(start_at, "start_at"),
+        end_at=_parse_window_dt(end_at, "end_at"),
+        limit=limit,
+        offset=offset,
     )
 
 
