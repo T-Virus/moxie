@@ -19,6 +19,8 @@ from ..errors import ApiError
 from ..metrics import increment
 from ..models import Account, EmailVerification, LegalConsent, RefreshSession
 from ..schemas import (
+    AccountDeleteRequest,
+    AccountDeletionRequestView,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
@@ -32,10 +34,13 @@ from ..security import (
     token_hash,
     verify_password,
 )
+from ..services import data_rights
 from ..services.audit import write_audit
 from ..services.notifications import send_verification_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+# 用户数据权利接口按 /v1/me/* 暴露，不带 /auth 前缀。
+account_router = APIRouter(tags=["account"])
 
 REQUIRED_CONSENTS = ("terms", "privacy")
 
@@ -310,10 +315,18 @@ def refresh(payload: RefreshRequest, request: Request, db: Session = Depends(get
         raise ApiError(401, "invalid_refresh", "Token 类型不对")
 
     session_id = decoded.get("sid") or ""
+    try:
+        token_account_id = int(decoded.get("sub"))
+    except (TypeError, ValueError):
+        raise ApiError(401, "invalid_refresh", "Refresh Token 无效")
+
     row = db.scalar(select(RefreshSession).where(RefreshSession.token_hash == token_hash(payload.refresh_token)))
     if (
         row is None
         or row.session_id != session_id
+        # 必须与 access 侧 deps.get_auth 同口径：会话归属账号与 token 声明的 sub 一致。
+        # 否则弱/泄露密钥场景下，可用自己合法登录的 sid 伪造他人 sub 的 refresh token 横向换新。
+        or row.account_id != token_account_id
         or row.revoked_at is not None
         or row.expires_at <= utcnow()
     ):
@@ -349,3 +362,39 @@ def logout(
 @router.get("/me")
 def me(auth: AuthContext = Depends(get_auth)):
     return _account_view(auth.account)
+
+
+@account_router.get("/me/export")
+def export_my_data(
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """导出本人全部个人数据（含对象内容/下载链接），不含密码与令牌哈希。"""
+    return data_rights.collect_account_data(
+        db,
+        auth.account,
+        request.app.state.storage,
+        request.app.state.settings,
+    )
+
+
+@account_router.post("/me/delete", response_model=AccountDeletionRequestView)
+def delete_my_account(
+    payload: AccountDeleteRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """提交注销申请：密码 + 显式确认串，撤销会话，宽限期后统一清除。"""
+    if not verify_password(payload.password, auth.account.password_hash):
+        raise ApiError(401, "invalid_password", "密码不正确")
+    result = data_rights.request_deletion(
+        db,
+        auth.account,
+        request=request,
+        settings=request.app.state.settings,
+        reason="self_service",
+    )
+    db.commit()
+    return result

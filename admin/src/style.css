@@ -216,6 +216,14 @@ button, input, select, textarea { font-family: inherit; font-size: 14px; }
 .data-table .truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .data-table .empty-row td { text-align: center; color: var(--text-3); padding: 28px 12px; }
 
+/* 虚拟滚动长列表：表体定高滚动，行定高（与 useVirtualRows 的 rowHeight 一致），spacer 只占位。 */
+.vtable.vtable { max-width: 100%; }
+.data-table.vtable tbody tr.vtable-row { height: 44px; }
+.data-table.vtable tbody tr.vtable-row--tall { height: 48px; }
+.data-table.vtable tbody tr.vtable-row td { padding: 6px 12px; }
+.data-table.vtable tbody tr.vtable-spacer td { padding: 0; border: none; background: transparent; box-shadow: none; }
+.vtable-spacer { pointer-events: none; }
+
 .pager { display: flex; align-items: center; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
 .pager .hint { font-size: 12px; color: var(--text-3); margin-right: auto; }
 .pager .page-no { font-size: 12px; color: var(--text-2); min-width: 84px; text-align: center; }
@@ -359,6 +367,12 @@ button, input, select, textarea { font-family: inherit; font-size: 14px; }
 
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } }
+
+.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin: 0; }
+.detail-grid > div { min-width: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; }
+.detail-grid dt { font-size: 11.5px; color: var(--text-3); margin-bottom: 3px; }
+.detail-grid dd { margin: 0; font-size: 12.5px; color: var(--text); word-break: break-word; }
+.detail-section { margin: 16px 0 8px; font-size: 13px; color: var(--text); }
 
 .meter { height: 7px; background: #e9f0ef; border-radius: 999px; overflow: hidden; min-width: 90px; }
 .meter i { display: block; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, var(--primary), #3fc3b5); transition: width .3s; }

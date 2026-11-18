@@ -1,36 +1,42 @@
 <template>
   <div class="reader">
-    <aside class="reader__toc" aria-label="章节目录">
-      <div v-for="volume in volumes" :key="volume.key" class="toc-volume">
-        <button
-          type="button"
-          class="toc-volume__head"
-          :aria-expanded="!collapsed.includes(volume.key)"
-          @click="toggleVolume(volume.key)"
+    <aside ref="tocRef" class="reader__toc" aria-label="章节目录" @scroll.passive="onTocScroll">
+      <p v-if="!tocRows.length" class="reader__toc-empty">暂无章节</p>
+      <template v-else>
+        <!-- 虚拟滚动：只渲染视口附近的目录行，上千章也不会撑爆 DOM -->
+        <div class="toc-spacer" :style="{ height: `${tocRange.paddingTop}px` }" aria-hidden="true" />
+        <div
+          v-for="row in visibleTocRows"
+          :key="row.key"
+          class="toc-row"
+          :class="{ 'toc-row--volume': row.kind === 'volume', 'toc-row--chapter': row.kind === 'chapter' }"
         >
-          <span class="toc-volume__caret" :class="{ 'is-open': !collapsed.includes(volume.key) }">▸</span>
-          <span class="toc-volume__title">{{ volume.title }}</span>
-          <span class="toc-volume__count">{{ volume.chapters.length }}</span>
-        </button>
-
-        <div v-if="!collapsed.includes(volume.key)" class="toc-volume__chapters">
           <button
-            v-for="chapter in volume.chapters"
-            :key="chapter.no"
+            v-if="row.kind === 'volume'"
+            type="button"
+            class="toc-volume__head"
+            :aria-expanded="!collapsed.includes(row.key)"
+            @click="toggleVolume(row.key)"
+          >
+            <span class="toc-volume__caret" :class="{ 'is-open': !collapsed.includes(row.key) }">▸</span>
+            <span class="toc-volume__title">{{ row.title }}</span>
+            <span class="toc-volume__count">{{ row.count }}</span>
+          </button>
+          <button
+            v-else
             type="button"
             class="toc-chapter"
-            :class="{ 'is-active': chapter.no === currentNo }"
-            :aria-current="chapter.no === currentNo ? 'true' : undefined"
-            :title="chapter.title || '未命名'"
-            @click="select(chapter.no)"
+            :class="{ 'is-active': row.no === currentNo }"
+            :aria-current="row.no === currentNo ? 'true' : undefined"
+            :title="row.title || '未命名'"
+            @click="select(row.no!)"
           >
-            <span class="toc-chapter__no">第 {{ chapter.no }} 章</span>
-            <span class="toc-chapter__title">{{ chapter.title || '未命名' }}</span>
+            <span class="toc-chapter__no">第 {{ row.no }} 章</span>
+            <span class="toc-chapter__title">{{ row.title || '未命名' }}</span>
           </button>
         </div>
-      </div>
-
-      <p v-if="!volumes.length" class="reader__toc-empty">暂无章节</p>
+        <div class="toc-spacer" :style="{ height: `${tocRange.paddingBottom}px` }" aria-hidden="true" />
+      </template>
     </aside>
 
     <section class="reader__main">
@@ -124,6 +130,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import type { ChapterContent, ChapterSummary, RunDetail } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
+import { computeVirtualRange } from '@/utils/virtualList'
 
 const props = defineProps<{ run: RunDetail; chapter: number }>()
 const emit = defineEmits<{ (event: 'select', chapter: number): void }>()
@@ -244,6 +251,58 @@ const volumes = computed(() => {
   return result
 })
 
+/* ---------------- 目录虚拟滚动：卷头 + 章行统一为定高行 ---------------- */
+interface TocRow {
+  key: string
+  kind: 'volume' | 'chapter'
+  title: string
+  count?: number
+  no?: number
+}
+const TOC_ROW_HEIGHT = 34 // 与 .toc-row 固定高度对齐
+
+const tocRef = ref<HTMLElement | null>(null)
+const tocScrollTop = ref(0)
+const tocViewport = ref(480)
+
+/** 扁平化目录：折叠的卷不产出章行；顺序与原先「卷→章」完全一致。 */
+const tocRows = computed<TocRow[]>(() => {
+  const rows: TocRow[] = []
+  for (const volume of volumes.value) {
+    rows.push({ key: `v:${volume.key}`, kind: 'volume', title: volume.title, count: volume.chapters.length })
+    if (collapsed.value.includes(volume.key)) continue
+    for (const chapter of volume.chapters) {
+      rows.push({ key: `c:${chapter.no}`, kind: 'chapter', title: chapter.title, no: chapter.no })
+    }
+  }
+  return rows
+})
+
+const tocRange = computed(() =>
+  computeVirtualRange(tocRows.value.length, TOC_ROW_HEIGHT, tocScrollTop.value, tocViewport.value),
+)
+const visibleTocRows = computed(() => tocRows.value.slice(tocRange.value.start, tocRange.value.end))
+
+function onTocScroll(event: Event): void {
+  tocScrollTop.value = (event.target as HTMLElement).scrollTop
+}
+
+/** 选中章节后，把对应行滚入视口（虚拟列表下目标行可能未渲染）。 */
+function scrollChapterIntoView(no: number): void {
+  const index = tocRows.value.findIndex((row) => row.kind === 'chapter' && row.no === no)
+  if (index < 0) return
+  const top = index * TOC_ROW_HEIGHT
+  const el = tocRef.value
+  if (!el) return
+  const bottom = top + TOC_ROW_HEIGHT
+  if (top < el.scrollTop) el.scrollTop = top
+  else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight
+}
+
+onMounted(() => {
+  if (tocRef.value) tocViewport.value = tocRef.value.clientHeight || tocViewport.value
+})
+
 const currentNo = computed(() => {
   if (chapters.value.some((chapter) => chapter.no === props.chapter)) return props.chapter
   return chapters.value[0]?.no || 0
@@ -328,9 +387,8 @@ function onChapterChange(): void {
 }
 
 function scrollActiveIntoView(): void {
-  document
-    .querySelector('.toc-chapter.is-active')
-    ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  // 虚拟列表下目标行可能未渲染，按行索引计算滚动位置，不依赖 DOM 查询
+  scrollChapterIntoView(currentNo.value)
 }
 
 onMounted(scrollActiveIntoView)
@@ -355,6 +413,31 @@ onMounted(scrollActiveIntoView)
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+}
+
+/* 虚拟滚动：每行定高，与 TOC_ROW_HEIGHT=34 对齐；占位撑出完整滚动高度 */
+.toc-spacer {
+  flex: none;
+  width: 1px;
+}
+
+.toc-row {
+  flex: none;
+  height: 34px;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.toc-row--chapter {
+  margin: 0 0 1px 15px;
+  padding-left: 8px;
+  border-left: 1px solid var(--color-line);
+}
+
+.toc-row--chapter .toc-chapter {
+  flex: 1;
+  min-width: 0;
 }
 
 .reader__toc::-webkit-scrollbar {

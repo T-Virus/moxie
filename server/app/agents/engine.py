@@ -564,7 +564,16 @@ def _run_chaptered_node(
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 paused=True,
             )
-        step_key = _chapter_key(node.id, index)
+        # 稳定章号：分段调度时窗口内的 index 会重置，绑定 chapter 号避免续跑错跳/重复。
+        # 默认黄金三章 chapter 号恰为 1/2/3，与旧键一致，兼容既有 checkpoint。
+        chap_no = index
+        try:
+            candidate = int(chapter.get("chapter") or 0)
+            if candidate > 0:
+                chap_no = candidate
+        except (TypeError, ValueError):
+            pass
+        step_key = _chapter_key(node.id, chap_no)
         row = rows.get(step_key)
         if row is not None and row.status == "done" and isinstance(row.output, dict):
             parts.append(row.output)
@@ -578,7 +587,7 @@ def _run_chaptered_node(
             rows[step_key] = row
         row.status = "running"
         row.error = None
-        row.meta = {"index": index, "total": total, "title": chapter.get("title") or ""}
+        row.meta = {"index": index, "chapter": chap_no, "total": total, "title": chapter.get("title") or ""}
         row.updated_at = utcnow()
         append_event(
             session,
@@ -813,6 +822,9 @@ def execute_agent_run(
         "resume_input": (run.meta or {}).get("resume_input"),
         "source_text": "",
         "options": dict((run.meta or {}).get("options") or {}),
+        # 全本正文分段调度：把默认篇幅与上限注入 builder，避免单次 run 超额占额度
+        "body_max_chapters": settings.agent_cloud_body_max_chapters,
+        "body_default_chapters": settings.agent_cloud_body_chapters,
     }
     if run.mode == "reference":
         source = _load_source(storage, run.source_key)
@@ -1292,6 +1304,7 @@ def _record_usage_item(
             "node": tag.split(":")[0],
             "segment": tag,
             "model": result.model,
+            "provider": result.provider,
             "route": result.route,
             "byok": bool(result.byok),
             "cost_cents": int(result.cost_cents or 0),

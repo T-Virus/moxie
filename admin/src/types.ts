@@ -184,6 +184,8 @@ export interface TaskRow {
   error_code?: string | null
   error_message?: string | null
   attempts?: number
+  /** 失败重试的退避到点时间（ISO 字符串），无待重试时为 null */
+  next_retry_at?: string | null
   /** 写作运行的模式（hot/reference/custom），拆解任务为空 */
   mode?: string | null
   created_at?: string | null
@@ -216,6 +218,61 @@ export interface RunEvent {
   level: string
   message: string
   at?: string | null
+}
+
+/** 运营看板聚合变更流：只发 refresh 信号，前端收到后重查列表/概览。 */
+export interface AdminFeedEvent {
+  type: 'ready' | 'refresh' | 'closed'
+  active: number
+  at?: number
+}
+
+export interface BackupEmailStatus {
+  enabled: boolean
+  status: string
+  reason?: string | null
+  recipients?: string[]
+  error?: string | null
+}
+
+export interface BackupRow {
+  id: string
+  created_at?: string | null
+  trigger: string
+  engine: string
+  size_bytes: number
+  checksum: string
+  email: BackupEmailStatus
+}
+
+export interface BackupRestoreResult {
+  id: string
+  mode: 'staged' | 'applied'
+  engine: string
+  path?: string | null
+}
+
+export interface ModelUsageRow {
+  key: string
+  label: string
+  provider: string
+  tokens: number
+  cost_cents: number
+  calls: number
+  account_count: number
+  model_count: number
+}
+
+export interface ModelUsageSummary {
+  generated_at: string
+  days: number
+  group_by: 'model' | 'provider' | 'account' | 'day'
+  total_tokens: number
+  total_cost_cents: number
+  total_calls: number
+  scanned_rows: number
+  truncated: boolean
+  items: ModelUsageRow[]
 }
 
 export interface TaskDetail {
@@ -252,18 +309,82 @@ export interface AlertRow {
   [key: string]: unknown
 }
 
+export interface DeliveryMetaSummary {
+  subscribers?: number | null
+  delivered?: number | null
+  expired_count?: number | null
+  receipt_count?: number | null
+  retry_after_seconds?: number | null
+  reason?: string | null
+}
+
+export interface PushReceipt {
+  sub_id: number
+  status: string
+  error?: string
+  http_status?: number
+  retry_after_seconds?: number
+}
+
 export interface NotificationRow {
   id: number
+  account_id?: number | null
   channel?: string | null
   recipient?: string | null
   subject?: string | null
   template?: string | null
   status: string
   attempts?: number
+  max_attempts?: number | null
   last_error?: string | null
+  next_retry_at?: string | null
+  provider_message_id?: string | null
+  meta_summary?: DeliveryMetaSummary | null
   created_at?: string | null
   sent_at?: string | null
   [key: string]: unknown
+}
+
+/** 批量发送结果：逐账号独立投递，单条失败不影响整批。 */
+export interface NotificationBatchResult {
+  batch_id: string
+  total: number
+  sent: number
+  skipped: number
+  results: Array<{
+    account_id: number
+    notification_id: number | null
+    status: string
+    detail: string | null
+  }>
+}
+
+/** 结构化回执历史：从 delivery.meta 拆出的稳定字段，便于对账。 */
+export interface PushReceiptHistory {
+  delivery_id: number
+  channel: string
+  status: string
+  attempts: number
+  subscribers: number
+  delivered: number
+  expired: number[]
+  receipts: PushReceipt[]
+  retry_after_seconds: number | null
+  reason: string | null
+  next_retry_at: string | null
+}
+
+/** 投递详情：meta 含逐订阅 receipts / expired / retry_after_seconds。 */
+export interface NotificationDetail extends NotificationRow {
+  meta: {
+    subscribers?: number
+    delivered?: number
+    expired?: number[]
+    receipts?: PushReceipt[]
+    retry_after_seconds?: number | null
+    reason?: string
+    [key: string]: unknown
+  }
 }
 
 export interface AuditRow {
@@ -284,4 +405,60 @@ export interface PlanRow {
   price_year_cents?: number
   currency?: string
   entitlements?: { key: string; limit: number; unit: string; reset_period?: string }[]
+}
+
+/** 可观测配置：前端错误上报的采样率、去重窗口与 zset 容量（后台可热改）。 */
+export interface TelemetryCanary {
+  sample_rate?: number | null
+  dedupe_window_seconds?: number | null
+  dedupe_max_entries?: number | null
+}
+
+export interface TelemetryConfig {
+  sample_rate: number
+  dedupe_window_seconds: number
+  dedupe_max_entries: number
+  canary_percent: number
+  canary: TelemetryCanary
+  source: 'environment' | 'database'
+  updated_at: string | null
+  updated_by: number | null
+}
+
+/** 统一技能目录（10 环节）：与后端 /v1/admin/skills 契约一致。 */
+export type SkillCoverage = 'full' | 'partial' | 'cloud_gap'
+
+export interface SkillEntry {
+  stages: string[]
+  cloud_skills: string[]
+  api: string[]
+}
+
+export interface AdminSkillItem {
+  id: string
+  index: number
+  name: string
+  external: string | null
+  trigger: string[]
+  purpose: string
+  coverage: SkillCoverage
+  available: boolean
+  entry: SkillEntry
+  gap: string | null
+  ssot: string
+  writes: string[]
+  next: string[]
+  desktop_note: string
+  cloud_note: string
+  desktop_files: string[]
+  cloud_files: string[]
+  registered: boolean
+  reference: string
+}
+
+export interface SkillsCatalog {
+  items: AdminSkillItem[]
+  degraded: string | null
+  schema_version: string | null
+  updated_at: string | null
 }

@@ -1,0 +1,26 @@
+{
+  "name": "墨写 · 智能写作工作台",
+  "short_name": "墨写",
+  "description": "AI 辅助的长篇小说创作工作台：书名策划、题材大纲、人物设定、逐章写作与 content 体检。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#0d9488",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

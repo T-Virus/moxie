@@ -3,12 +3,16 @@ import { onMounted, ref } from 'vue'
 import { api, errorMessage, normalizeList } from '../api'
 import type { AuditRow } from '../types'
 import { compactJson, formatNumber, formatTime, prettyJson } from '../ui'
+import { useVirtualRows } from '../utils/useVirtualRows'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pager from '../components/Pager.vue'
 import StateBlock from '../components/StateBlock.vue'
 
+// 审计日志单页最多取 200 条，表体定高虚拟滚动，只渲染视口附近的行。
+const ROW_HEIGHT = 44
+const VIEWPORT_HEIGHT = 528
 const actorId = ref('')
 const action = ref('')
 const targetType = ref('')
@@ -17,10 +21,11 @@ const startDate = ref('')
 const endDate = ref('')
 
 const rows = ref<AuditRow[]>([])
+const { range, visibleRows, onScroll, resetScroll } = useVirtualRows(rows, ROW_HEIGHT, VIEWPORT_HEIGHT, 6)
 const loading = ref(false)
 const error = ref('')
 const page = ref(1)
-const pageSize = 50
+const pageSize = 200
 const total = ref<number | null>(null)
 
 async function load() {
@@ -54,11 +59,13 @@ async function load() {
 
 function submit() {
   page.value = 1
+  resetScroll()
   void load()
 }
 
 function setPage(next: number) {
   page.value = next
+  resetScroll()
   void load()
 }
 
@@ -146,33 +153,37 @@ onMounted(load)
       <StateBlock kind="empty" :title="total ? '没有更多匹配的审计记录' : '暂无匹配的审计记录'"
         :message="total ? '当前页没有记录，可返回上一页。' : '尝试放宽操作类型、对象或时间条件。'" />
     </div>
-    <div v-else class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th style="width: 136px">时间</th>
-            <th style="width: 90px">操作人</th>
-            <th>操作</th>
-            <th style="width: 200px">对象</th>
-            <th style="width: 120px">IP</th>
-            <th>明细</th>
-            <th style="width: 76px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in rows" :key="row.id">
-            <td class="muted">{{ formatTime(row.created_at) }}</td>
-            <td class="mono">{{ row.actor_id ? `#${row.actor_id}` : '—' }}</td>
-            <td class="mono">{{ row.action }}</td>
-            <td class="mono">
-              {{ row.target_type || '—' }}<template v-if="row.target_id"> #{{ row.target_id }}</template>
-            </td>
-            <td class="mono muted">{{ row.ip || '—' }}</td>
-            <td class="mono truncate" :title="compactJson(row.meta)">{{ compactJson(row.meta) }}</td>
-            <td><button class="btn ghost sm" @click="openDetail(row)">详情</button></td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else>
+      <div class="table-wrap vtable" :style="{ maxHeight: `${VIEWPORT_HEIGHT + 40}px` }" @scroll.passive="onScroll">
+        <table class="data-table vtable">
+          <thead>
+            <tr>
+              <th style="width: 136px">时间</th>
+              <th style="width: 90px">操作人</th>
+              <th>操作</th>
+              <th style="width: 200px">对象</th>
+              <th style="width: 120px">IP</th>
+              <th>明细</th>
+              <th style="width: 76px">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="range.paddingTop" class="vtable-spacer" :style="{ height: `${range.paddingTop}px` }"><td :colspan="7" /></tr>
+            <tr v-for="row in visibleRows" :key="row.id" class="vtable-row">
+              <td class="muted">{{ formatTime(row.created_at) }}</td>
+              <td class="mono">{{ row.actor_id ? `#${row.actor_id}` : '—' }}</td>
+              <td class="mono">{{ row.action }}</td>
+              <td class="mono">
+                {{ row.target_type || '—' }}<template v-if="row.target_id"> #{{ row.target_id }}</template>
+              </td>
+              <td class="mono muted">{{ row.ip || '—' }}</td>
+              <td class="mono truncate" :title="compactJson(row.meta)">{{ compactJson(row.meta) }}</td>
+              <td><button class="btn ghost sm" @click="openDetail(row)">详情</button></td>
+            </tr>
+            <tr v-if="range.paddingBottom" class="vtable-spacer" :style="{ height: `${range.paddingBottom}px` }"><td :colspan="7" /></tr>
+          </tbody>
+        </table>
+      </div>
       <Pager :page="page" :page-size="pageSize" :total="total" :loading="loading" @update:page="setPage" />
     </div>
   </div>

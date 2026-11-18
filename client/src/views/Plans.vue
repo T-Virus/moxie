@@ -71,6 +71,37 @@
       </template>
     </section>
 
+    <section v-if="session.account" class="plans__section">
+      <div class="card byok">
+        <div class="byok__head">
+          <div>
+            <h2 class="byok__title">自有模型 Key（BYOK）</h2>
+            <p class="muted byok__hint">
+              仅保存在当前浏览器会话，创建/续跑任务时以 X-BYOK-Key 发送；服务端仅短期内存缓存，不落库、不写日志。
+            </p>
+          </div>
+          <span class="badge" :class="byokEnabled ? 'badge--success' : ''">
+            {{ byokEnabled ? '已启用' : '未启用' }}
+          </span>
+        </div>
+        <div class="byok__row">
+          <input
+            v-model="byokInput"
+            class="byok__input"
+            type="password"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="粘贴你的模型 API Key（仅本次会话）"
+            aria-label="自有模型 API Key"
+            @keyup.enter="saveByok"
+          />
+          <button type="button" class="btn btn--sm" :disabled="!byokInput" @click="saveByok">保存</button>
+          <button type="button" class="btn btn--sm" :disabled="!byokEnabled" @click="clearByok">清除</button>
+        </div>
+        <p class="muted byok__status">{{ byokStatus }}</p>
+      </div>
+    </section>
+
     <section v-else class="plans__section">
       <div class="card plans__guest">
         <h2 class="plans__guest-title">登录后可查看你的订阅与额度</h2>
@@ -191,6 +222,7 @@ import {
   subscribePlan,
 } from '@/services/billingApi'
 import { ApiError } from '@/services/http'
+import { clearByokKey, hasByokKey, setByokKey } from '@/services/byok'
 import { session } from '@/stores/session'
 import type { PaymentProviderOption } from '@/types'
 
@@ -234,6 +266,33 @@ const quota = ref<QuotaSummary | null>(null)
 
 const toastText = ref('')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+
+const byokInput = ref('')
+const byokEnabled = ref(false)
+const byokStatus = ref('未配置自有 Key，任务将使用平台额度与平台模型。')
+
+function loadByok(): void {
+  byokEnabled.value = hasByokKey()
+  byokInput.value = ''
+  byokStatus.value = byokEnabled.value
+    ? '当前会话已启用 BYOK：创建/续跑任务使用你的模型 Key，不占用平台模型账单。'
+    : '未配置自有 Key，任务将使用平台额度与平台模型。'
+}
+
+function saveByok(): void {
+  const key = byokInput.value.trim()
+  if (!key) return
+  setByokKey(key)
+  byokInput.value = ''
+  loadByok()
+  showToast('自有模型 Key 已保存到当前会话')
+}
+
+function clearByok(): void {
+  clearByokKey()
+  loadByok()
+  showToast('已清除自有模型 Key')
+}
 
 function showToast(message: string): void {
   if (!message) return
@@ -527,7 +586,10 @@ onMounted(() => {
   selectedCode.value = readIntent()
   void loadProviders()
   void loadPlans()
-  if (session.account) void loadAccount()
+  if (session.account) {
+    void loadAccount()
+    loadByok()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -881,7 +943,59 @@ onBeforeUnmount(() => {
   transform: translate(-50%, 8px);
 }
 
+.byok {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6);
+}
+
+.byok__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.byok__title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-lg);
+}
+
+.byok__hint {
+  margin: 0;
+  max-width: 640px;
+  line-height: 1.6;
+}
+
+.byok__row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.byok__input {
+  flex: 1 1 320px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-sm);
+}
+
+.byok__status {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
 @media (max-width: 640px) {
+  .byok__head {
+    flex-direction: column;
+  }
+
   .plans__guest,
   .plans__status {
     flex-direction: column;

@@ -1,18 +1,25 @@
-fastapi>=0.115
-python-multipart>=0.0.9
-uvicorn>=0.30
-sqlalchemy>=2.0
-alembic>=1.13
-pydantic>=2.7
-pydantic-settings>=2.3
-pyjwt>=2.8
-cryptography>=42
-redis>=5
-rq>=1.16
-httpx>=0.27
-Pillow>=10
-psycopg[binary]>=3.1
+# 运行依赖：钉主版本上界，避免次要/主版本自动升级引入破坏性变更。
+# 生产精确版本见 requirements.lock.txt；Dockerfile 优先使用 lock 文件。
+fastapi>=0.115,<1
+python-multipart>=0.0.9,<1
+uvicorn>=0.30,<1
+sqlalchemy>=2.0,<3
+alembic>=1.13,<2
+pydantic>=2.7,<3
+pydantic-settings>=2.3,<3
+pyjwt>=2.8,<3
+cryptography>=42,<51
+# Web Push 发送端（VAPID + http-ece 加密）：未启用推送时无需加载，代码内延迟导入
+pywebpush>=2,<3
+redis>=5,<9
+rq>=1.16,<4
+httpx>=0.27,<1
+# 新版 Starlette TestClient 优先使用 httpx2；与 httpx 并存以兼容旧调用
+httpx2>=2.16,<3
+Pillow>=10,<14
+psycopg[binary]>=3.1,<4
 # STORAGE_BACKEND=s3（MinIO/OSS/S3）时需要
-boto3>=1.34
-pytest>=8
-fakeredis>=2.23
+boto3>=1.34,<2
+# 测试依赖（本地 pytest 需要；Docker 生产镜像可不装）
+pytest>=8,<10
+fakeredis>=2.23,<3

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import codecs
 import posixpath
 import re
 import uuid
@@ -24,9 +25,65 @@ from .storage import Storage
 
 UPLOAD_ROOT = "uploads"
 
+# 头部嗅探字节数：足以识别魔数与编码，又不至于把大文件读进内存
+SNIFF_BYTES = 4096
+
+# 文本白名单扩展名出现这些二进制魔数即判为伪装（EXE/ELF/压缩包/PDF/图片/媒体等）
+_BINARY_SIGNATURES = (
+    b"MZ",                  # DOS/PE 可执行文件
+    b"\x7fELF",             # ELF
+    b"PK\x03\x04",          # ZIP / DOCX / JAR / APK
+    b"PK\x05\x06",
+    b"PK\x07\x08",
+    b"%PDF",                # PDF
+    b"\x89PNG\r\n\x1a\n",   # PNG
+    b"\xff\xd8\xff",        # JPEG
+    b"GIF87a", b"GIF89a",   # GIF
+    b"RIFF",                # WAV / WEBP / AVI
+    b"\x1f\x8b",            # GZIP
+    b"BZh",                 # BZIP2
+    b"Rar!\x1a\x07",        # RAR
+    b"7z\xbc\xaf\x27\x1c",  # 7-Zip
+    b"\xca\xfe\xba\xbe",    # Java class / Mach-O fat
+    b"\x00asm",             # WebAssembly
+)
+
 
 class UploadTooLarge(Exception):
     """流式读取时超过大小上限（由 API 层转成 413）。"""
+
+
+class UploadContentRejected(Exception):
+    """内容嗅探判定为伪装/二进制（由 save_upload 转成 422）。"""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def sniff_text_head(head: bytes) -> None:
+    """校验文本上传的头部：禁 NUL、禁二进制魔数、须为合法 UTF-8。
+
+    允许末尾截断的多字节字符（incremental decoder，final=False），避免恰好
+    在 4096 字节边界切断 UTF-8 多字节序列造成误判。
+    """
+    if not head:
+        return
+    if b"\x00" in head:
+        raise UploadContentRejected("source_content_binary", "文件含二进制内容（NUL 字节），拒绝上传")
+    for signature in _BINARY_SIGNATURES:
+        if head.startswith(signature):
+            raise UploadContentRejected(
+                "source_content_binary", "文件头与声明的文本类型不符，拒绝上传"
+            )
+    decoder = codecs.getincrementaldecoder("utf-8")("strict")
+    try:
+        decoder.decode(head, final=False)
+    except UnicodeDecodeError as exc:
+        raise UploadContentRejected(
+            "source_content_encoding", "文件不是有效的 UTF-8 文本，拒绝上传"
+        ) from exc
 
 
 def upload_prefix(account_id: int) -> str:
@@ -106,6 +163,25 @@ class _LimitedReader:
         return chunk
 
 
+class _PrefixedReader:
+    """把已嗅探的头部字节拼回流首，保证 content 与写入一致且不重复读源文件。"""
+
+    def __init__(self, head: bytes, src):
+        self._head = head
+        self._offset = 0
+        self._src = src
+
+    def read(self, size: int = -1):
+        if self._offset < len(self._head):
+            if size is None or size < 0:
+                out = self._head[self._offset :]
+            else:
+                out = self._head[self._offset : self._offset + size]
+            self._offset += len(out)
+            return out
+        return self._src.read(size)
+
+
 def save_upload(
     storage: Storage,
     settings: Settings,
@@ -114,10 +190,22 @@ def save_upload(
     filename: str,
     fileobj,
 ) -> dict:
-    """流式写入对象存储并返回元信息；超限时删除已写半成品并抛 413。"""
+    """流式写入对象存储并返回元信息；超限时删除已写半成品并抛 413。
+
+    写入前先嗅探头部：内容为二进制伪装或非 UTF-8 文本时直接拒绝（422），
+    此时尚未调用 put_stream，无半成品需要清理。
+    """
     safe, suffix = validate_filename(filename, settings)
     key = f"{upload_prefix(account_id)}/{uuid.uuid4().hex}-{safe}"
-    reader = _LimitedReader(fileobj, settings.upload_max_bytes)
+
+    # 预读头部（不超上限），嗅探通过后把头部拼回流首重新消费
+    head = fileobj.read(SNIFF_BYTES)
+    try:
+        sniff_text_head(head)
+    except UploadContentRejected as exc:
+        raise ApiError(422, exc.code, exc.message) from exc
+
+    reader = _LimitedReader(_PrefixedReader(head, fileobj), settings.upload_max_bytes)
     try:
         storage.put_stream(
             key,

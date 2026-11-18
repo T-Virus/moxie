@@ -12,6 +12,10 @@ export type Permission =
   | 'model_config:read' | 'model_config:write'
   | 'offline_package:read' | 'offline_package:write'
   | 'presets:read' | 'presets:write'
+  | 'skills:read'
+  | 'telemetry:read' | 'telemetry:write'
+  | 'backup:read' | 'backup:write'
+  | 'usage:read'
 
 const ADMIN_PERMISSIONS: Permission[] = [
   'users:read', 'users:write',
@@ -25,6 +29,10 @@ const ADMIN_PERMISSIONS: Permission[] = [
   'model_config:read', 'model_config:write',
   'offline_package:read', 'offline_package:write',
   'presets:read', 'presets:write',
+  'skills:read',
+  'telemetry:read', 'telemetry:write',
+  'backup:read', 'backup:write',
+  'usage:read',
 ]
 
 const SUPPORT_PERMISSIONS: Permission[] = [
@@ -37,6 +45,10 @@ const SUPPORT_PERMISSIONS: Permission[] = [
   'alerts:read',
   'audit:read',
   'presets:read',
+  'skills:read',
+  'telemetry:read',
+  'backup:read',
+  'usage:read',
 ]
 
 const ROLE_MAP: Record<Role, Permission[]> = {
@@ -69,6 +81,10 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/offline-packages', label: '离线安装包', permission: 'offline_package:read', group: '运维监控' },
   { path: '/audit', label: '审计日志', permission: 'audit:read', group: '运维监控' },
   { path: '/presets', label: '预设值维护', permission: 'presets:read', group: '运维监控' },
+  { path: '/skills', label: '技能目录', permission: 'skills:read', group: '运维监控' },
+  { path: '/telemetry-config', label: '可观测配置', permission: 'telemetry:read', group: '运维监控' },
+  { path: '/backups', label: '备份管理', permission: 'backup:read', group: '运维监控' },
+  { path: '/model-usage', label: '模型消费统计', permission: 'usage:read', group: '运维监控' },
 ]
 
 export function visibleNav(role: Role | null): NavItem[] {

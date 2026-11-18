@@ -9,11 +9,13 @@
 > 2. **任意单节点可执行**：节点 = 现有 4 个可独立运行的 stage（`decompose / adapt / storymap / expand`）；依赖节点在计划中标为 `input`（从冻结快照读），不连带重跑上游；跑完按传播表标脏下游。
 > 3. **数据一致性**：owner 唯一写权 + 写集越界整组回滚、人工锁定字段保护、输入指纹幂等跳过、冻结快照与 lineage 漂移检测、引用完整性/章号连续规则体检。
 >
-> **实际落盘**：`config/flow.json`（4 节点 + 2 条传播规则）、`src/flow.py`（编排器）、`scripts/flowctl.py`（CLI）、`tests/test_flow.py`（14 条回归断言，全过）、`src/webapp.py`（`POST /api/run` 接入写集准入；新增 `POST /api/flow/plan`、`POST /api/flow/check`；`PUT /api/chapters` 支持 `flow_locks` 上报）。
+> **实际落盘（2026-11-17 事实核查修正）**：上面列出的 `config/flow.json`（4 节点 + 2 条传播规则）、`src/flow.py`（编排器）、`scripts/flowctl.py`（CLI）、`tests/test_flow.py`（14 条回归断言）**四个文件均不存在于仓库**；`POST /api/run` 仍是旧的线性 queue + JOB_LOCK，没有 `POST /api/flow/plan`、`POST /api/flow/check` 与 `flow_locks` 上报。原"已落地 / 断言全过"表述不实，保留此处仅作历史设计记录。
 >
-> **验证**：`python tests/test_flow.py`、`python scripts/flowctl.py validate|plan|check`。
+> **当前真实入口**：桌面工序绑定 `config/studio.json#bindings` + `src/studio.py#BIND_STAGES`（11 个工序），提示词清单 `src/prompts.py#registry()`；云端技能注册 `server/app/agents/registry.py#build_registry()`（13 个技能）+ 图 `server/app/agents/graph.py`（HOT/REFERENCE/CUSTOM 三图）。网文创作 10 环节的唯一事实源见 `config/skills_catalog.json`。
 >
-> **重要更正**：v1.2 声称「配置已落盘、dagctl.py 已可运行、14 条断言全过」，但 `config/dag.json`、`config/skills.json`、`config/trend_schema.json`、`config/dependency_map.json`、`scripts/dagctl.py`、`scripts/build_standalone.py` 在仓库中均不存在。下文所有「已落实」「已可运行」等表述均以本决议为准。保留 `docs/outline_fields.json`（316 字段字典）作为字段命名参考，但不作为 owner 表的运行时依赖。
+> **验证**：`python scripts/check_skills.py`（该脚本会扫描本文档的强声明路径，缺失即告警）。
+>
+> **重要更正**：v1.2 声称「配置已落盘、dagctl.py 已可运行、14 条断言全过」，但 `config/dag.json`、`config/skills.json`、`config/trend_schema.json`、`config/dependency_map.json`、`scripts/dagctl.py`、`scripts/build_standalone.py` 在仓库中均不存在。v1.3 决议声称已落地的 `config/flow.json`、`src/flow.py`、`scripts/flowctl.py`、`tests/test_flow.py` 经 2026-11-17 核查**同样不存在**。下文所有「已落实」「已可运行」等表述仅作历史设计参考，**现状以 `config/skills_catalog.json` 与 `python scripts/check_skills.py` 为准**。保留 `docs/outline_fields.json`（316 字段字典）作为字段命名参考，但不作为 owner 表的运行时依赖。
 
 - 版本：v1.3（工程修正已落地）　日期：2026-11-06
 - 输入：用户给定的流程设想（榜单发现 → 7 个拆解 Agent → 一致性审查 → 最终设计图谱；每个 Agent 细分 Skill；**每个节点与每个 Skill 都要能单独执行**，且单跑后关联数据同步；榜单阶段只从全网公开数据抓、不读原本书、只输出 Top20 排名阅读量）

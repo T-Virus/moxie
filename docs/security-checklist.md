@@ -10,10 +10,17 @@
 - [x] 配置项集中在 `.env.example`：数据库、JWT、License 私钥、微信/支付宝/Stripe、S3、Webhook 容差等均有占位说明。
 - [x] JWT / 支付 / 对象存储密钥一律从环境变量读取，不写死在代码里；默认值仅用于开发并带 `change-me` 提示（`server/app/config.py`）。
 - [x] BYOK 密钥只允许通过 `X-BYOK-Key` 请求头传入；任务参数中出现 `secret` 字段直接 422 拒绝（`server/app/runners/decompose.py`）。
+- [x] 在线端 BYOK Key 仅存 `sessionStorage`（`mx_byok_key`），只在 `withByok` 请求注入请求头；不写 `localStorage`、不入 Vue store、不随业务参数落库（`client/src/services/byok.ts`）。
 - [x] 支付回调日志与订单 payload 字段做脱敏（`key/secret/token/sign/password/cert/authorization` → `[redacted]`，`server/app/services/orders.py`）。
 - [x] 桌面端云端 token 使用系统 DPAPI（Windows）/ AES-GCM（非 Windows）加密存储，不写明文配置（`src/cloud.py`）。
-- [ ] 生产必须替换的默认值：`JWT_SECRET`、`MOCK_PAYMENT_SECRET`、`S3_SECRET_KEY`、`LICENSE_PRIVATE_KEY_PEM`。建议在启动时对 `ENV=production` 做强制校验（当前仅告警）。
-- [ ] `server/requirements.txt` 为版本区间而非哈希锁定；建议增加 `pip-compile --generate-hashes` 的锁文件供生产镜像使用。
+- [x] 生产启动 fail-fast：默认占位符/弱口令由 `app/main.py` 的 `Settings.is_production` 闸门拦截，
+      `mock`/`fake` 渠道生产禁注册（`payments/__init__.py`），License 私钥、载荷签名密钥生产必填。
+- [x] **已处理（2026-11-17）**：`server/requirements.txt` 每个依赖钉主版本上界（如 `>=2.0,<3`），
+      新增 `server/requirements.lock.txt` 精确版本锁文件，Dockerfile 优先用 lock 构建。
+      CI 增加 `migration-check`（`alembic upgrade head` + `alembic check`，零漂移）与
+      `dependency-audit`（`pip-audit --strict` + 三端 `npm audit --omit=dev --audit-level=high`）。
+      2026-11-18 已用 CPython 3.12.16 重新冻结 `requirements.lock.txt`，与生产镜像 `python:3.12-slim` 对齐，
+      `pip check` 无冲突，并用 3.12 环境跑通安全/初始化定向测试。
 
 ## 2. 日志脱敏
 
@@ -69,7 +76,13 @@
 ## 8. 传输与 Web 安全头
 
 - [x] 生产部署文档要求 HTTPS 反向代理；支付回调使用公网 HTTPS 地址。
-- [ ] 本地 `webapp.py` 未统一设置 `Content-Security-Policy` / `X-Content-Type-Options` / `X-Frame-Options`；建议在服务端响应头或反向代理层补齐。
+- [x] **已处理（2026-11-17）**：在线版统一安全头。FastAPI 中间件对普通 API 下发严格 CSP
+      （`default-src 'self'` / `script-src 'self'` / `object-src 'none'`），对 `/docs`、`/redoc`、
+      `/openapi.json` 用宽松策略以兼容 Swagger 内联脚本（见 `app/main.py` + `tests/test_security.py`）；
+      nginx 两份配置（HTTP/HTTPS）用 `map $uri` 对前端 HTML/静态资源下发严格 CSP、对 API 路径留空交
+      由后端决定，并补齐 X-Content-Type-Options / X-Frame-Options / Referrer-Policy / Permissions-Policy /
+      HSTS（含静态资源 location，规避 add_header 不继承陷阱）。
+- [ ] 本地 `webapp.py`（离线桌面端）仍未统一设置 CSP 等安全头；本地回环、非在线版，优先级低。
 - [ ] 未做 CSRF 风险评估（当前桌面端本地 API 无跨站调用面，云端为 Bearer Token）；建议在网关层限制来源。
 
 ## 9. 备份与可恢复性
@@ -81,9 +94,30 @@
 
 ## 10. 待办汇总（按优先级）
 
-1. ~~**高**：移除/加密 Android 侧明文提示词 seed 资源；确认发布包不含 `user_prompt_settings.txt`。~~ **已处理（2026-11-04）**：明文 seed 与根目录文件已删除，APK 重建验证不含该资源。
+1. ~~**高**：移除/加密 Android 侧明文提示词 seed 资源~~ **已处理（2026-11-04）**。
 2. **高**：提供真实支付沙箱凭据，跑通 `pytest -m live` 并留存回调验签记录。
-3. **中**：生产环境强制替换默认密钥（启动时校验）。
-4. **中**：补齐 Web 安全响应头（CSP / nosniff / frame-options）。
-5. **中**：依赖审计接入 CI 定时任务，启用 Dependabot。
-6. **低**：越权矩阵自动化、日志轮转与保留策略、备份强加密。
+3. ~~**中**：生产环境强制替换默认密钥（启动时校验）~~ **已处理**（`is_production` 闸门）。
+4. ~~**中**：补齐 Web 安全响应头（CSP / nosniff / frame-options）~~ **已处理（2026-11-17）**，见 §8。
+5. ~~**中**：依赖审计接入 CI~~ **已处理（2026-11-17）**：CI 含 pip-audit/npm audit + 迁移漂移检查。
+   **仍待**：启用 Dependabot/Renovate 定时自动升级。
+6. ~~**中**：refresh 会话归属校验、审计/回调 IP 口径统一~~ **已处理（2026-11-17）**：
+   `auth.py` refresh 校验 `RefreshSession.account_id` 与 token `sub` 一致（防弱/泄露密钥下横向换发，
+   见 `tests/test_auth.py`）；`services/audit.py` 与 `api/billing.py` 统一走 `deps.client_ip()`，
+   反代下审计 IP 与支付回调白名单不再失效。
+7. **中**：合规闸门目前仍是客户端自声明 `X-Rights-Confirmed`，缺服务端内容安全/授权留痕闭环；
+   上传缺内容嗅探与病毒扫描。
+8. **中**：容器资源限额已加到 `docker-compose.yml`（CPU/内存/pids），仍需实机 Docker 验证。
+9. **低**：越权矩阵自动化、日志轮转与保留策略、备份强加密、前端监控/埋点、i18n/SEO/PWA。
+
+## 11. 本轮变更记录（2026-11-17）
+
+- **CI 重建**：新增 `.github/workflows/ci.yml`，5 个 job（server-tests / migration-check / web-apps / dependency-audit / e2e-desktop）。
+- **迁移漂移修复**：新增 `alembic/versions/m2e3f4a5b6c7_...py`，把 `model_provider_configs.step_key`
+  的唯一约束形态对齐 ORM 模型；SQLite 用 batch 模式，`alembic check` 现在零漂移。
+- **前端质量防线**：client/admin 引入 Vitest + ESLint（flat config），补单测（http 4 / roles 4）；
+  client 新增路由守卫与 404 页、路由懒加载（首屏 chunk 365KB→165KB）、请求默认 60s 超时
+  （上传关闭）；admin 开启 TS strict（typecheck 仍通过）。
+- **安全头 / IP / 会话**：严格 CSP、refresh 归属校验、审计/回调 IP 口径统一（见上）。
+- **依赖治理**：requirements 主版本上界 + lock 文件 + Dockerfile 优先用 lock。
+- **回归**：后端全量 247 passed / 3 skip；两端 typecheck、lint（0 error）、test、build 全通过；
+  `alembic check` 零漂移；生产依赖 npm audit 0 漏洞。

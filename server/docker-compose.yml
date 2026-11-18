@@ -4,6 +4,12 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+          pids: 200
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-moxie}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
@@ -19,6 +25,12 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+          pids: 100
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redisdata:/data
@@ -31,6 +43,12 @@ services:
   minio:
     image: minio/minio:latest
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+          pids: 200
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -61,6 +79,12 @@ services:
   api:
     build: .
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+          pids: 500
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-moxie}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-moxie}
@@ -108,6 +132,11 @@ services:
     # start.sh / start_online.bat 也会用 --scale worker=N 覆盖这里的值。
     deploy:
       replicas: ${WORKER_REPLICAS:-4}
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
+          pids: 300
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-moxie}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-moxie}
@@ -138,6 +167,12 @@ services:
   scheduler:
     build: .
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1g
+          pids: 200
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-moxie}:${POSTGRES_PASSWORD:-change-me-in-production}@postgres:5432/${POSTGRES_DB:-moxie}

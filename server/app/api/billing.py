@@ -11,15 +11,26 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db, utcnow
-from ..deps import AuthContext, get_auth, require_admin, require_staff
+from ..deps import AuthContext, client_ip, get_auth, require_admin, require_staff
 from ..errors import ApiError
 from ..metrics import increment
 from ..models import Order, Plan, Subscription, UsageEvent
 from ..schemas import (
     CancelSubscriptionRequest,
+    CreateSubscriptionResponse,
+    CurrentSubscriptionResponse,
+    GetOrderResponse,
+    OrderListResponse,
+    PaymentProvidersResponse,
+    PlansResponse,
+    QuotaSummaryResponse,
+    UsageListResponse,
     RenewRequest,
+    RenewSubscriptionResponse,
     SubscribeRequest,
+    SubscriptionActionResponse,
     UpgradeRequest,
+    UpgradeSubscriptionResponse,
 )
 from ..services import orders as ordersvc
 from ..services import payment_flow
@@ -88,7 +99,7 @@ def _order_view(order: Order) -> dict:
     }
 
 
-@router.get("/plans")
+@router.get("/plans", response_model=PlansResponse)
 def list_plans(db: Session = Depends(get_db)):
     plans = db.scalars(
         select(Plan)
@@ -98,7 +109,7 @@ def list_plans(db: Session = Depends(get_db)):
     return {"plans": [_plan_view(db, plan) for plan in plans]}
 
 
-@router.get("/payments/providers")
+@router.get("/payments/providers", response_model=PaymentProvidersResponse)
 def list_payment_providers(request: Request):
     """当前可下单的支付渠道；mock/fake 仅在测试环境且显式开启时出现。"""
     from ..payments import available_providers
@@ -106,7 +117,7 @@ def list_payment_providers(request: Request):
     return {"items": available_providers(request.app.state.settings)}
 
 
-@router.post("/subscriptions", status_code=201)
+@router.post("/subscriptions", status_code=201, response_model=CreateSubscriptionResponse)
 def create_subscription(
     payload: SubscribeRequest,
     request: Request,
@@ -145,7 +156,7 @@ def create_subscription(
     }
 
 
-@router.get("/subscriptions/current")
+@router.get("/subscriptions/current", response_model=CurrentSubscriptionResponse)
 def current_subscription(
     auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
 ):
@@ -157,7 +168,7 @@ def current_subscription(
     return view
 
 
-@router.post("/subscriptions/{subscription_id}/cancel")
+@router.post("/subscriptions/{subscription_id}/cancel", response_model=SubscriptionActionResponse)
 def cancel(
     subscription_id: int,
     payload: CancelSubscriptionRequest,
@@ -180,7 +191,7 @@ def cancel(
     return {"subscription": _subscription_view(db, sub)}
 
 
-@router.post("/subscriptions/{subscription_id}/resume")
+@router.post("/subscriptions/{subscription_id}/resume", response_model=SubscriptionActionResponse)
 def resume(
     subscription_id: int,
     request: Request,
@@ -201,7 +212,7 @@ def resume(
     return {"subscription": _subscription_view(db, sub)}
 
 
-@router.post("/subscriptions/{subscription_id}/renew")
+@router.post("/subscriptions/{subscription_id}/renew", response_model=RenewSubscriptionResponse)
 def renew(
     subscription_id: int,
     payload: RenewRequest,
@@ -240,7 +251,7 @@ def renew(
     }
 
 
-@router.post("/subscriptions/{subscription_id}/upgrade")
+@router.post("/subscriptions/{subscription_id}/upgrade", response_model=UpgradeSubscriptionResponse)
 def upgrade(
     subscription_id: int,
     payload: UpgradeRequest,
@@ -293,7 +304,7 @@ def upgrade(
     return {"order": _order_view(order), "payment": payment, "subscription": _subscription_view(db, sub)}
 
 
-@router.get("/orders/{order_id}")
+@router.get("/orders/{order_id}", response_model=GetOrderResponse)
 def get_order(
     order_id: int,
     auth: AuthContext = Depends(get_auth),
@@ -307,7 +318,7 @@ def get_order(
     return {"order": _order_view(order)}
 
 
-@router.get("/orders")
+@router.get("/orders", response_model=OrderListResponse)
 def list_orders(
     limit: int = Query(default=50, ge=1, le=200),
     auth: AuthContext = Depends(get_auth),
@@ -319,12 +330,12 @@ def list_orders(
     return {"orders": [_order_view(o) for o in rows]}
 
 
-@router.get("/entitlements")
+@router.get("/entitlements", response_model=QuotaSummaryResponse)
 def entitlements(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
     return QuotaService(db).summary(auth.account.id)
 
 
-@router.get("/usage")
+@router.get("/usage", response_model=UsageListResponse)
 def usage(
     limit: int = Query(default=50, ge=1, le=200),
     before_id: int | None = Query(default=None, ge=1),
@@ -352,7 +363,7 @@ def usage(
     }
 
 
-@router.get("/usage/summary")
+@router.get("/usage/summary", response_model=QuotaSummaryResponse)
 def usage_summary(auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)):
     return QuotaService(db).summary(auth.account.id)
 
@@ -368,8 +379,9 @@ async def webhook(provider: str, request: Request, db: Session = Depends(get_db)
     raw_body = await request.body()
     headers = {key.lower(): value for key, value in request.headers.items()}
     allowlist = [ip.strip() for ip in settings.payment_webhook_ip_allowlist.split(",") if ip.strip()]
-    client_ip = request.client.host if request.client else ""
-    if allowlist and client_ip not in allowlist:
+    # 与限流/审计同口径：trust_proxy 开启时按 XFF 取真实来源，避免反代后白名单把全部回调拒绝。
+    source_ip = client_ip(request) or ""
+    if allowlist and source_ip not in allowlist:
         write_audit(
             db,
             actor_id=None,

@@ -422,6 +422,7 @@ def _record_usage(session: Session, task: Task, result, tag: str, settings: Sett
                     occurred_at=utcnow(),
                     meta={
                         "model": result.model,
+                        "provider": getattr(result, "provider", ""),
                         "prompt_tokens": result.prompt_tokens,
                         "completion_tokens": result.completion_tokens,
                         "total_tokens": result.total_tokens,

@@ -3,6 +3,7 @@
 
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVER_DIR = Path(__file__).resolve().parent.parent
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     @property
@@ -38,13 +40,30 @@ class Settings(BaseSettings):
     # 仅在确有可信反向代理（且代理会重写/丢弃客户端原始 XFF）时显式设为 True。
     trust_proxy: bool = False
 
+    # 请求体上限：全局中间件与载荷解密中间件共用同一口径，避免加密层先读完整 body
+    # 导致 chunked 绕过。兼容旧环境变量 MOXIE_MAX_BODY_BYTES。
+    max_request_body_bytes: int = Field(
+        default=4 * 1024 * 1024,
+        validation_alias=AliasChoices("MAX_REQUEST_BODY_BYTES", "MOXIE_MAX_BODY_BYTES"),
+    )
+
+    # 启动时按邮箱白名单幂等提升管理员；仅在账号已存在时生效，避免自动创建弱口令账号。
+    bootstrap_admin_emails: str = ""
+
+    # 用户数据权利：注销申请宽限期（天）；到期由 scheduler 统一清除账号与对象。
+    account_deletion_grace_days: int = 7
+    # 数据导出上限：单个对象内联上限与最多内联对象数，超出只给元数据/下载链接。
+    account_export_object_max_bytes: int = 2 * 1024 * 1024
+    account_export_max_objects: int = 200
+
     # 管理端跨域白名单（逗号分隔）；不允许 "*"，credentials 仅在明确来源时开启
     cors_allow_origins: str = "http://127.0.0.1:5180,http://localhost:5180"
     cors_allow_methods: str = "GET,POST,PATCH,DELETE,OPTIONS"
     cors_allow_headers: str = (
         "Authorization,Content-Type,Idempotency-Key,X-Request-Id,"
         "X-Rights-Confirmed,X-BYOK-Key,"
-        "X-Payload-Key,X-Payload-Client,X-Payload-Nonce,X-Payload-Encrypted"
+        "X-Payload-Key,X-Payload-Client,X-Payload-Nonce,X-Payload-Encrypted,"
+        "X-Trace-Id,Traceparent"
     )
     cors_max_age_seconds: int = 600
 
@@ -142,22 +161,45 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False
     scheduler_interval_seconds: int = 60
     task_lease_seconds: int = 1800
+    # 任务执行失败后的最大尝试次数（含首次）。达到上限才落 failed 死信；
+    # 每次失败重试保留预占与已完成步骤，回到 queued 由 worker 重投（不重复扣额度）。
+    task_max_attempts: int = 3
+    # 失败重试指数退避：delay = min(base * 2^(attempts-1), cap) 秒。
+    # 避免瞬时失败后秒级密集重投冲击抖动中的上游；到点后由 scheduler 统一重新入队。
+    task_retry_backoff_seconds: int = 5
+    task_retry_backoff_max_seconds: int = 300
     # 孤儿任务自愈阈值：queued 超过该时长无人领取 / running 超过该时长无心跳，
     # scheduler 重新入队（执行入口有原子认领，重复投递无副作用）
     stuck_queued_seconds: int = 600
     stuck_running_seconds: int = 7200
+    # 数据库备份：默认不开启定时任务，备份目录留空则用 server/backups。
+    backup_enabled: bool = True
+    backup_schedule_enabled: bool = False
+    backup_interval_minutes: int = 720
+    backup_dir: str = ""
+    backup_retention_count: int = 14
+    backup_notify_emails: str = ""
+    backup_email_enabled: bool = True
     metrics_enabled: bool = True
     # /metrics 访问令牌：配置后需带 X-Metrics-Token 头（或 ?token=）；
     # 生产环境未配置时 /metrics 直接拒绝，避免队列/业务指标公开暴露。
     metrics_token: str = ""
     sentry_dsn: str = ""
     register_rate_limit_per_minute: int = 10
+    # 前端错误上报转发 Sentry 的采样率（0..1）：1=全量，0=关闭，0.x=按指纹稳定抽样。
+    # 去重窗口（秒）：同一指纹在窗口内只转发一次，避免错误风暴打爆 Sentry 配额。
+    client_error_sentry_sample_rate: float = 1.0
+    client_error_sentry_dedupe_window_seconds: int = 60
+    # Redis 去重 zset 容量上限（滑动窗口内单指纹最多保留的时间戳数）
+    client_error_sentry_dedupe_max_entries: int = 64
     login_rate_limit_per_minute: int = 20
     # 全局限流兜底：每 IP 每分钟请求数上限，防止刷接口耗尽资源（DoS）
     rate_limit_enabled: bool = True
     global_rate_limit_per_minute: int = 600
     # 认证类接口（注册/登录/刷新/验证等）单独用更严格的阈值
     auth_rate_limit_per_minute: int = 60
+    # 前端错误上报独立限流（防止错误风暴挤占业务配额 / 被用作日志洪泛）
+    client_error_rate_limit_per_minute: int = 30
     # 登录失败锁定：窗口内连续失败达到上限后拒绝，防止密码暴力破解
     login_failure_limit: int = 5
     login_failure_window_seconds: int = 900
@@ -177,6 +219,8 @@ class Settings(BaseSettings):
     notification_email_transport: str = "smtp"  # smtp|fake（fake 仅写发送记录，不连外网）
     notification_max_attempts: int = 3
     notification_retry_backoff_seconds: int = 300
+    # 推送服务 429 Retry-After 建议退避的上限（秒），防止畸形 header 长时间卡死投递
+    notification_push_retry_after_cap_seconds: int = 3600
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
@@ -189,7 +233,14 @@ class Settings(BaseSettings):
     sms_api_url: str = ""
     sms_api_key: str = ""
     sms_sender: str = ""
+    # Web Push：私钥/subject 缺失时 no-op（只记 skipped），与 smtp/sms 同风格。
+    notification_push_enabled: bool = False
+    vapid_private_key: str = ""  # base64url 的未压缩 EC P-256 私钥
+    vapid_public_key: str = ""   # 与前端 VITE_VAPID_PUBLIC_KEY 成对，仅用于自检
+    vapid_subject: str = ""      # pywebpush 要求形如 "mailto:admin@example.com"
 
+    # 统一技能目录：指向 config/skills_catalog.json；留空则按部署布局自动探测。
+    skills_catalog_path: str = ""
     # 公开榜单抓取（热门写作调研）：只抓元数据，不抓正文；失败自动跳过
     ranking_enabled: bool = True
     ranking_sources: str = "qidian,fanqie,zongheng,jinjiang"
@@ -279,6 +330,12 @@ class Settings(BaseSettings):
     # 单本源文件字符上限 / 段数上限；超出显式失败，禁止静默截断
     agent_max_source_chars: int = 600000
     agent_max_segments: int = 100
+
+    # 云端正文分段调度：单 run 默认写黄金三章；全本可通过 options.body_chapters
+    # 调大窗口、options.body_start 指定起始章，多段串行完成。max 为硬上限，
+    # 防止一次 run 超额占用 adapt_chapters / managed_chars。
+    agent_cloud_body_chapters: int = 3
+    agent_cloud_body_max_chapters: int = 2000
 
     # 产物存储：db（默认，全部落库）/ local（磁盘 fallback）/ s3（MinIO / OSS / S3）
     storage_backend: str = "db"

@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""通知通道：站内信 + 邮件（SMTP）+ 可选短信适配位。
+"""通知通道：站内信 + 邮件（SMTP）+ 可选短信 + Web Push。
 
 设计要点：
   · 幂等：notification (account_id, dedupe_key) 唯一；delivery (channel, dedupe_key) 唯一；
-  · 可开关：NOTIFICATIONS_ENABLED / NOTIFICATION_EMAIL_ENABLED / NOTIFICATION_SMS_ENABLED；
+  · 可开关：NOTIFICATIONS_ENABLED / NOTIFICATION_EMAIL_ENABLED / NOTIFICATION_SMS_ENABLED
+    / NOTIFICATION_PUSH_ENABLED；
   · 无凭据时 no-op：短信只写 skipped；邮件未配置 SMTP 也写 skipped，不抛错；
+    Push 未配置 VAPID 私钥或账号无有效订阅也只写 skipped；
   · 失败重试：failed + attempts < max_attempts 的记录由 scheduler 按退避重投；
   · 敏感信息不入库：正文只包含额度/金额/订单号，不含密钥或凭据。
 """
@@ -22,9 +24,27 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..db import utcnow
-from ..models import Account, Notification, NotificationDelivery
+from ..errors import ApiError
+from ..models import Account, Notification, NotificationDelivery, WebPushSubscription
+from . import webpush
 
 logger = logging.getLogger("moxie.notifications")
+
+# 通知点击跳转：按类别落到同源相对路径（SW 会做同源校验），都不含敏感参数。
+_PUSH_URL_BY_CATEGORY = {
+    "payment_succeeded": "/plans",
+    "payment_failed": "/plans",
+    "subscription_renewal_reminder": "/plans",
+    "subscription_expired": "/plans",
+    "credit_pack_expiring": "/plans",
+    "quota_insufficient": "/plans",
+    "usage_anomaly": "/runs",
+    "admin_message": "/",
+}
+
+
+def _push_url(category: str) -> str:
+    return _PUSH_URL_BY_CATEGORY.get(category, "/")
 
 # 模板：{key} 占位符；标题与正文都走这里，便于统一改文案
 TEMPLATES: dict[str, dict[str, str]] = {
@@ -89,7 +109,12 @@ class _SafeDict(dict):
 
 
 def _deliver(
-    delivery: NotificationDelivery, settings: Settings | None, now: datetime, *, forced: bool = False
+    delivery: NotificationDelivery,
+    settings: Settings | None,
+    now: datetime,
+    *,
+    session: Session | None = None,
+    forced: bool = False,
 ) -> None:
     """执行一次发送；结果写回 delivery。异常不外抛。
 
@@ -157,6 +182,118 @@ def _deliver(
         delivery.provider_message_id = f"sms-{delivery.id}"
         return
 
+    if delivery.channel == "push":
+        if not settings.notification_push_enabled:
+            delivery.status = "skipped"
+            delivery.meta = {**(delivery.meta or {}), "reason": "push_disabled"}
+            return
+        if not webpush.push_configured(settings):
+            delivery.status = "skipped"
+            delivery.meta = {**(delivery.meta or {}), "reason": "vapid_not_configured"}
+            return
+        if session is None:
+            delivery.status = "skipped"
+            delivery.meta = {**(delivery.meta or {}), "reason": "session_unavailable"}
+            return
+        subscriptions = list(
+            session.scalars(
+                select(WebPushSubscription).where(
+                    WebPushSubscription.account_id == delivery.account_id,
+                    WebPushSubscription.status == "active",
+                )
+            ).all()
+        )
+        if not subscriptions:
+            delivery.status = "skipped"
+            delivery.meta = {**(delivery.meta or {}), "reason": "no_active_subscription"}
+            return
+        payload = {
+            "title": delivery.subject,
+            "body": delivery.body,
+            "tag": delivery.category,
+            "url": _push_url(delivery.category),
+        }
+        sent = 0
+        expired_ids: list[int] = []
+        receipts: list[dict[str, Any]] = []
+        last_error: str | None = None
+        retry_after_seconds: int | None = None
+        cap = settings.notification_push_retry_after_cap_seconds if settings else 3600
+        for sub in subscriptions:
+            try:
+                provider_id = webpush.send_web_push(
+                    endpoint=sub.endpoint,
+                    p256dh=sub.p256dh,
+                    auth=sub.auth,
+                    payload=payload,
+                    settings=settings,
+                )
+                sent += 1
+                if not delivery.provider_message_id:
+                    delivery.provider_message_id = provider_id
+                receipts.append({"sub_id": sub.id, "status": "sent"})
+            except Exception as exc:  # noqa: BLE001 - 单条订阅失败不阻断其他设备
+                status_code = webpush.error_status_code(exc)
+                expired = webpush.is_expired_subscription_error(exc)
+                error = f"{type(exc).__name__}: {str(exc)[:200]}"
+                last_error = error
+                receipt: dict[str, Any] = {
+                    "sub_id": sub.id,
+                    "status": "expired" if expired else "failed",
+                    "error": error[:120],
+                }
+                if status_code is not None:
+                    receipt["http_status"] = status_code
+                # 429 Retry-After：解析服务端建议退避并写回回执（供前端可视化 + 退避消费）
+                if status_code == 429:
+                    hint = webpush.error_retry_after_seconds(exc, cap_seconds=cap)
+                    if hint is not None:
+                        receipt["retry_after_seconds"] = hint
+                        # 多订阅取最大建议值，避免过早重投仍被限流
+                        retry_after_seconds = (
+                            hint if retry_after_seconds is None else max(retry_after_seconds, hint)
+                        )
+                receipts.append(receipt)
+                logger.warning(
+                    "Web Push 发送失败 delivery=%s sub=%s http_status=%s expired=%s error=%s",
+                    delivery.id,
+                    sub.id,
+                    status_code,
+                    expired,
+                    type(exc).__name__,
+                )
+                # 仅 404/410 自动下线订阅并记录回执；5xx/网络错误保留订阅等待重试
+                if expired:
+                    sub.status = "expired"
+                    sub.updated_at = now
+                    expired_ids.append(sub.id)
+        delivery.meta = {
+            **(delivery.meta or {}),
+            "subscribers": len(subscriptions),
+            "delivered": sent,
+            "expired": expired_ids,
+            "receipts": receipts,
+            "retry_after_seconds": retry_after_seconds,  # 仅 429 时有值，供退避与可视化
+        }
+        all_expired = len(expired_ids) == len(subscriptions)
+        if sent == len(subscriptions):
+            delivery.status = "sent"
+            delivery.sent_at = now
+        elif sent > 0:
+            # 部分设备成功：不重复整条重投（会给成功设备发第二遍），记为已送达并记录部分失败
+            delivery.status = "sent"
+            delivery.sent_at = now
+            delivery.last_error = last_error
+        elif all_expired:
+            # 全部端点已失效：下线后重投也只会 skipped，直接标记 skipped 避免无效重试
+            delivery.status = "skipped"
+            delivery.meta["reason"] = "all_subscriptions_expired"
+            delivery.last_error = last_error
+        else:
+            delivery.status = "failed"
+            delivery.last_error = last_error or "push_send_failed"
+        return
+
 
 def emit(
     session: Session,
@@ -199,7 +336,11 @@ def emit(
     session.flush()
 
     if channels is None:
-        channels = ("inapp", "email" if account and account.email else None)
+        channels = (
+            "inapp",
+            "email" if account and account.email else None,
+            "push" if webpush.push_configured(settings) else None,
+        )
         channels = tuple(c for c in channels if c)
     else:
         channels = tuple(c for c in channels if c)
@@ -226,14 +367,25 @@ def emit(
         )
         session.add(delivery)
         session.flush()
-        _deliver(delivery, settings, now)
+        _deliver(delivery, settings, now, session=session)
         if delivery.status == "failed" and settings:
             delivery.attempts = 1
-            delivery.next_retry_at = now + timedelta(
-                seconds=settings.notification_retry_backoff_seconds
-            )
+            delay = _retry_delay(delivery, settings, settings.notification_retry_backoff_seconds)
+            delivery.next_retry_at = now + timedelta(seconds=delay)
     session.flush()
     return notification
+
+
+def _retry_delay(delivery: NotificationDelivery, settings: Settings, fallback: int) -> int:
+    """退避秒数：推送服务 429 Retry-After 优先，否则用固定/线性兜底。
+
+    meta 里 hint 由本次 _deliver 写入（仅 429 有值），消费后无需清除——下次重投
+    会整体覆盖 receipts/meta，不会残留旧值影响下一次判定。
+    """
+    hint = (delivery.meta or {}).get("retry_after_seconds")
+    if isinstance(hint, int) and not isinstance(hint, bool) and hint > 0:
+        return hint
+    return max(0, fallback)
 
 
 def retry_deliveries(session: Session, settings: Settings, now: datetime | None = None) -> int:
@@ -249,11 +401,14 @@ def retry_deliveries(session: Session, settings: Settings, now: datetime | None 
     ).all()
     for delivery in rows:
         delivery.attempts += 1
-        _deliver(delivery, settings, now)
+        _deliver(delivery, settings, now, session=session)
         if delivery.status == "failed":
-            delivery.next_retry_at = now + timedelta(
-                seconds=settings.notification_retry_backoff_seconds * delivery.attempts
+            delay = _retry_delay(
+                delivery,
+                settings,
+                settings.notification_retry_backoff_seconds * delivery.attempts,
             )
+            delivery.next_retry_at = now + timedelta(seconds=delay)
         else:
             delivery.next_retry_at = None
     if rows:
@@ -284,6 +439,75 @@ def mark_all_read(session: Session, account_id: int, now: datetime | None = None
     if rows:
         session.flush()
     return len(rows)
+
+
+def upsert_subscription(
+    session: Session,
+    *,
+    account_id: int,
+    endpoint: str,
+    p256dh: str,
+    auth: str,
+    device_label: str | None = None,
+    now: datetime | None = None,
+) -> WebPushSubscription:
+    """订阅/更新：endpoint 全局唯一；同账号重复上报复活订阅，跨账号禁止抢占。"""
+    now = now or utcnow()
+    row = session.scalar(
+        select(WebPushSubscription).where(WebPushSubscription.endpoint == endpoint)
+    )
+    if row is None:
+        row = WebPushSubscription(
+            account_id=account_id,
+            endpoint=endpoint,
+            p256dh=p256dh,
+            auth=auth,
+            device_label=device_label,
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(row)
+    else:
+        # endpoint 相当于推送凭据：持有者不得把他人订阅静默改绑到自己的账号，
+        # 否则可劫持他人通知。换账号需在浏览器重新订阅生成新 endpoint。
+        if row.account_id != account_id:
+            raise ApiError(409, "subscription_owned_by_other", "该推送订阅已属于其他账号")
+        row.p256dh = p256dh
+        row.auth = auth
+        row.device_label = device_label
+        row.status = "active"
+        row.updated_at = now
+    session.flush()
+    return row
+
+
+def delete_subscription(session: Session, *, account_id: int, endpoint: str) -> bool:
+    """退订：只软删除本账号的订阅，避免误删其他账号在共享设备上的订阅。"""
+    row = session.scalar(
+        select(WebPushSubscription).where(
+            WebPushSubscription.endpoint == endpoint,
+            WebPushSubscription.account_id == account_id,
+        )
+    )
+    if row is None:
+        return False
+    row.status = "unsubscribed"
+    row.updated_at = utcnow()
+    session.flush()
+    return True
+
+
+def list_subscriptions(session: Session, account_id: int) -> list[WebPushSubscription]:
+    rows = session.scalars(
+        select(WebPushSubscription)
+        .where(
+            WebPushSubscription.account_id == account_id,
+            WebPushSubscription.status == "active",
+        )
+        .order_by(WebPushSubscription.id)
+    ).all()
+    return list(rows)
 
 
 def send_verification_email(

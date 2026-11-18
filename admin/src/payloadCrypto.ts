@@ -158,3 +158,22 @@ export async function decryptJson(
   )
   return new TextDecoder('utf-8').decode(plain)
 }
+
+/** SSE 帧解密：nonce 前置，AAD 为 `GET\nPATH?QUERY\nKEY_ID\nstream`。 */
+export async function decryptSse(
+  session: PayloadSession,
+  pathWithQuery: string,
+  payload: string,
+): Promise<string> {
+  const raw = b64urlDecode(payload)
+  if (raw.length <= NONCE_LEN) throw new Error('加密事件格式不完整')
+  const nonce = raw.slice(0, NONCE_LEN)
+  const ciphertext = raw.slice(NONCE_LEN)
+  const aad = encoder.encode(`GET\n${pathWithQuery}\n${session.keyId}\nstream`)
+  const plain = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: nonce, additionalData: aad },
+    session.key,
+    ciphertext,
+  )
+  return new TextDecoder('utf-8').decode(plain)
+}

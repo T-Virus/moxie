@@ -16,6 +16,7 @@ _COUNTERS: dict[tuple[str, tuple[tuple[str, str], ...]], float] = defaultdict(fl
 HELP = {
     "moxie_tasks_total": "任务最终状态计数（succeeded/failed/canceled）",
     "moxie_tasks_requeued_total": "租约超时后重新入队的任务数",
+    "moxie_task_retries_total": "任务执行失败后回到队列重试的次数",
     "moxie_model_calls_total": "模型调用次数（route=managed/byok/stub）",
     "moxie_model_cost_cents_total": "模型调用累计成本（分）",
     "moxie_model_tokens_total": "模型调用累计 token（含估算）",
@@ -24,6 +25,7 @@ HELP = {
     "moxie_quota_rejections_total": "额度拒绝次数（metric）",
     "moxie_usage_alerts_total": "异常用量告警次数",
     "moxie_rate_limited_total": "被限流的请求次数（scope）",
+    "moxie_client_error_reports_total": "前端错误上报计数（result/source）",
     "moxie_agent_runs_started_total": "Agent 运行启动次数（mode）",
     "moxie_agent_runs_total": "Agent 运行最终状态计数（status/mode）",
     "moxie_agent_run_duration_seconds_total": "Agent 运行累计耗时（秒，mode）",
@@ -47,10 +49,20 @@ def _fmt(value: float) -> str:
     return f"{value:.6f}"
 
 
+def _escape_label(value: str) -> str:
+    """Prometheus 文本格式：标签值中的反斜杠、引号、换行必须转义。"""
+    return (
+        value.replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace('"', '\\"')
+    )
+
+
 def _label_text(labels: tuple[tuple[str, str], ...]) -> str:
     if not labels:
         return ""
-    body = ",".join(f'{k}="{v}"' for k, v in labels)
+    body = ",".join(f'{k}="{_escape_label(v)}"' for k, v in labels)
     return "{" + body + "}"
 
 

@@ -8,6 +8,7 @@ import json
 from pydantic import Field
 
 from ..contracts import SkillContext, StrictModel, call_json, list_of_dicts, text_of
+from ..entity_ids import entity_id as _entity_id
 from .base import BaseSkill
 
 
@@ -51,6 +52,17 @@ PROMPT = """【技能 character_graph】
 """
 
 
+def _with_ids(rows: list[dict], kind: str) -> list[dict]:
+    """为实体补稳定 ID（保留模型/调用方已给的 id），供跨端 claim 台账对齐。"""
+    out: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        name = text_of(item.get("name"))
+        item["id"] = item.get("id") or _entity_id(kind, name)
+        out.append(item)
+    return out
+
+
 def _fallback(payload: CharacterGraphInput) -> CharacterGraphOutput:
     characters = [dict(c) for c in payload.characters if isinstance(c, dict)]
     factions = [dict(f) for f in payload.factions if isinstance(f, dict)]
@@ -86,8 +98,8 @@ def _fallback(payload: CharacterGraphInput) -> CharacterGraphOutput:
         )
     return CharacterGraphOutput(
         story_bible=dict(payload.story_bible or {}),
-        characters=characters,
-        factions=factions,
+        characters=_with_ids(characters, "char"),
+        factions=_with_ids(factions, "faction"),
         relations=relations[:40],
     )
 
@@ -129,7 +141,7 @@ class CharacterGraphSkill(BaseSkill):
         ctx.log(f"图谱完成：角色 {len(characters)}，势力 {len(factions)}，关系 {len(relations)}")
         return CharacterGraphOutput(
             story_bible=data.get("story_bible") if isinstance(data.get("story_bible"), dict) else fallback.story_bible,
-            characters=characters,
-            factions=factions,
+            characters=_with_ids(characters, "char"),
+            factions=_with_ids(factions, "faction"),
             relations=relations[:60],
         )

@@ -27,6 +27,7 @@ const paths: Record<string, string> = {
   link: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
   play: 'M5 3l16 9-16 9z',
   retry: 'M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.5 15',
+  'telemetry-config': 'M3 3v18h18M7 15l4-5 3 3 5-7',
 }
 </script>
 

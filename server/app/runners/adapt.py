@@ -63,6 +63,7 @@ def _record_usage(ctx, step_key: str, results: list) -> None:
         "cost_cents": cost,
         "route": results[0].route,
         "model": results[0].model,
+        "provider": getattr(results[0], "provider", ""),
         "step": step_key,
     }
     if existing is None:

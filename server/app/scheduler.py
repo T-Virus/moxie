@@ -7,6 +7,7 @@
 - 续费提醒：临近到期写审计（按订阅/天幂等）；
 - worker 租约清扫：running 且租约超时的任务重新入队（避免双跑）；
 - 异常用量告警（只记录 + 审计，不自动封禁）；
+- 到期账号注销：级联清理业务数据与对象存储；
 - 日对账：按渠道拉取账单并与本地订单比对。
 
 运行方式：
@@ -28,7 +29,9 @@ from .config import Settings
 from .db import Database, utcnow
 from .metrics import increment
 from .models import AgentRun, AuditLog, Subscription, Task, UsageEvent
+from .services import backup as backupsvc
 from .services import credits as creditsvc
+from .services import data_rights as rights_svc
 from .services import notifications as nsvc
 from .services import reconcile as reconcilesvc
 from .services import subscription as subsvc
@@ -160,6 +163,38 @@ def requeue_stuck_runs(
         )
         logger.warning("requeue stuck runs: %s", count)
     return count
+
+
+def dispatch_retry_due(
+    session,
+    settings: Settings,
+    now: datetime | None = None,
+    task_out: list[str] | None = None,
+) -> int:
+    """失败重试退避到点：清 next_retry_at 并重新入队。
+
+    与 requeue_stuck_runs 的区别：这里按 next_retry_at 精确时间点触发（通常 5s 起），
+    不等 stuck 的 600s 阈值；执行入口有原子认领校验，重复投递无副作用。
+    """
+    now = now or utcnow()
+    rows = session.scalars(
+        select(Task)
+        .where(
+            Task.status == "queued",
+            Task.next_retry_at.isnot(None),
+            Task.next_retry_at <= now,
+        )
+        .limit(100)
+    ).all()
+    for task in rows:
+        task.next_retry_at = None
+        task.heartbeat_at = now
+        append_event(session, task.id, "失败重试退避到点，重新入队", level="warning")
+        if task_out is not None:
+            task_out.append(task.id)
+    if rows:
+        session.flush()
+    return len(rows)
 
 
 def _dispatch_requeued(settings: Settings, task_ids: list[str], run_ids: list[str]) -> None:
@@ -406,6 +441,7 @@ def run_once(settings: Settings, db: Database | None = None, now: datetime | Non
     try:
         phases = [
             ("lease_reclaimed", lambda: sweep_leases(session, settings, now, requeued_task_ids)),
+            ("retry_due", lambda: dispatch_retry_due(session, settings, now, requeued_task_ids)),
             ("stuck_requeued", lambda: requeue_stuck_runs(session, settings, now, requeued_task_ids, requeued_run_ids)),
             ("expired", lambda: subsvc.expire_due(session, now)),
             ("grace_expired", lambda: expire_grace_period(session, settings, now)),
@@ -415,7 +451,9 @@ def run_once(settings: Settings, db: Database | None = None, now: datetime | Non
             ("notifications_retried", lambda: retry_notifications(session, settings, now)),
             ("usage_alerts", lambda: check_usage_alerts(session, settings, now)),
             ("uploads_cleaned", lambda: cleanup_uploads(session, settings, now)),
+            ("account_deletions", lambda: rights_svc.purge_due_deletions(session, settings, now=now)),
             ("reconciled", lambda: reconcile_daily(session, settings, now)),
+            ("db_backup", lambda: backupsvc.run_scheduled(settings, db)),
         ]
         for name, fn in phases:
             try:

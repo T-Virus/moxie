@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import logging
+import math
+import random
 import uuid
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Callable, Protocol
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +35,32 @@ METRIC_BY_TYPE = {
     "adapt": "adapt_chapters",
     "review": "review_month",
 }
+
+
+def retry_backoff_seconds(
+    attempts: int,
+    settings: Settings | None,
+    *,
+    rng: Callable[[], float] | None = None,
+) -> int:
+    """第 attempts 次失败后的退避秒数：指数退避 + 抖动，封顶 max。
+
+    delay = min(cap, base * 2^(attempts-1))，再加 full jitter：在 [delay/2, delay]
+    区间均匀取值。多个同时失败的任务因此落在错开的时点重投，避免同频惊群
+    （thundering herd）再次冲击刚刚抖动的上游。抖动下限 delay/2 保证仍有
+    可感知的退避，不会退化成秒级紧密重试。
+
+    rng 可注入以便测试确定性（默认 random.random）。达到最大尝试次数后
+    调用方不再重试，这里只负责未达上限时的等待时长；attempts 从 1 起。
+    """
+    base = max(1, settings.task_retry_backoff_seconds) if settings else 1
+    cap = max(base, settings.task_retry_backoff_max_seconds) if settings else base
+    exponent = max(0, attempts - 1)
+    delay = min(cap, base * (2**exponent))
+    low = max(0.0, delay / 2)
+    rand = rng or random.random
+    value = low + rand() * (delay - low)
+    return max(1, math.ceil(value))
 
 
 class TaskCanceled(Exception):
@@ -157,6 +185,8 @@ def task_to_dict(task: Task) -> dict:
         "error_code": task.error_code,
         "cancel_requested": task.cancel_requested,
         "attempts": task.attempts,
+        # 失败重试退避到点时间：前端/后台据此展示「下次重试时间」；无待重试时为 null
+        "next_retry_at": task.next_retry_at.isoformat() if task.next_retry_at else None,
         "prompt_version": task.prompt_version,
         "cost_estimate_cents": task.cost_estimate_cents,
         "cost_actual_cents": task.cost_actual_cents,
@@ -309,6 +339,7 @@ def execute_task(
         task.status = "canceled"
         task.error_code = "canceled"
         task.lease_until = None
+        task.next_retry_at = None
         task.finished_at = now
         task.heartbeat_at = now
         QuotaService(session).release(_reservation_of(session, task), now=now)
@@ -322,8 +353,13 @@ def execute_task(
     # 原子认领：只有 queued 才能被领取；重复投递/并发执行时这里直接跳过，避免双跑
     claimed = session.execute(
         update(Task)
-        .where(Task.id == task.id, Task.status == "queued")
-        .values(status="running", attempts=Task.attempts + 1)
+        .where(
+            Task.id == task.id,
+            Task.status == "queued",
+            # 退避未到点不认领：scheduler 到点会把 next_retry_at 清空再重投
+            (Task.next_retry_at.is_(None) | (Task.next_retry_at <= now)),
+        )
+        .values(status="running", attempts=Task.attempts + 1, next_retry_at=None)
     )
     if claimed.rowcount != 1:
         session.expire(task)
@@ -363,10 +399,39 @@ def execute_task(
         append_event(session, task.id, "任务已取消（协作式检查点）", level="warning")
         quota.release(reservation, now=now)
     except Exception:  # noqa: BLE001
+        from ..metrics import increment
+
+        max_attempts = max(1, settings.task_max_attempts) if settings else 1
+        if task.attempts < max_attempts:
+            # 瞬时失败（上游抖动/限流等）先重试：保留预占（不重复扣额度）与已完成步骤，
+            # 回到 queued 等退避到点，由 scheduler 重新入队；达到上限才落 failed 死信。
+            backoff = retry_backoff_seconds(task.attempts, settings)
+            retry_at = now + timedelta(seconds=backoff)
+            task.status = "queued"
+            task.error_code = None
+            task.lease_until = None
+            task.heartbeat_at = utcnow()
+            task.next_retry_at = retry_at
+            append_event(
+                session,
+                task.id,
+                f"任务执行失败，第 {task.attempts}/{max_attempts} 次尝试后 "
+                f"{backoff}s 重试（预占与已完成步骤保留）",
+                level="warning",
+            )
+            logger.warning("task retry task_id=%s attempt=%s/%s", task.id, task.attempts, max_attempts, exc_info=True)
+            increment("moxie_task_retries_total")
+            session.flush()
+            return task.status
         task.status = "failed"
         task.error_code = "task_failed"
-        append_event(session, task.id, "任务执行失败（内部错误，详情见服务端日志）", level="error")
-        logger.exception("task failed task_id=%s", task.id)
+        append_event(
+            session,
+            task.id,
+            f"任务执行失败，已达最大尝试次数 {max_attempts}（死信，不再自动重试）",
+            level="error",
+        )
+        logger.exception("task failed task_id=%s (attempts=%s)", task.id, task.attempts)
         quota.release(reservation, now=now)
     else:
         if output_ref:
@@ -463,6 +528,7 @@ def force_cancel_task(
     task.cancel_requested = True
     task.error_code = "canceled_by_admin"
     task.lease_until = None
+    task.next_retry_at = None
     task.finished_at = now
     task.heartbeat_at = now
     append_event(session, task.id, f"{reason}，预占额度已释放", level="warning")
@@ -482,6 +548,7 @@ def requeue_task(session: Session, task: Task, *, now: datetime | None = None) -
     task.cancel_requested = False
     task.error_code = None
     task.lease_until = None
+    task.next_retry_at = None  # 手动重排立即生效，不受失败退避影响
     task.heartbeat_at = now
     append_event(session, task.id, "运营已将任务重新排队，等待 worker 认领", level="warning")
     session.flush()

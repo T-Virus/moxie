@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { api, errorMessage, normalizeList } from '../api'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { api, errorMessage, normalizeList, streamTaskEvents, streamTasksFeed } from '../api'
 import { can } from '../roles'
 import { getRole } from '../session'
 import { pushToast } from '../toast'
-import type { RunEvent, TaskDashboard, TaskDetail, TaskRow, TaskStage } from '../types'
+import type { AdminFeedEvent, RunEvent, TaskDashboard, TaskDetail, TaskRow, TaskStage } from '../types'
 import { formatNumber, formatTime } from '../ui'
+import { computeVirtualRange } from '../utils/virtualList'
 import Icon from '../components/Icon.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pager from '../components/Pager.vue'
@@ -113,6 +114,16 @@ function formatClock(value?: string | null): string {
   )}:${pad(date.getSeconds())}`
 }
 
+/** 下次重试时间：到点前显示相对倒计时，到点后标注等待调度，便于运营判断卡单原因 */
+function formatRetryTime(value: unknown): string {
+  if (typeof value !== 'string' || !value) return ''
+  const at = new Date(value).getTime()
+  if (Number.isNaN(at)) return ''
+  const seconds = Math.ceil((at - Date.now()) / 1000)
+  const relative = seconds > 0 ? `${seconds} 秒后` : '已到点，等待调度'
+  return `${relative}（${formatClock(value)}）`
+}
+
 function durationText(task: TaskRow): string {
   const start = task.started_at || task.created_at
   if (!start) return '—'
@@ -155,7 +166,8 @@ const detail = ref<TaskDetail | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
 const logEl = ref<HTMLElement | null>(null)
-let detailTimer: number | null = null
+let detailController: AbortController | null = null
+let detailFallbackTimer: number | null = null
 
 const detailStatus = computed(() => {
   const d = (detail.value?.detail || {}) as Record<string, unknown>
@@ -183,6 +195,20 @@ const taskSteps = computed<{ step_key: string; status: string; updated_at?: stri
 })
 const events = computed<RunEvent[]>(() => detail.value?.events || [])
 
+/* 任务日志最多 2000 条：定高行虚拟滚动，只渲染视口附近，避免长任务撑爆 DOM。
+   任务表本身已分页（20/页），无需重复虚拟化。 */
+const LOG_ROW_HEIGHT = 26
+const LOG_VIEWPORT_HEIGHT = 460
+const logScrollTop = ref(0)
+const logRange = computed(() =>
+  computeVirtualRange(events.value.length, LOG_ROW_HEIGHT, logScrollTop.value, LOG_VIEWPORT_HEIGHT, 8),
+)
+const visibleEvents = computed(() => events.value.slice(logRange.value.start, logRange.value.end))
+
+function onLogScroll(event: Event): void {
+  logScrollTop.value = (event.target as HTMLElement).scrollTop
+}
+
 const detailMeta = computed<[string, unknown][]>(() => {
   const d = (detail.value?.detail || {}) as Record<string, unknown>
   const error = (d.error as Record<string, unknown>) || null
@@ -194,6 +220,7 @@ const detailMeta = computed<[string, unknown][]>(() => {
     ['错误码', error?.code || d.error_code],
     ['失败原因', error?.message || d.error_message],
     ['尝试次数', d.attempts],
+    ['下次重试时间', formatRetryTime(d.next_retry_at) || undefined],
     ['创建时间', d.created_at],
     ['开始时间', d.started_at],
     ['结束时间', d.finished_at],
@@ -209,8 +236,55 @@ function scrollLogToBottom(force = false) {
   const near = el.scrollHeight - el.scrollTop - el.clientHeight < 90
   if (!force && !near) return
   nextTick(() => {
-    if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
+    const target = logEl.value
+    if (!target) return
+    const bottom = target.scrollHeight
+    target.scrollTop = bottom
+    // 同步虚拟区间到尾部：否则滚动位置到底但只渲染开头几行
+    logScrollTop.value = bottom
   })
+}
+
+function applyDetailStatus(status: string): void {
+  if (!detail.value) return
+  detail.value.detail = { ...(detail.value.detail || {}), status }
+  if (detailTask.value) detailTask.value.status = status
+  syncDetailStream()
+}
+
+async function connectDetail(signal: AbortSignal): Promise<void> {
+  const task = detailTask.value
+  if (!task) return
+  let since = detail.value?.last_seq ?? 0
+  while (!signal.aborted && detailLive.value) {
+    try {
+      await streamTaskEvents(
+        String(task.id),
+        task.source,
+        since,
+        (event: RunEvent) => {
+          if (!detail.value) return
+          if (detail.value.events.some((item) => item.seq === event.seq)) return
+          detail.value.events.push(event)
+          since = Math.max(since, event.seq)
+          detail.value.last_seq = since
+          scrollLogToBottom()
+        },
+        applyDetailStatus,
+        signal,
+      )
+    } catch {
+      if (!signal.aborted) startDetailFallback()
+      return
+    }
+    if (signal.aborted || !detailLive.value) return
+    await new Promise((resolve) => window.setTimeout(resolve, 300))
+  }
+}
+
+function startDetailFallback(): void {
+  if (detailFallbackTimer !== null || !detailLive.value) return
+  detailFallbackTimer = window.setInterval(() => void refreshDetail(), 4000)
 }
 
 async function openDetail(task: TaskRow) {
@@ -218,7 +292,7 @@ async function openDetail(task: TaskRow) {
   detail.value = null
   detailError.value = ''
   detailLoading.value = true
-  stopDetailTimer()
+  stopDetailStream()
   try {
     detail.value = await api.taskDetail(String(task.id), task.source)
     scrollLogToBottom(true)
@@ -227,7 +301,7 @@ async function openDetail(task: TaskRow) {
   } finally {
     detailLoading.value = false
   }
-  syncDetailTimer()
+  syncDetailStream()
 }
 
 async function refreshDetail() {
@@ -240,31 +314,33 @@ async function refreshDetail() {
   } catch (e) {
     detailError.value = errorMessage(e)
   }
-  syncDetailTimer()
+  syncDetailStream()
 }
 
-/** 任务在跑就保持 4 秒轮询；从弹窗里点「继续/重试」后也会自动接上刷新。 */
-function syncDetailTimer() {
-  if (detailLive.value) startDetailTimer()
-  else stopDetailTimer()
+/** 任务在跑就订阅详情事件流；SSE 不可用时自动降级为 4 秒整单刷新。 */
+function syncDetailStream() {
+  if (!detailLive.value) {
+    stopDetailStream()
+    return
+  }
+  if (detailController || detailFallbackTimer !== null) return
+  detailController = new AbortController()
+  void connectDetail(detailController.signal)
 }
 
 function closeDetail() {
-  stopDetailTimer()
+  stopDetailStream()
   detailTask.value = null
   detail.value = null
   detailError.value = ''
 }
 
-function startDetailTimer() {
-  stopDetailTimer()
-  detailTimer = window.setInterval(() => void refreshDetail(), 4000)
-}
-
-function stopDetailTimer() {
-  if (detailTimer !== null) {
-    window.clearInterval(detailTimer)
-    detailTimer = null
+function stopDetailStream() {
+  detailController?.abort()
+  detailController = null
+  if (detailFallbackTimer !== null) {
+    window.clearInterval(detailFallbackTimer)
+    detailFallbackTimer = null
   }
 }
 
@@ -350,26 +426,68 @@ async function controlTask(task: TaskRow, action: ControlAction) {
   }
 }
 
-let listTimer: number | null = null
+let feedController: AbortController | null = null
+let feedFallbackTimer: number | null = null
 let clockTimer: number | null = null
+
+async function connectFeed(signal: AbortSignal): Promise<void> {
+  while (!signal.aborted && autoRefresh.value) {
+    try {
+      await streamTasksFeed((event: AdminFeedEvent) => {
+        if (event.type === 'refresh' && !document.hidden) void refreshAll(true)
+      }, signal)
+    } catch {
+      if (!signal.aborted) startFeedFallback()
+      return
+    }
+    if (signal.aborted || !autoRefresh.value) return
+    await new Promise((resolve) => window.setTimeout(resolve, 300))
+  }
+}
+
+function startFeedFallback(): void {
+  if (feedFallbackTimer !== null || !autoRefresh.value) return
+  feedFallbackTimer = window.setInterval(() => {
+    if (!autoRefresh.value || document.hidden) return
+    void refreshAll(true)
+  }, 10_000)
+}
+
+function syncFeed(): void {
+  if (!autoRefresh.value) {
+    feedController?.abort()
+    feedController = null
+    if (feedFallbackTimer !== null) {
+      window.clearInterval(feedFallbackTimer)
+      feedFallbackTimer = null
+    }
+    return
+  }
+  if (feedController || feedFallbackTimer !== null) return
+  feedController = new AbortController()
+  void connectFeed(feedController.signal)
+}
+
+watch(autoRefresh, syncFeed)
+
 onMounted(() => {
   void refreshAll(false)
-  listTimer = window.setInterval(() => {
-    if (autoRefresh.value) void refreshAll(true)
-  }, 10_000)
+  syncFeed()
   clockTimer = window.setInterval(() => {
     tick.value = Date.now()
   }, 1000)
 })
 onUnmounted(() => {
-  if (listTimer !== null) window.clearInterval(listTimer)
+  feedController?.abort()
+  feedController = null
+  if (feedFallbackTimer !== null) window.clearInterval(feedFallbackTimer)
   if (clockTimer !== null) window.clearInterval(clockTimer)
-  stopDetailTimer()
+  stopDetailStream()
 })
 </script>
 
 <template>
-  <PageHeader title="任务看板" desc="所有用户任务的完整记录（排队 / 运行 / 暂停 / 完成 / 失败 / 取消）。点击任意任务即可查看执行过程与任务日志，支持取消、暂停、继续、重新排队与强制终止。页面每 10 秒自动刷新。">
+  <PageHeader title="任务看板" desc="所有用户任务的完整记录（排队 / 运行 / 暂停 / 完成 / 失败 / 取消）。点击任意任务即可查看执行过程与任务日志，支持取消、暂停、继续、重新排队与强制终止。状态变化通过 SSE 实时刷新，接口不支持时自动降级为定时刷新。">
     <label class="badge muted" style="cursor: pointer">
       <input v-model="autoRefresh" type="checkbox" style="margin-right: 5px" />自动刷新
     </label>
@@ -595,20 +713,23 @@ onUnmounted(() => {
         <button class="btn ghost sm" @click="refreshDetail">刷新</button>
       </div>
 
-      <div ref="logEl" class="task-log">
+      <div ref="logEl" class="task-log" @scroll.passive="onLogScroll">
         <div v-if="!events.length" class="task-log__empty">暂无执行日志。</div>
         <template v-else>
+          <div class="task-log__spacer" :style="{ height: `${logRange.paddingTop}px` }" />
           <div
-            v-for="ev in events"
+            v-for="ev in visibleEvents"
             :key="ev.seq"
             class="task-log__line"
             :class="`lvl-${ev.level}`"
+            :title="ev.message"
           >
             <span class="task-log__seq">#{{ ev.seq }}</span>
             <span class="task-log__at">{{ formatClock(ev.at) }}</span>
             <span class="task-log__stage" :title="ev.stage">{{ stageNames[ev.stage] || ev.stage }}</span>
             <span class="task-log__msg">{{ ev.message }}</span>
           </div>
+          <div class="task-log__spacer" :style="{ height: `${logRange.paddingBottom}px` }" />
         </template>
       </div>
     </template>
@@ -799,12 +920,18 @@ onUnmounted(() => {
 .task-log__empty {
   color: #6c7c93;
 }
+.task-log__spacer {
+  flex: none;
+}
+
 .task-log__line {
   display: grid;
   grid-template-columns: 52px 108px 130px 1fr;
   gap: 10px;
-  align-items: baseline;
-  padding: 1px 0;
+  align-items: center;
+  height: 26px;
+  padding: 0;
+  box-sizing: border-box;
 }
 .task-log__line:hover {
   background: rgba(255, 255, 255, 0.04);
@@ -824,8 +951,10 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .task-log__msg {
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* 定高虚拟行：超长消息单行省略，完整内容看 title 或「复制日志」 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .task-log__line.lvl-warning .task-log__msg {
   color: #fbbf24;

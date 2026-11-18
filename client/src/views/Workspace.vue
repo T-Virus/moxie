@@ -164,6 +164,7 @@ import ItemsTab from '@/components/workspace/ItemsTab.vue'
 import OutlineTab from '@/components/workspace/OutlineTab.vue'
 import SummariesTab from '@/components/workspace/SummariesTab.vue'
 import TaskCenter from '@/components/workspace/TaskCenter.vue'
+import { useRunStream } from '@/composables/useRunStream'
 import type { RunDetail, RunStatus } from '@/types'
 import { deleteRun, downloadExportBundle, getRun } from '@/services/agentApi'
 import { ApiError } from '@/services/http'
@@ -314,9 +315,13 @@ const deleteError = ref('')
 const exportBusy = ref(false)
 const downloadError = ref('')
 
-let pollTimer: number | null = null
-
 const TERMINAL: RunStatus[] = ['succeeded', 'failed', 'canceled']
+
+// SSE 优先、失败降级轮询；composable 负责重连/去重/节流，视图只提供状态与刷新入口
+const live = useRunStream({
+  getStatus: () => run.value?.status,
+  refresh: () => loadRun(true),
+})
 
 /** 运行中且当前 Tab 还没有数据时，用「正在生成…」骨架替代空白 */
 const isRunning = computed(
@@ -368,7 +373,7 @@ async function downloadBundle(): Promise<void> {
 async function retryLoad(): Promise<void> {
   await loadRun()
   if (loadError.value) return
-  startPolling()
+  startSync()
 }
 
 async function loadRun(silent = false): Promise<void> {
@@ -385,22 +390,13 @@ async function loadRun(silent = false): Promise<void> {
   }
 }
 
-function startPolling(): void {
-  stopPolling()
-  pollTimer = window.setInterval(() => {
-    if (!run.value) return
-    // paused 不会自行恢复（用户停止或节点失败），统一停轮询；继续/重试后由 onTaskChanged 重启
-    const blocked = run.value.status === 'paused'
-    if (TERMINAL.includes(run.value.status) || blocked) return
-    void loadRun(true)
-  }, 1800)
+/** 启动实时同步（SSE 优先，失败自动降级为轮询） */
+function startSync(): void {
+  live.start(props.id)
 }
 
-function stopPolling(): void {
-  if (pollTimer !== null) {
-    window.clearInterval(pollTimer)
-    pollTimer = null
-  }
+function stopSync(): void {
+  live.stop()
 }
 
 function openDeleteDialog(): void {
@@ -416,7 +412,7 @@ async function confirmDeleteRun(): Promise<void> {
   try {
     await deleteRun(run.value.run_id)
     deleteOpen.value = false
-    stopPolling()
+    stopSync()
     await router.push('/runs')
   } catch (err) {
     deleteError.value = errorText(err, '删除作品失败，请稍后重试')
@@ -483,18 +479,18 @@ onMounted(async () => {
   if (chapters?.length && !chapters.some((chapter) => chapter.no === selectedChapter.value)) {
     selectedChapter.value = chapters[0].no
   }
-  if (!loadError.value) startPolling()
+  if (!loadError.value) startSync()
 })
 
 /** 任务中心切换任务时复用同一路由组件，需要手动重新拉取详情 */
 watch(
   () => props.id,
   async () => {
-    stopPolling()
+    stopSync()
     readWorkspaceQuery()
     selectedChapter.value = 1
     await loadRun()
-    if (!loadError.value) startPolling()
+    if (!loadError.value) startSync()
   },
 )
 
@@ -505,9 +501,9 @@ watch(
     // paused 不会自行恢复（用户停止或节点失败），停止轮询；恢复（继续/重试）后必须重新启动，
     // 否则工作台会一直停在暂停时刻的数据，看起来「状态改不回来」。
     if (TERMINAL.includes(status) || status === 'paused') {
-      stopPolling()
-    } else if (pollTimer === null) {
-      startPolling()
+      stopSync()
+    } else if (!live.active.value) {
+      startSync()
     }
   },
   { immediate: true },
@@ -518,11 +514,11 @@ async function onTaskChanged(runId?: string): Promise<void> {
   if (!run.value) return
   if (runId && runId !== run.value.run_id) return
   await loadRun(true)
-  if (run.value && !TERMINAL.includes(run.value.status) && pollTimer === null) startPolling()
+  if (run.value && !TERMINAL.includes(run.value.status) && !live.active.value) startSync()
 }
 
 onBeforeUnmount(() => {
-  stopPolling()
+  stopSync()
 })
 </script>
 

@@ -1,0 +1,241 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 后端：SQLite + fakeredis，不需要 Docker / Postgres 服务
+  server-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest-cov
+      - name: Pytest (exclude live channel tests)
+        env:
+          LICENSE_ALLOW_EPHEMERAL_KEY: "true"
+        run: >-
+          python -m pytest -m "not live" -q
+          --junitxml=../server-pytest-report.xml
+          --cov=app --cov-report=xml:coverage.xml --cov-fail-under=70
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-pytest-report
+          path: server-pytest-report.xml
+          if-no-files-found: ignore
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-coverage
+          path: server/coverage.xml
+          if-no-files-found: ignore
+
+  # 迁移漂移：确认 alembic 迁移链能升到 head，且与 ORM 模型一致
+  migration-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Upgrade to head and check drift
+        env:
+          LICENSE_ALLOW_EPHEMERAL_KEY: "true"
+          DATABASE_URL: "sqlite:///./ci-migration-check.db"
+        run: |
+          python -m alembic upgrade head
+          python -m alembic check
+
+  # 在线前端：C 端 client 与后台 admin 的类型检查 + 生产构建
+  web-apps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        app: [client, admin]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Archive ${{ matrix.app }} dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-dist
+          path: ${{ matrix.app }}/dist
+          if-no-files-found: error
+
+  # 依赖漏洞审计：高危即失败，避免带洞上线
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pip-audit (server)
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r server/requirements.txt --strict
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - name: npm audit (client/admin/e2e, production deps)
+        run: |
+          for d in client admin e2e; do
+            echo "== auditing $d =="
+            (cd "$d" && npm audit --omit=dev --audit-level=high)
+          done
+
+  # 离线桌面端 E2E（Playwright）：目前 e2e/ 只覆盖本地模式
+  e2e-desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    needs: web-apps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install desktop test dependencies
+        run: pip install -r tests/requirements-ci.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Build offline web assets
+        working-directory: web
+        run: npm ci && npm run build
+      - name: Install e2e deps and browser
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Run Playwright (desktop smoke)
+        working-directory: e2e
+        env:
+          E2E_PYTHON: python3
+        run: npm test
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: e2e/artifacts/report
+          if-no-files-found: ignore
+
+  # 失败汇总：写入 Job Summary；配置 CI_FAILURE_WEBHOOK 时额外推送到值班群机器人
+  ci-failure-notice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    needs: [server-tests, migration-check, web-apps, dependency-audit, e2e-desktop]
+    if: failure()
+    steps:
+      - name: Write failure summary
+        run: |
+          {
+            echo "## CI 失败"
+            echo
+            echo "- 分支：${{ github.ref_name }}"
+            echo "- 提交：${{ github.sha }}"
+            echo "- 触发：${{ github.event_name }}"
+            echo "- 详情：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Notify webhook if configured
+        env:
+          CI_FAILURE_WEBHOOK: ${{ secrets.CI_FAILURE_WEBHOOK }}
+        if: ${{ env.CI_FAILURE_WEBHOOK != '' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          import urllib.request
+
+          payload = {
+              "msgtype": "text",
+              "text": {
+                  "content": (
+                      "CI failed: {repo} / {ref}\ncommit: {sha}\nrun: {url}"
+                  ).format(
+                      repo=os.environ["GITHUB_REPOSITORY"],
+                      ref=os.environ["GITHUB_REF_NAME"],
+                      sha=os.environ["GITHUB_SHA"][:12],
+                      url=(
+                          os.environ["GITHUB_SERVER_URL"]
+                          + "/"
+                          + os.environ["GITHUB_REPOSITORY"]
+                          + "/actions/runs/"
+                          + os.environ["GITHUB_RUN_ID"]
+                      ),
+                  )
+              },
+          }
+          req = urllib.request.Request(
+              os.environ["CI_FAILURE_WEBHOOK"],
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json"},
+          )
+          with urllib.request.urlopen(req, timeout=10) as resp:
+              print(resp.status)
+          PY

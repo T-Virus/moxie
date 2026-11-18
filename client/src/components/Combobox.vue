@@ -169,6 +169,7 @@ const props = withDefaults(
     virtualThreshold: 50,
     createText: '使用「{0}」',
     clearable: false,
+    presetType: '',
   },
 )
 

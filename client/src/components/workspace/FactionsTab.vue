@@ -464,9 +464,8 @@ async function saveFaction(values: Record<string, any>): Promise<void> {
       const existed = memberMap.get(memberName)
       return existed ? { ...existed } : { name: memberName }
     })
-    const { members: _ignored, ...rest } = values
     const merged = {
-      ...rest,
+      ...values,
       name,
       members,
       // 成员数直接由所选成员推导，避免与成员明细不一致

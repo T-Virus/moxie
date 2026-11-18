@@ -8,22 +8,27 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import logging
 import re
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
-from sqlalchemy import delete as sa_delete, func, or_, select, text, update
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.orm import Session
 
-from ..db import Base, get_db, utcnow
+from ..db import get_db, utcnow
 from ..deps import require_admin, require_staff
 from ..errors import ApiError
 from ..models import (
     Account,
+    AccountDeletionRequest,
     AgentRun,
     AuditLog,
     Device,
@@ -45,26 +50,69 @@ from ..models import (
     UsageEvent,
 )
 from ..schemas import (
+    AccountDeletionListResponse,
+    AccountDeletionRequestView,
+    AdminAlertsResponse,
+    AdminDashboardResponse,
+    AdminModelConfigDeleteResponse,
+    AdminModelConfigTestResponse,
+    AdminTasksDashboardResponse,
+    BackupCreateResponse,
+    BackupDeleteResponse,
+    BackupListView,
+    BackupRestoreRequest,
+    BackupRestoreResponse,
+    ModelUsageResponse,
     AdminDeleteByEmailRequest,
     AdminModelConfigUpsert,
     AdminModelConfigView,
+    OfflinePackageDeleteResponse,
+    OfflinePackageLimitsResponse,
+    OfflinePackageView,
+    AdminNotificationDetailResponse,
+    AdminNotificationBatchRequest,
+    AdminNotificationBatchResponse,
     AdminNotificationRequest,
+    AdminNotificationsResponse,
+    AdminOrdersResponse,
+    AdminPlansResponse,
+    AdminPresetDeleteResponse,
+    AdminPresetListResponse,
+    AdminPresetSyncResponse,
+    AdminPresetView,
     AdminQuotaAdjustRequest,
+    AdminQuotaAdjustResponse,
+    AdminQuotaAdjustmentsResponse,
     AdminReasonRequest,
+    AdminReconcileReportsResponse,
     AdminSubscriptionPatchRequest,
+    AdminSubscriptionsResponse,
     AdminTaskControlRequest,
+    AdminTasksResponse,
     AdminUserStatusRequest,
+    AdminUsersResponse,
+    AuditLogsResponse,
+    HealthResponse,
+    PushReceiptHistoryResponse,
+    TelemetryConfigUpdate,
+    TelemetryConfigView,
 )
+from ..services import backup as backupsvc
+from ..services import data_rights
 from ..services import model_config as model_config_svc
+from ..services import runtime_config
 from ..services import notifications as nsvc
 from ..services import subscription as subsvc
+from ..services import usage_stats
 from ..services.audit import write_audit
 from ..services.model_config import describe_configs, encrypt_key, resolve_step_model
 from ..services.model_gateway import complete_sync, validate_upstream_base_url
+from ..services.sse import SSE_MAX_TICKS, SSE_POLL_SECONDS, sse_context, sse_response
 from ..services.uploads import safe_filename as safe_upload_name
 from ..services.quota import QuotaService, period_of
 from ..agents.store import run_to_dict
 from ..services.tasks import task_to_dict
+from .telemetry import redact as redact_error_text
 
 # 统一预设值维护（后台纳管）
 from ..models import Preset
@@ -72,11 +120,12 @@ from ..schemas import AdminPresetUpsert
 from ..seed import seed_presets
 
 health_router = APIRouter(tags=["ops"])
+logger = logging.getLogger("moxie.admin")
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-@health_router.get("/healthz")
+@health_router.get("/healthz", response_model=HealthResponse)
 def healthz(request: Request):
     return {
         "status": "ok",
@@ -126,7 +175,7 @@ def _audit_view(row: AuditLog) -> dict:
     }
 
 
-@admin_router.get("/audit-logs")
+@admin_router.get("/audit-logs", response_model=AuditLogsResponse)
 def audit_logs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -184,7 +233,7 @@ def expire_due(
 
 
 # ---- 套餐管理 ---------------------------------------------------------------
-@admin_router.get("/plans")
+@admin_router.get("/plans", response_model=AdminPlansResponse)
 def admin_list_plans(
     _staff: Account = Depends(require_staff),
     db: Session = Depends(get_db),
@@ -264,7 +313,7 @@ def _user_not_found() -> ApiError:
     return ApiError(404, "user_not_found", "用户不存在")
 
 
-@admin_router.get("/users")
+@admin_router.get("/users", response_model=AdminUsersResponse)
 def list_users(
     q: str | None = Query(default=None, max_length=64),
     status: str | None = Query(default=None, max_length=16),
@@ -437,90 +486,15 @@ def set_user_status(
 
 
 def _delete_account(db: Session, account: Account, request: Request, admin: Account) -> None:
-    """硬删除账号并级联清理其子表。
-
-    PostgreSQL 外键约束生效且无 ON DELETE CASCADE，因此需按依赖拓扑序
-    （引用者先删、被引用者后删）手动清理所有可达子表。
-    """
-    if account.role == "admin":
-        raise ApiError(409, "cannot_delete_admin", "不允许删除管理员账号")
-    if account.id == admin.id:
-        raise ApiError(409, "cannot_delete_self", "不能删除当前登录的账号")
-    account_id = account.id
-    email = account.email
-
-    tables = Base.metadata.tables
-
-    # 1) 收集需清理的表：从 accounts 出发沿「被引用」方向可达的所有表（含传递表）
-    relevant = {}
-    frontier = ["accounts"]
-    while frontier:
-        current = frontier.pop()
-        for table in tables.values():
-            if table.name == "accounts" or table.name in relevant:
-                continue
-            if any(fk.column.table.name == current for fk in table.foreign_keys):
-                relevant[table.name] = table
-                frontier.append(table.name)
-
-    def account_fk(table):
-        return next(
-            (
-                f for f in table.foreign_keys
-                if f.column.table.name == "accounts" and f.column.name == "id"
-            ),
-            None,
-        )
-
-    def scope_of(table):
-        """该表中属于此账号的行：直接子表按 account_id；传递表按父表范围 in_ 子查询。"""
-        fk = account_fk(table)
-        if fk is not None:
-            return fk.parent == account_id
-        conds = []
-        for f in table.foreign_keys:
-            parent = f.column.table
-            if parent.name == "accounts" or parent.name not in relevant:
-                continue
-            # 父表尚未删除（拓扑序保证），可用子查询圈定账号范围内的父行
-            conds.append(f.parent.in_(select(f.column).where(scope_of(parent))))
-        return or_(*conds) if conds else None
-
-    # 2) 拓扑排序：A 引用 B ⇒ A 先删。如 orders(subscription_id) 先于 subscriptions
-    indegree = {name: 0 for name in relevant}
-    dependents = {name: [] for name in relevant}
-    for name, table in relevant.items():
-        for fk in table.foreign_keys:
-            ref = fk.column.table.name
-            if ref != name and ref in relevant:
-                dependents[name].append(ref)
-                indegree[ref] += 1
-    queue = [name for name, deg in indegree.items() if deg == 0]
-    order = []
-    while queue:
-        name = queue.pop()
-        order.append(name)
-        for ref in dependents[name]:
-            indegree[ref] -= 1
-            if indegree[ref] == 0:
-                queue.append(ref)
-    order.extend(name for name in relevant if name not in order)  # 兜底：异常成环不遗漏
-
-    # 3) 按拓扑序清理子表，最后删除账号本体
-    for name in order:
-        condition = scope_of(relevant[name])
-        if condition is not None:
-            db.execute(sa_delete(relevant[name]).where(condition))
-
-    # 自定义预设仅以 account_id 软关联（Preset 未声明外键约束），
-    # 不在上面的拓扑遍历范围内，需手动级联清理，避免删除账号后留下孤儿数据。
-    db.execute(sa_delete(Preset).where(Preset.account_id == account_id))
-
-    db.delete(account)
-    write_audit(
-        db, actor_id=admin.id, action="user.delete", request=request,
-        target_type="account", target_id=str(account_id),
-        meta={"email": email, "role": account.role},
+    """硬删除账号：与用户注销到期清理共用同一套级联/对象清理逻辑。"""
+    data_rights.purge_account(
+        db,
+        account,
+        actor_id=admin.id,
+        settings=request.app.state.settings,
+        storage=request.app.state.storage,
+        request=request,
+        audit_action="user.delete",
     )
 
 
@@ -559,8 +533,73 @@ def delete_user(
     return {"deleted": True, "id": account_id}
 
 
+# ---- 用户注销申请 -----------------------------------------------------------
+@admin_router.get("/account-deletions", response_model=AccountDeletionListResponse)
+def list_account_deletions(
+    status: str | None = Query(default=None, max_length=16),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    _staff: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    query = select(AccountDeletionRequest)
+    if status:
+        query = query.where(AccountDeletionRequest.status == status)
+    total = _total(db, query)
+    rows = db.scalars(
+        query.order_by(AccountDeletionRequest.purge_at)
+        .offset(_offset(page, page_size))
+        .limit(page_size)
+    ).all()
+    return {"items": [data_rights.deletion_view(row) for row in rows], "total": total}
+
+
+@admin_router.post("/account-deletions/{request_id}/cancel", response_model=AccountDeletionRequestView)
+def cancel_account_deletion(
+    request_id: int,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """撤销注销申请并恢复账号登录；原会话已吊销，用户需重新登录。"""
+    row = db.get(AccountDeletionRequest, request_id)
+    if row is None:
+        raise ApiError(404, "deletion_request_not_found", "注销申请不存在")
+    result = data_rights.cancel_deletion(db, row, request=request, actor_id=admin.id)
+    db.commit()
+    return result
+
+
+@admin_router.post("/account-deletions/{request_id}/purge")
+def purge_account_deletion(
+    request_id: int,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """管理员立即执行已申请的注销（跳过剩余宽限期）。"""
+    row = db.get(AccountDeletionRequest, request_id)
+    if row is None or row.status != "pending":
+        raise ApiError(404, "deletion_request_not_found", "待处理的注销申请不存在")
+    account = db.get(Account, row.account_id)
+    if account is None:
+        raise ApiError(404, "account_not_found", "账号不存在")
+    result = data_rights.purge_account(
+        db,
+        account,
+        actor_id=admin.id,
+        settings=request.app.state.settings,
+        storage=request.app.state.storage,
+        request=request,
+        reason="admin_immediate_purge",
+        audit_action="account.deleted",
+    )
+    db.commit()
+    return {"deleted": True, **result}
+
+
 # ---- 订阅与额度 -------------------------------------------------------------
-@admin_router.get("/subscriptions")
+@admin_router.get("/subscriptions", response_model=AdminSubscriptionsResponse)
 def list_subscriptions(
     q: str | None = Query(default=None, max_length=64),
     status: str | None = Query(default=None, max_length=16),
@@ -641,7 +680,7 @@ def _adjustment_view(event: UsageEvent, before: int, after: int) -> dict:
     }
 
 
-@admin_router.post("/accounts/{account_id}/quota-adjustments")
+@admin_router.post("/accounts/{account_id}/quota-adjustments", response_model=AdminQuotaAdjustResponse)
 def adjust_quota(
     account_id: int,
     payload: AdminQuotaAdjustRequest,
@@ -719,7 +758,7 @@ def adjust_quota(
     }
 
 
-@admin_router.get("/accounts/{account_id}/quota-adjustments")
+@admin_router.get("/accounts/{account_id}/quota-adjustments", response_model=AdminQuotaAdjustmentsResponse)
 def list_quota_adjustments(
     account_id: int,
     limit: int = Query(default=50, ge=1, le=200),
@@ -769,7 +808,7 @@ def _order_view(order: Order) -> dict:
     }
 
 
-@admin_router.get("/orders")
+@admin_router.get("/orders", response_model=AdminOrdersResponse)
 def admin_orders(
     q: str | None = Query(default=None, max_length=64),
     status: str | None = Query(default=None, max_length=16),
@@ -831,7 +870,7 @@ def admin_order_detail(
     }
 
 
-@admin_router.get("/reconcile-reports")
+@admin_router.get("/reconcile-reports", response_model=AdminReconcileReportsResponse)
 def admin_reconcile_reports(
     provider: str | None = Query(default=None, max_length=16),
     limit: int = Query(default=20, ge=1, le=100),
@@ -938,7 +977,7 @@ def _briefs_by_status(db: Session, status: str, *, order_by_started: bool) -> li
     return briefs[:20]
 
 
-@admin_router.get("/tasks/dashboard")
+@admin_router.get("/tasks/dashboard", response_model=AdminTasksDashboardResponse)
 def tasks_dashboard(
     _staff: Account = Depends(require_staff),
     db: Session = Depends(get_db),
@@ -1107,6 +1146,128 @@ def control_task(
 
 EVENT_PAGE_LIMIT = 2000
 
+ADMIN_FEED_STATUSES = ("queued", "running", "paused")
+TASK_TERMINAL_STATUSES = ("succeeded", "failed", "canceled")
+
+
+@admin_router.get("/tasks/stream")
+def admin_tasks_stream(request: Request, admin: Account = Depends(require_staff)):
+    """运营看板聚合变更流：任务状态变化时通知前端重查列表与概览。"""
+    frame, headers = sse_context(request)
+    database = request.app.state.db
+
+    def _signature() -> tuple[int, str, str]:
+        with database.session() as session:
+            task_row = session.execute(
+                select(
+                    func.count(Task.id),
+                    func.max(Task.heartbeat_at),
+                    func.max(Task.created_at),
+                ).where(Task.status.in_(ADMIN_FEED_STATUSES))
+            ).one()
+            run_row = session.execute(
+                select(
+                    func.count(AgentRun.id),
+                    func.max(AgentRun.updated_at),
+                    func.max(AgentRun.created_at),
+                ).where(AgentRun.status.in_(ADMIN_FEED_STATUSES))
+            ).one()
+        stamps = [stamp for stamp in (task_row[1], task_row[2], run_row[1], run_row[2]) if stamp]
+        return (
+            int(task_row[0] or 0) + int(run_row[0] or 0),
+            max((s.isoformat() for s in stamps), default=""),
+            f"{task_row[0] or 0}:{run_row[0] or 0}",
+        )
+
+    def _stream():
+        current = _signature()
+        yield f"event: ready\ndata: {frame({'type': 'ready', 'active': current[0]})}\n\n"
+        for _ in range(SSE_MAX_TICKS):
+            time.sleep(SSE_POLL_SECONDS)
+            nxt = _signature()
+            if nxt != current:
+                current = nxt
+                yield f"event: refresh\ndata: {frame({'type': 'refresh', 'active': nxt[0], 'at': time.time()})}\n\n"
+        yield f"event: end\ndata: {frame({'type': 'closed', 'since': current[0]})}\n\n"
+
+    return sse_response(_stream(), headers)
+
+
+@admin_router.get("/tasks/{task_id}/events")
+def admin_task_events(
+    task_id: str,
+    request: Request,
+    source: str | None = Query(default=None, pattern="^(task|agent_run)$"),
+    since: int = Query(default=0, ge=0),
+    admin: Account = Depends(require_staff),
+):
+    """任务详情增量事件流：替代管理端每 4 秒拉一次详情的轮询。"""
+    frame, headers = sse_context(request)
+    database = request.app.state.db
+
+    def _stream():
+        last = since
+        status_seen: str | None = None
+        for _ in range(SSE_MAX_TICKS):
+            status = "missing"
+            resolved_source: str | None = None
+            payloads: list[dict] = []
+            with database.session() as session:
+                if source != "task":
+                    run = session.get(AgentRun, task_id)
+                    if run is not None:
+                        status = run.status
+                        resolved_source = "agent_run"
+                        rows = session.scalars(
+                            select(AgentRunEvent)
+                            .where(AgentRunEvent.run_id == run.id, AgentRunEvent.seq > last)
+                            .order_by(AgentRunEvent.seq.asc())
+                            .limit(200)
+                        ).all()
+                        payloads = [
+                            {
+                                "seq": row.seq,
+                                "stage": row.stage,
+                                "level": row.level,
+                                "message": row.message,
+                                "at": row.created_at.isoformat() if row.created_at else None,
+                            }
+                            for row in rows
+                        ]
+                if resolved_source is None and source != "agent_run":
+                    task = session.get(Task, task_id)
+                    if task is not None:
+                        status = task.status
+                        resolved_source = "task"
+                        rows = session.scalars(
+                            select(TaskEvent)
+                            .where(TaskEvent.task_id == task.id, TaskEvent.seq > last)
+                            .order_by(TaskEvent.seq.asc())
+                            .limit(200)
+                        ).all()
+                        payloads = [
+                            {
+                                "seq": row.seq,
+                                "stage": "task",
+                                "level": row.level,
+                                "message": row.message,
+                                "at": row.created_at.isoformat() if row.created_at else None,
+                            }
+                            for row in rows
+                        ]
+            if status_seen != status:
+                status_seen = status
+                yield f"event: status\ndata: {frame({'status': status, 'source': resolved_source})}\n\n"
+            for item in payloads:
+                last = max(last, int(item["seq"]))
+                yield f"data: {frame(item)}\n\n"
+            if status in TASK_TERMINAL_STATUSES or status == "missing":
+                break
+            time.sleep(SSE_POLL_SECONDS)
+        yield f"event: end\ndata: {frame({'status': 'closed', 'since': last})}\n\n"
+
+    return sse_response(_stream(), headers)
+
 
 @admin_router.get("/tasks/{task_id}")
 def admin_task_detail(
@@ -1199,7 +1360,7 @@ def admin_task_detail(
     }
 
 
-@admin_router.get("/tasks")
+@admin_router.get("/tasks", response_model=AdminTasksResponse)
 def admin_tasks(
     status: str | None = Query(default=None, max_length=16),
     source: str | None = Query(default=None, pattern="^(task|agent_run)$"),
@@ -1275,7 +1436,7 @@ def admin_tasks(
 
 
 # ---- 告警 / 通知 -------------------------------------------------------------
-@admin_router.get("/alerts")
+@admin_router.get("/alerts", response_model=AdminAlertsResponse)
 def admin_alerts(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -1328,7 +1489,42 @@ def admin_alerts(
     }
 
 
-@admin_router.get("/notifications")
+def _delivery_meta_summary(d: NotificationDelivery) -> dict:
+    """从 delivery.meta 提取可视化摘要：列表页不返回完整 receipts，避免大响应。"""
+    meta = d.meta or {}
+    receipts = meta.get("receipts") or []
+    expired = meta.get("expired") or []
+    return {
+        "subscribers": meta.get("subscribers"),
+        "delivered": meta.get("delivered"),
+        "expired_count": len(expired),
+        "receipt_count": len(receipts),
+        "retry_after_seconds": meta.get("retry_after_seconds"),
+        "reason": meta.get("reason"),
+    }
+
+
+def _notification_view(d: NotificationDelivery) -> dict:
+    return {
+        "id": d.id,
+        "account_id": d.account_id,
+        "channel": d.channel,
+        "recipient": d.recipient,
+        "subject": d.subject,
+        "template": d.category,
+        "status": d.status,
+        "attempts": d.attempts,
+        "max_attempts": d.max_attempts,
+        "last_error": d.last_error,
+        "next_retry_at": d.next_retry_at.isoformat() if d.next_retry_at else None,
+        "provider_message_id": d.provider_message_id,
+        "meta_summary": _delivery_meta_summary(d),
+        "created_at": d.created_at.isoformat(),
+        "sent_at": d.sent_at.isoformat() if d.sent_at else None,
+    }
+
+
+@admin_router.get("/notifications", response_model=AdminNotificationsResponse)
 def admin_notifications(
     status: str | None = Query(default=None, max_length=16),
     channel: str | None = Query(default=None, max_length=16),
@@ -1347,26 +1543,24 @@ def admin_notifications(
         query.order_by(NotificationDelivery.id.desc()).offset(_offset(page, page_size)).limit(page_size)
     ).all()
     return {
-        "items": [
-            {
-                "id": d.id,
-                "account_id": d.account_id,
-                "channel": d.channel,
-                "recipient": d.recipient,
-                "subject": d.subject,
-                "template": d.category,
-                "status": d.status,
-                "attempts": d.attempts,
-                "last_error": d.last_error,
-                "created_at": d.created_at.isoformat(),
-                "sent_at": d.sent_at.isoformat() if d.sent_at else None,
-            }
-            for d in rows
-        ],
+        "items": [_notification_view(d) for d in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
     }
+
+
+@admin_router.get("/notifications/{delivery_id}", response_model=AdminNotificationDetailResponse)
+def admin_notification_detail(
+    delivery_id: int,
+    _staff: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """单条投递详情：返回完整 meta（逐订阅 receipts / expired / retry_after）。"""
+    d = db.get(NotificationDelivery, delivery_id)
+    if d is None:
+        raise ApiError(404, "delivery_not_found", "发送记录不存在")
+    return {"delivery": {**_notification_view(d), "meta": d.meta or {}}}
 
 
 @admin_router.get("/notification-deliveries")
@@ -1444,8 +1638,161 @@ def admin_send_notification(
     return {"notification_id": row.id if row else None}
 
 
+@admin_router.post("/notifications/batch", response_model=AdminNotificationBatchResponse)
+def admin_send_notification_batch(
+    payload: AdminNotificationBatchRequest,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """批量发送：共享 batch_id，逐账号独立 dedupe_key 与投递记录。
+
+    单个账号失败（不存在 / emit 异常）不影响其它账号；所有成功项在同一事务提交，
+    失败项记录原因后继续。dedupe_key 带 batch_id，重复提交同一批不会重复发送。
+    """
+    batch_id = f"batch-{uuid.uuid4()}"
+    account_ids = list(dict.fromkeys(payload.account_ids))  # 去重且保序
+    results: list[dict] = []
+    sent = 0
+    for account_id in account_ids:
+        if db.get(Account, account_id) is None:
+            results.append({
+                "account_id": account_id, "notification_id": None,
+                "status": "invalid_account", "detail": "账号不存在",
+            })
+            continue
+        try:
+            row = nsvc.emit(
+                db,
+                account_id=account_id,
+                category="admin_message",
+                dedupe_key=f"admin:{batch_id}",
+                context={"title": payload.title, "body": payload.body},
+                settings=request.app.state.settings,
+                channels=tuple(payload.channels) if payload.channels else None,
+            )
+            results.append({
+                "account_id": account_id,
+                "notification_id": row.id if row else None,
+                "status": "sent" if row else "skipped",
+                "detail": None,
+            })
+            sent += 1
+        except Exception as exc:  # noqa: BLE001 - 单账号失败不影响整批
+            logger.warning("批量通知单账号失败 account=%s error=%s", account_id, type(exc).__name__)
+            results.append({
+                "account_id": account_id, "notification_id": None,
+                "status": "skipped", "detail": f"{type(exc).__name__}: {str(exc)[:120]}",
+            })
+    write_audit(
+        db, actor_id=admin.id, action="notification.batch", request=request,
+        target_type="notification", target_id=batch_id,
+        meta={"batch_id": batch_id, "total": len(account_ids), "sent": sent,
+              "channels": payload.channels},
+    )
+    db.commit()
+    return {
+        "batch_id": batch_id, "total": len(account_ids), "sent": sent,
+        "skipped": len(account_ids) - sent, "results": results,
+    }
+
+
+@admin_router.get("/notifications/{delivery_id}/receipts", response_model=PushReceiptHistoryResponse)
+def admin_notification_receipt_history(
+    delivery_id: int,
+    _staff: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """结构化回执历史：把 delivery.meta 的 receipts 拆成稳定字段，便于跨投递对账。"""
+    d = db.get(NotificationDelivery, delivery_id)
+    if d is None:
+        raise ApiError(404, "delivery_not_found", "发送记录不存在")
+    meta = d.meta or {}
+    receipts = [
+        {
+            "sub_id": int(r.get("sub_id") or 0),
+            "status": str(r.get("status") or "unknown"),
+            "http_status": r.get("http_status"),
+            "retry_after_seconds": r.get("retry_after_seconds"),
+            "error": redact_error_text(str(r.get("error") or "")),
+        }
+        for r in (meta.get("receipts") or [])
+        if isinstance(r, dict)
+    ]
+    return {"delivery": {
+        "delivery_id": d.id, "channel": d.channel, "status": d.status,
+        "attempts": d.attempts,
+        "subscribers": int(meta.get("subscribers") or 0),
+        "delivered": int(meta.get("delivered") or 0),
+        "expired": list(meta.get("expired") or []),
+        "receipts": receipts,
+        "retry_after_seconds": meta.get("retry_after_seconds"),
+        "reason": meta.get("reason"),
+        "next_retry_at": d.next_retry_at.isoformat() if d.next_retry_at else None,
+    }}
+
+
+@admin_router.get("/notifications/{delivery_id}/receipts/export")
+def admin_notification_receipts_export(
+    delivery_id: int,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """单次投递回执导出 CSV（对账用）：逐订阅一行，含 HTTP 状态/退避/错误。
+
+    error 来自 webpush 异常文本，属不可信外部输入：统一做 CSV 公式注入防护，
+    并清理单元格内换行；文件名用 quote 编码，避免 Content-Disposition 头注入。
+    """
+    d = db.get(NotificationDelivery, delivery_id)
+    if d is None:
+        raise ApiError(404, "delivery_not_found", "发送记录不存在")
+    meta = d.meta or {}
+
+    def cell(value) -> str:
+        text = redact_error_text("" if value is None else str(value))
+        text = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+        # Excel 会忽略前置空白：必须先 lstrip 再判首字符，否则 " =CMD" 可绕过防护。
+        significant = text.lstrip(" \t")
+        return "'" + text if significant and significant[0] in "=+-@" else text
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "delivery_id", "channel", "delivery_status", "sub_id", "status",
+        "http_status", "retry_after_seconds", "error",
+    ])
+    for r in (meta.get("receipts") or []):
+        if not isinstance(r, dict):
+            continue
+        writer.writerow([
+            cell(d.id), cell(d.channel), cell(d.status),
+            cell(r.get("sub_id") or 0), cell(r.get("status") or "unknown"),
+            cell(r.get("http_status")), cell(r.get("retry_after_seconds")), cell(r.get("error")),
+        ])
+    expired = list(meta.get("expired") or [])
+    # 失效订阅单独一行标注，便于后台统计退订率
+    for sub_id in expired:
+        writer.writerow([
+            cell(d.id), cell(d.channel), cell(d.status), cell(sub_id), "expired",
+            "", "", "subscription expired / gone (410/404)",
+        ])
+    write_audit(
+        db, actor_id=_admin.id, action="notification.receipts_export", request=request,
+        target_type="notification_delivery", target_id=str(d.id),
+        meta={"receipts": len(meta.get("receipts") or []), "expired": len(expired)},
+    )
+    db.commit()
+    filename = f"receipts-{d.id}.csv"
+    return PlainTextResponse(
+        "\ufeff" + buffer.getvalue(),  # UTF-8 BOM 兼容中文 Excel
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=receipts-{d.id}.csv; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
 # ---- 兼容旧看板路径 / 汇总 ----------------------------------------------------
-@admin_router.get("/dashboard")
+@admin_router.get("/dashboard", response_model=AdminDashboardResponse)
 def dashboard(
     _staff: Account = Depends(require_staff),
     db: Session = Depends(get_db),
@@ -1545,7 +1892,7 @@ def upsert_model_config(
     )
 
 
-@admin_router.delete("/model-configs/{step_key}")
+@admin_router.delete("/model-configs/{step_key}", response_model=AdminModelConfigDeleteResponse)
 def delete_model_config(
     step_key: str,
     request: Request,
@@ -1568,7 +1915,7 @@ def delete_model_config(
     return {"deleted": True, "step_key": step_key}
 
 
-@admin_router.post("/model-configs/{step_key}/test")
+@admin_router.post("/model-configs/{step_key}/test", response_model=AdminModelConfigTestResponse)
 def test_model_config(
     step_key: str,
     payload: AdminModelConfigUpsert,
@@ -1669,7 +2016,7 @@ class _CountingReader:
         return chunk
 
 
-@admin_router.get("/offline-packages")
+@admin_router.get("/offline-packages", response_model=list[OfflinePackageView])
 def list_offline_packages(
     request: Request,
     _admin: Account = Depends(require_admin),
@@ -1682,7 +2029,7 @@ def list_offline_packages(
     return [_offline_view(r, request.app.state.settings) for r in rows]
 
 
-@admin_router.get("/offline-packages/limits")
+@admin_router.get("/offline-packages/limits", response_model=OfflinePackageLimitsResponse)
 def offline_package_limits(
     request: Request,
     _admin: Account = Depends(require_admin),
@@ -1698,7 +2045,7 @@ def offline_package_limits(
     }
 
 
-@admin_router.post("/offline-packages")
+@admin_router.post("/offline-packages", response_model=OfflinePackageView)
 async def upload_offline_package(
     request: Request,
     platform: str = Form(...),
@@ -1764,7 +2111,7 @@ async def upload_offline_package(
     return _offline_view(pkg, settings)
 
 
-@admin_router.delete("/offline-packages/{pkg_id}")
+@admin_router.delete("/offline-packages/{pkg_id}", response_model=OfflinePackageDeleteResponse)
 def delete_offline_package(
     pkg_id: int,
     request: Request,
@@ -1872,7 +2219,7 @@ def _preset_scope_condition(scope: str):
     return None
 
 
-@admin_router.get("/presets")
+@admin_router.get("/presets", response_model=AdminPresetListResponse)
 def admin_list_presets(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -1918,7 +2265,7 @@ def admin_list_presets(
     }
 
 
-@admin_router.post("/presets", status_code=201)
+@admin_router.post("/presets", status_code=201, response_model=AdminPresetView)
 def admin_create_preset(
     payload: AdminPresetUpsert,
     request: Request,
@@ -1949,7 +2296,7 @@ def admin_create_preset(
     return _preset_view(row)
 
 
-@admin_router.put("/presets/{preset_id}")
+@admin_router.put("/presets/{preset_id}", response_model=AdminPresetView)
 def admin_update_preset(
     preset_id: int,
     payload: AdminPresetUpsert,
@@ -1982,7 +2329,7 @@ def admin_update_preset(
     return _preset_view(row)
 
 
-@admin_router.delete("/presets/{preset_id}")
+@admin_router.delete("/presets/{preset_id}", response_model=AdminPresetDeleteResponse)
 def admin_delete_preset(
     preset_id: int,
     request: Request,
@@ -2003,7 +2350,7 @@ def admin_delete_preset(
     return {"deleted": True, "id": preset_id}
 
 
-@admin_router.post("/presets/sync-seeds")
+@admin_router.post("/presets/sync-seeds", response_model=AdminPresetSyncResponse)
 def admin_sync_preset_seeds(
     request: Request,
     _admin: Account = Depends(require_admin),
@@ -2017,3 +2364,182 @@ def admin_sync_preset_seeds(
     )
     db.commit()
     return {"synced": True, **result}
+
+
+@admin_router.get("/telemetry-config")
+def get_telemetry_config_settings(
+    request: Request,
+    _staff: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+) -> TelemetryConfigView:
+    """查看当前生效的前端错误上报策略（DB 覆盖优先于环境变量）。"""
+    cfg = runtime_config.get_telemetry_config(db, request.app.state.settings)
+    return TelemetryConfigView(**cfg)
+
+
+@admin_router.put("/telemetry-config")
+def update_telemetry_config_settings(
+    payload: TelemetryConfigUpdate,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> TelemetryConfigView:
+    """热改采样率/去重窗口/zset 容量：写库后本进程立即生效，其它 worker TTL 内收敛。"""
+    settings = request.app.state.settings
+    runtime_config.set_telemetry_config(
+        db,
+        settings,
+        _admin.id,
+        sample_rate=payload.sample_rate,
+        dedupe_window_seconds=payload.dedupe_window_seconds,
+        dedupe_max_entries=payload.dedupe_max_entries,
+        canary_percent=payload.canary_percent,
+        canary=payload.canary.model_dump(exclude_none=True) if payload.canary else {},
+    )
+    write_audit(
+        db, actor_id=_admin.id, action="telemetry_config.update", request=request,
+        target_type="operational_setting", target_id="telemetry",
+        meta={
+            "sample_rate": payload.sample_rate,
+            "dedupe_window_seconds": payload.dedupe_window_seconds,
+            "dedupe_max_entries": payload.dedupe_max_entries,
+            "canary_percent": payload.canary_percent,
+            "canary": payload.canary.model_dump(exclude_none=True) if payload.canary else {},
+        },
+    )
+    db.commit()
+    return TelemetryConfigView(**runtime_config.get_telemetry_config(db, settings))
+
+
+# —— 运维：数据库备份 / 恢复 ——
+def _backup_view(item: dict) -> dict:
+    email = item.get("email") if isinstance(item.get("email"), dict) else {}
+    return {
+        "id": item.get("id", ""),
+        "created_at": item.get("created_at"),
+        "trigger": item.get("trigger", "manual"),
+        "engine": item.get("engine", "sqlite"),
+        "size_bytes": int(item.get("size_bytes") or 0),
+        "checksum": item.get("checksum", ""),
+        # 收件地址属运营凭据：只披露发送状态，不在列表/创建响应中回显。
+        "email": {
+            "enabled": bool(email.get("enabled", False)),
+            "status": str(email.get("status", "unknown")),
+            "reason": email.get("reason"),
+            "error": email.get("error"),
+        },
+    }
+
+
+@admin_router.get("/backups", response_model=BackupListView)
+def admin_list_backups(request: Request, admin: Account = Depends(require_staff)):
+    settings = request.app.state.settings
+    return {"items": [_backup_view(item) for item in backupsvc.list_backups(settings)]}
+
+
+@admin_router.post("/backups", status_code=201, response_model=BackupCreateResponse)
+def admin_create_backup(
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    settings = request.app.state.settings
+    manifest = backupsvc.create_backup(settings, trigger="manual")
+    view = _backup_view(manifest)
+    write_audit(
+        db, actor_id=admin.id, action="db.backup.created", request=request,
+        target_type="backup", target_id=manifest["id"],
+        meta={"engine": manifest["engine"], "trigger": "manual", "size_bytes": manifest["size_bytes"]},
+    )
+    db.commit()
+    return {"item": view}
+
+
+@admin_router.get("/backups/{backup_id}/download")
+def admin_download_backup(
+    backup_id: str,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    filename, content = backupsvc.download_backup(request.app.state.settings, backup_id)
+    write_audit(
+        db, actor_id=admin.id, action="db.backup.downloaded", request=request,
+        target_type="backup", target_id=backup_id,
+    )
+    db.commit()
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@admin_router.post("/backups/{backup_id}/restore", response_model=BackupRestoreResponse)
+def admin_restore_backup(
+    backup_id: str,
+    payload: BackupRestoreRequest,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if payload.apply and payload.confirm != "RESTORE":
+        raise ApiError(422, "restore_confirmation_required", "破坏性恢复必须输入 RESTORE 确认")
+    write_audit(
+        db, actor_id=admin.id, action="db.restore.requested", request=request,
+        target_type="backup", target_id=backup_id,
+        meta={"apply": payload.apply, "confirm": "RESTORE" if payload.apply else ""},
+    )
+    db.commit()
+    result = backupsvc.restore_backup(
+        request.app.state.settings, backup_id, apply=payload.apply, db=request.app.state.db
+    )
+    if payload.apply:
+        # 覆盖恢复会替换当前库，上面的「请求」审计随旧库一起消失；成功后重写一条落在新库。
+        with request.app.state.db.session() as audit_db:
+            write_audit(
+                audit_db, actor_id=admin.id, action="db.restore.applied", request=request,
+                target_type="backup", target_id=backup_id,
+                meta={"mode": result["mode"], "engine": result["engine"]},
+            )
+            audit_db.commit()
+    return BackupRestoreResponse(**result)
+
+
+@admin_router.delete("/backups/{backup_id}", response_model=BackupDeleteResponse)
+def admin_delete_backup(
+    backup_id: str,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    result = backupsvc.delete_backup(request.app.state.settings, backup_id)
+    write_audit(
+        db, actor_id=admin.id, action="db.backup.deleted", request=request,
+        target_type="backup", target_id=backup_id,
+    )
+    db.commit()
+    return BackupDeleteResponse(**result)
+
+
+@admin_router.get("/usage/models", response_model=ModelUsageResponse)
+def admin_model_usage(
+    days: int = Query(default=30, ge=1, le=366),
+    group_by: str = Query(default="model", pattern="^(model|provider|account|day)$"),
+    provider: str = Query(default=""),
+    model: str = Query(default=""),
+    route: str = Query(default=""),
+    account_id: int | None = Query(default=None, ge=1),
+    admin: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+):
+    """AI 模型消费统计：按模型 / 供应商 / 账户 / 日期聚合 usage_events。"""
+    return usage_stats.model_usage(
+        db,
+        days=days,
+        group_by=group_by,
+        provider=provider,
+        model=model,
+        route=route,
+        account_id=account_id,
+    )

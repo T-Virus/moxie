@@ -25,6 +25,7 @@ from ..errors import ApiError
 from ..metrics import increment
 from ..models import UsageEvent
 from ..services.model_config import resolve_step_model
+from ..services.model_gateway import provider_of
 from ..services.usage_stream import StreamUsageCollector
 
 logger = logging.getLogger("moxie.gateway")
@@ -45,6 +46,7 @@ def _persist_usage(
     usage: dict,
     byok: bool,
     route: str,
+    provider: str = "",
 ) -> None:
     total = int(usage.get("total_tokens") or 0)
     cost = _cost(settings, total)
@@ -59,6 +61,7 @@ def _persist_usage(
             occurred_at=utcnow(),
             meta={
                 "model": model,
+                "provider": provider or provider_of(model, settings.llm_base_url),
                 "prompt_tokens": int(usage.get("prompt_tokens") or 0),
                 "completion_tokens": int(usage.get("completion_tokens") or 0),
                 "total_tokens": total,
@@ -136,6 +139,7 @@ async def chat_completions(
             },
             byok=bool(byok_key),
             route="stub",
+            provider=result.provider,
         )
         return JSONResponse(content=result.data, headers={"x-request-id": getattr(request.state, "request_id", "")})
 
@@ -205,6 +209,7 @@ async def chat_completions(
                     usage=usage,
                     byok=bool(byok_key),
                     route=route,
+                    provider=provider_of(chosen_model, base_url),
                 )
             except Exception:  # noqa: BLE001 - 成本归集失败不影响已输出的内容
                 logger.exception("gateway stream usage attribution failed account=%s", account_id)
@@ -263,6 +268,7 @@ async def chat_completions(
             },
             byok=bool(byok_key),
             route="byok" if byok_key else "managed",
+            provider=provider_of(str(body.get("model") or settings.llm_model), base_url),
         )
     except Exception:  # noqa: BLE001
         # 成本归集失败不能影响用户拿结果

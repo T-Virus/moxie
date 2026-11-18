@@ -18,13 +18,17 @@ from ..deps import AuthContext, get_auth, require_admin, require_staff
 from ..errors import ApiError
 from ..models import InvoiceRequest, Order, Refund, ReconcileReport, Subscription
 from ..schemas import (
+    AdminInvoiceListResponse,
     AdminRefundDecisionRequest,
     AdminRefundRequest,
     InvoiceApplyRequest,
     InvoiceCreateRequest,
+    InvoiceDetailResponse,
+    InvoiceListResponse,
     InvoiceUpdateRequest,
     InvoiceVoidRequest,
     ReconcileRequest,
+    RefundListResponse,
 )
 from ..payments import get_provider
 from ..services import invoicing as invoicesvc
@@ -99,7 +103,7 @@ def portal(
 
 
 # ---- 用户：退款记录 / 发票 -------------------------------------------------
-@router.get("/refunds")
+@router.get("/refunds", response_model=RefundListResponse)
 def list_refunds(
     auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
 ):
@@ -110,7 +114,7 @@ def list_refunds(
     return {"items": items, "refunds": items}
 
 
-@router.get("/invoices")
+@router.get("/invoices", response_model=InvoiceListResponse)
 def list_invoices(
     auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
 ):
@@ -133,7 +137,7 @@ def _own_invoice(db: Session, invoice_id: int, account_id: int) -> InvoiceReques
     return row
 
 
-@router.get("/invoices/{invoice_id}")
+@router.get("/invoices/{invoice_id}", response_model=InvoiceDetailResponse)
 def get_invoice(
     invoice_id: int,
     auth: AuthContext = Depends(get_auth),
@@ -382,7 +386,7 @@ def reject_refund(
     return {"refund": _refund_view(refund)}
 
 
-@router.get("/admin/refunds")
+@router.get("/admin/refunds", response_model=RefundListResponse)
 def admin_refunds(
     order_id: int | None = Query(default=None, ge=1),
     _staff=Depends(require_staff),
@@ -506,7 +510,7 @@ def export_reconcile(
     )
 
 
-@router.get("/admin/invoices")
+@router.get("/admin/invoices", response_model=AdminInvoiceListResponse)
 def admin_invoices(
     status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -532,7 +536,7 @@ def admin_invoices(
     return {"items": items, "invoices": items, "total": total, "page": page, "page_size": page_size}
 
 
-@router.get("/admin/invoices/{invoice_id}")
+@router.get("/admin/invoices/{invoice_id}", response_model=InvoiceDetailResponse)
 def admin_invoice_detail(
     invoice_id: int,
     _staff=Depends(require_staff),

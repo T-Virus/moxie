@@ -67,6 +67,36 @@ class ModelResult:
     cost_cents: int
     byok: bool
     route: str
+    provider: str = ""
+
+
+_PROVIDER_HINTS = (
+    ("deepseek", "DeepSeek"),
+    ("dashscope", "通义千问"),
+    ("qwen", "通义千问"),
+    ("moonshot", "月之暗面"),
+    ("kimi", "月之暗面"),
+    ("zhipu", "智谱"),
+    ("glm", "智谱"),
+    ("openai", "OpenAI"),
+    ("gpt-", "OpenAI"),
+    ("anthropic", "Anthropic"),
+    ("claude", "Anthropic"),
+    ("gemini", "Google"),
+)
+
+
+def provider_of(model: str, base_url: str = "") -> str:
+    """从模型名 / 网关域名推导供应商，供消费统计按平台聚合。"""
+    text = (model or "").lower()
+    for hint, name in _PROVIDER_HINTS:
+        if hint in text:
+            return name
+    host = (urlparse(base_url or "").hostname or "").lower()
+    for hint, name in _PROVIDER_HINTS:
+        if hint in host:
+            return name
+    return host or "unknown"
 
 
 def _usage(data: dict) -> tuple[int, int, int]:
@@ -120,6 +150,7 @@ async def complete(
             cost_cents=_cost(settings, total),
             byok=byok,
             route="stub",
+            provider="stub",
         )
 
     if not api_key:
@@ -173,6 +204,7 @@ async def complete(
         cost_cents=_cost(settings, total),
         byok=byok,
         route="byok" if byok else "managed",
+        provider=provider_of(chosen, base_url or settings.llm_base_url),
     )
 
 

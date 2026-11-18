@@ -17,8 +17,10 @@ RUN (sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debi
     && apt-get install -y --no-install-recommends fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
+# 优先使用精确版本锁文件，保证构建可复现；锁文件缺失时回退到带版本上界的 requirements.txt。
+COPY requirements*.txt ./
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
+      -r $(test -f requirements.lock.txt && echo requirements.lock.txt || echo requirements.txt)
 
 COPY . .
 RUN chown -R appuser:appuser /app

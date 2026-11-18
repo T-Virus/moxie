@@ -26,6 +26,9 @@ ARTIFACT_NAMES = (
     "chapters.json",
     "chapters_full.json",
     "manuscript.md",
+    "polish_report.json",
+    "continuity_check.json",
+    "cover_plan.json",
     "chapter_summaries.json",
     "characters.json",
     "factions.json",
@@ -502,8 +505,12 @@ def run_to_dict(
                 )
         if merged:
             outputs[node.id] = {"chapters": merged}
-    # 正文只认 chapter_expand；参考创作没有正文节点，不能把改编数据当正文回显。
-    chapters = (outputs.get("chapter_expand") or {}).get("chapters") or []
+    # 正文只认润色后的 polish → 原始 chapter_expand 回退；不能把改编数据当正文回显。
+    chapters = (
+        (outputs.get("polish") or {}).get("chapters")
+        or (outputs.get("chapter_expand") or {}).get("chapters")
+        or []
+    )
     graph_output = outputs.get("character_graph") or {}
     characters = (
         graph_output.get("characters")

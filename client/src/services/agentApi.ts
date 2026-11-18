@@ -27,9 +27,11 @@ import type {
   ReviewContent,
   RunDetail,
   RunEvent,
+  RunFeedEvent,
   RunLength,
   RunListResult,
   RunMode,
+  SkillsCatalog,
   ResumePayload,
   SigningCheck,
   TimeEvent,
@@ -57,29 +59,33 @@ export async function fetchGenres(): Promise<GenresResponse> {
   return apiFetch<GenresResponse>('/genres')
 }
 
+/** 统一技能目录：数据来自后端 SSOT，登录后可读。 */
+export async function fetchSkills(): Promise<SkillsCatalog> {
+  return apiFetch<SkillsCatalog>('/skills')
+}
+
 export async function createRun(payload: CreateRunPayload): Promise<CreateRunResponse> {
   const idempotencyKey =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
       : `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`
 
+  // 权利声明走 payload.rights（加密 body，服务端可信）；不再发送可伪造的明文头。
+  // 缺少声明时服务端返回 422 rights_confirmation_required（生产环境不可关闭）。
   const headers: Record<string, string> = { 'Idempotency-Key': idempotencyKey }
-  if (payload.mode === 'reference') {
-    // 参考写作会把用户上传的作品用于改编，服务端版权闸门要求显式确认；
-    // 缺少该头会返回 422 rights_confirmation_required（生产环境不可关闭）。
-    headers['X-Rights-Confirmed'] = 'true'
-  }
   return apiFetch<CreateRunResponse>('/agent-runs', {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
+    withByok: true,
   })
 }
 
 export async function uploadSource(file: File): Promise<UploadResponse> {
   const form = new FormData()
   form.append('file', file)
-  return apiFetch<UploadResponse>('/uploads', { method: 'POST', body: form })
+  // 大文件上传耗时不可控，关闭默认超时；网络中断仍由 fetch 自身 reject 处理。
+  return apiFetch<UploadResponse>('/uploads', { method: 'POST', body: form, timeoutMs: 0 })
 }
 
 type RawRun = Omit<
@@ -1014,6 +1020,7 @@ export async function resumeRun(runId: string, payload: ResumePayload): Promise<
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
+    withByok: true,
   })
 }
 
@@ -1052,6 +1059,7 @@ export async function uploadRunCover(runId: string, file: File): Promise<CoverRe
   return apiFetch<CoverResult>(`/agent-runs/${encodeURIComponent(runId)}/cover/upload`, {
     method: 'POST',
     body: form,
+    timeoutMs: 0, // 上传耗时不可控，关闭默认超时
   })
 }
 
@@ -1166,17 +1174,17 @@ export async function listRuns(
   }
 }
 
-/**
- * 订阅事件流：正常返回时由调用方在完成后 abort。
- * 接口未实现（404/405/501）时抛 ApiError，调用方降级为轮询并在界面提示。
- */
-export async function streamRunEvents(
-  runId: string,
-  since: number,
-  onEvent: (event: RunEvent) => void,
+interface SseMessage {
+  event: string
+  data: string
+}
+
+/** 统一 SSE 帧解析：保留 event 名，支持加密帧与错误响应解密。 */
+async function streamSse(
+  url: string,
+  onMessage: (message: SseMessage) => void,
   signal: AbortSignal,
 ): Promise<void> {
-  const url = `${API_BASE}/agent-runs/${encodeURIComponent(runId)}/events?since=${since}`
   const pathQuery = (() => {
     try {
       const parsed = new URL(url, window.location.origin)
@@ -1215,23 +1223,66 @@ export async function streamRunEvents(
     const blocks = buffer.split(/\r?\n\r?\n/)
     buffer = blocks.pop() || ''
     for (const block of blocks) {
-      const dataLines = block
-        .split(/\r?\n/)
+      const lines = block.split(/\r?\n/)
+      const dataLines = lines
         .filter((line) => line.startsWith('data:'))
         .map((line) => line.slice(5).trim())
         .join('')
       if (!dataLines) continue
+      const eventLine = lines.find((line) => line.startsWith('event:'))
       try {
-        const raw = streamEncrypted
-          ? await decryptSse(session, pathQuery, dataLines)
-          : dataLines
-        const event = JSON.parse(raw) as RunEvent
-        if (typeof event.seq === 'number') onEvent(event)
+        const raw = streamEncrypted ? await decryptSse(session, pathQuery, dataLines) : dataLines
+        onMessage({ event: eventLine?.slice(6).trim() || 'message', data: raw })
       } catch {
         // 忽略格式错误的心跳/注释帧，保持流不中断
       }
     }
   }
+}
+
+/**
+ * 订阅单条运行的过程事件：正常返回时由调用方在完成后 abort。
+ * 接口未实现（404/405/501）时抛 ApiError，调用方降级为轮询并在界面提示。
+ */
+export async function streamRunEvents(
+  runId: string,
+  since: number,
+  onEvent: (event: RunEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  await streamSse(
+    `${API_BASE}/agent-runs/${encodeURIComponent(runId)}/events?since=${since}`,
+    (message) => {
+      try {
+        const event = JSON.parse(message.data) as RunEvent
+        if (typeof event.seq === 'number') onEvent(event)
+      } catch {
+        // 忽略非 JSON 控制帧
+      }
+    },
+    signal,
+  )
+}
+
+/** 账号级运行变更流：列表页收到 refresh 后重查，不再自己定时轮询。 */
+export async function streamRunFeed(
+  onEvent: (event: RunFeedEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  await streamSse(
+    `${API_BASE}/agent-runs/stream`,
+    (message) => {
+      // 服务端流结束帧的 event 名为 end（data 内 type=closed）；closed 兼容旧契约。
+      if (!['ready', 'refresh', 'end', 'closed'].includes(message.event)) return
+      try {
+        const event = JSON.parse(message.data) as RunFeedEvent
+        if (typeof event.active === 'number') onEvent(event)
+      } catch {
+        // 忽略非 JSON 控制帧
+      }
+    },
+    signal,
+  )
 }
 
 function safeJson(text: string): unknown {

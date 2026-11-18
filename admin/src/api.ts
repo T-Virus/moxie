@@ -1,7 +1,9 @@
-import { clearSession, getAccessToken } from './session'
+import { getAccessToken } from './session'
+import { noteRequestId, reportApiError } from './errorReporter'
 import {
   configurePayloadCrypto,
   decryptJson,
+  decryptSse,
   encryptJson,
   getPayloadSession,
   payloadHeaders,
@@ -9,8 +11,9 @@ import {
   type PayloadSession,
 } from './payloadCrypto'
 import type {
-  AlertRow, AuditRow, InvoiceRow, ListResult, LoginResponse, NotificationRow, OrderRow,
-  PlanRow, ReconcileReport, RefundRow, SubscriptionRow, TaskDashboard, TaskDetail, TaskRow,
+  AdminFeedEvent, AlertRow, AuditRow, BackupRestoreResult, BackupRow, ListResult, LoginResponse, ModelUsageSummary, NotificationDetail, NotificationRow, OrderRow,
+  NotificationBatchResult, PlanRow, PushReceiptHistory, ReconcileReport, RefundRow, RunEvent, SkillsCatalog,
+  SubscriptionRow, TaskDashboard, TaskDetail, TaskRow, TelemetryCanary, TelemetryConfig,
   UserDetail, UserRow,
 } from './types'
 
@@ -63,10 +66,12 @@ export function isMissingEndpoint(error: unknown): boolean {
 
 /** 提交前统一去掉字符串首尾空白；口令/令牌/密钥/正文等敏感字段保留原样。 */
 const NO_TRIM_KEYS = new Set([
-  'password', 'refresh_token', 'token', 'signature', 'api_key', 'secret', 'content',
+  'password', 'refresh_token', 'token', 'signature', 'api_key', 'secret',
+  // 正文/提示词/通知正文等长文本保留原始空白；短文本与标识统一 trim。
+  'content', 'body', 'prompt',
 ])
 
-function trimPayload(value: unknown, key = ''): unknown {
+export function trimPayload(value: unknown, key = ''): unknown {
   if (typeof value === 'string') return NO_TRIM_KEYS.has(key) ? value : value.trim()
   if (Array.isArray(value)) return value.map((item) => trimPayload(item, key))
   if (value && typeof value === 'object') {
@@ -116,9 +121,14 @@ interface RequestOptions {
   skipRefresh?: boolean
   headers?: Record<string, string>
   query?: Record<string, unknown>
+  /** 请求超时毫秒数；0 表示关闭（大文件上传用）。默认 60s。 */
+  timeoutMs?: number
   /** 内部使用：密钥轮换后只重试一次 */
   cryptoRetried?: boolean
 }
+
+/** 默认请求超时，避免网络挂起时 fetch 永远 pending。 */
+const DEFAULT_TIMEOUT_MS = 60_000
 
 interface RawResponse {
   response: Response
@@ -230,16 +240,27 @@ async function rawRequest(path: string, options: RequestOptions = {}): Promise<R
       headers['X-Payload-Encrypted'] = '1'
     }
   }
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const signal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined
   try {
     const response = await fetch(url, {
       method,
       headers,
       body,
       credentials: 'omit',
+      signal,
     })
+    noteRequestId(response.headers.get('x-request-id'))
     return { response, session, method, pathQuery }
   } catch (error) {
-    throw new ApiError(0, 'network_error', `无法连接服务端（${apiBaseLabel()}）`, path)
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      const err = new ApiError(0, 'timeout', '请求超时，请稍后重试', path)
+      reportApiError(err, pathQuery)
+      throw err
+    }
+    const err = new ApiError(0, 'network_error', `无法连接服务端（${apiBaseLabel()}）`, path)
+    reportApiError(err, pathQuery)
+    throw err
   }
 }
 
@@ -260,6 +281,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       resetPayloadCrypto()
       return request<T>(path, { ...options, cryptoRetried: true })
     }
+    reportApiError(error, raw.pathQuery, error.requestId)
     throw error
   }
   if (!rawText) return {} as T
@@ -368,7 +390,9 @@ export async function downloadBlob(path: string, fallbackName: string): Promise<
   }
   if (!response.ok) {
     const text = await readResponseText(raw)
-    throw await parseError(response, path, text)
+    const error = await parseError(response, path, text)
+    reportApiError(error, raw.pathQuery, error.requestId)
+    throw error
   }
   const disposition = response.headers.get('content-disposition') || ''
   const match = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i.exec(disposition)
@@ -403,7 +427,7 @@ export const api = {
   },
 
   users(query: Record<string, unknown>) {
-    return request<any>('/v1/admin/users', { query })
+    return request<{ items: UserRow[]; total: number; page: number; page_size: number }>('/v1/admin/users', { query })
   },
   userDetail(id: number) {
     return request<UserDetail>(`/v1/admin/users/${id}`)
@@ -416,6 +440,18 @@ export const api = {
   },
   deleteUser(id: number) {
     return request<any>(`/v1/admin/users/${id}`, { method: 'DELETE' })
+  },
+  skills() {
+    return request<SkillsCatalog>('/v1/admin/skills')
+  },
+  telemetryConfig() {
+    return request<TelemetryConfig>('/v1/admin/telemetry-config')
+  },
+  putTelemetryConfig(payload: {
+    sample_rate: number; dedupe_window_seconds: number; dedupe_max_entries: number
+    canary_percent?: number; canary?: TelemetryCanary
+  }) {
+    return request<TelemetryConfig>('/v1/admin/telemetry-config', { method: 'PUT', body: payload })
   },
   presets(query: Record<string, unknown>) {
     return request<any>('/v1/admin/presets', { query })
@@ -453,14 +489,15 @@ export const api = {
     )
   },
   uploadOfflinePackage(formData: FormData) {
-    return request<any>('/v1/admin/offline-packages', { method: 'POST', body: formData })
+    // 安装包可达数百 MB，关闭默认超时
+    return request<any>('/v1/admin/offline-packages', { method: 'POST', body: formData, timeoutMs: 0 })
   },
   deleteOfflinePackage(id: number) {
     return request<any>(`/v1/admin/offline-packages/${id}`, { method: 'DELETE' })
   },
 
   subscriptions(query: Record<string, unknown>) {
-    return request<any>('/v1/admin/subscriptions', { query })
+    return request<{ items: SubscriptionRow[]; total: number; page: number; page_size: number }>('/v1/admin/subscriptions', { query })
   },
   adjustSubscription(id: number, body: Record<string, unknown>) {
     return request<any>(`/v1/admin/subscriptions/${id}`, { method: 'PATCH', body })
@@ -473,7 +510,7 @@ export const api = {
   },
 
   orders(query: Record<string, unknown>) {
-    return request<any>('/v1/admin/orders', { query })
+    return request<{ items: OrderRow[]; total: number; page: number; page_size: number }>('/v1/admin/orders', { query })
   },
   orderDetail(id: number) {
     return request<{ order: OrderRow; refunds?: RefundRow[] }>(`/v1/admin/orders/${id}`)
@@ -535,7 +572,7 @@ export const api = {
   },
   /** 全部任务记录：status/source/account_id/q + 分页，覆盖排队/运行/暂停/完成/失败/取消。 */
   taskList(query: Record<string, unknown> = {}) {
-    return request<unknown>('/v1/admin/tasks', { query })
+    return request<{ items: TaskRow[]; total: number; page: number; page_size: number }>('/v1/admin/tasks', { query })
   },
   taskRetry(id: string) {
     return request<any>(`/v1/admin/tasks/${encodeURIComponent(id)}/retry`, { method: 'POST', body: {} })
@@ -559,17 +596,59 @@ export const api = {
   },
 
   alerts(query: Record<string, unknown>) {
-    return request<any>('/v1/admin/alerts', { query })
+    return request<{
+      items: AlertRow[]; total: number; page: number; page_size: number
+      window_hours: number; failed_notifications: number; webhook_failures: number
+    }>('/v1/admin/alerts', { query })
   },
   notifications(query: Record<string, unknown>) {
-    return request<any>('/v1/admin/notifications', { query })
+    return request<{ items: NotificationRow[]; total: number; page: number; page_size: number }>('/v1/admin/notifications', { query })
+  },
+  notificationDetail(id: number) {
+    return request<{ delivery: NotificationDetail }>(`/v1/admin/notifications/${id}`)
+  },
+  notificationReceipts(id: number) {
+    return request<{ delivery: PushReceiptHistory }>(`/v1/admin/notifications/${id}/receipts`)
+  },
+  notificationReceiptsCsv(id: number) {
+    return downloadBlob(`/v1/admin/notifications/${id}/receipts/export`, `receipts-${id}.csv`)
+  },
+  sendNotificationBatch(payload: { account_ids: number[]; title: string; body: string; channels?: string[] }) {
+    return request<NotificationBatchResult>('/v1/admin/notifications/batch', { method: 'POST', body: payload })
   },
   retryNotification(id: number) {
     return request<any>(`/v1/admin/notifications/${id}/retry`, { method: 'POST', body: {} })
   },
 
+  backups() {
+    return request<{ items: BackupRow[] }>('/v1/admin/backups')
+  },
+  createBackup() {
+    return request<{ item: BackupRow }>('/v1/admin/backups', { method: 'POST', body: {} })
+  },
+  downloadBackup(id: string) {
+    return downloadBlob(`/v1/admin/backups/${encodeURIComponent(id)}/download`, `${id}.zip`)
+  },
+  restoreBackup(id: string, apply = false, confirm = '') {
+    return request<BackupRestoreResult>(`/v1/admin/backups/${encodeURIComponent(id)}/restore`, {
+      method: 'POST',
+      body: { apply, confirm },
+    })
+  },
+  deleteBackup(id: string) {
+    return request<{ id: string; deleted: boolean }>(`/v1/admin/backups/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+  },
+
+  modelUsage(query: Record<string, unknown>) {
+    return request<ModelUsageSummary>('/v1/admin/usage/models', { query })
+  },
+
   auditLogs(query: Record<string, unknown>) {
-    return request<any>('/v1/admin/audit-logs', { query })
+    return request<{ items: AuditRow[]; total: number; page: number; page_size: number }>(
+      '/v1/admin/audit-logs', { query },
+    )
   },
   plans() {
     return request<{ plans: PlanRow[] }>('/v1/plans', { auth: false })
@@ -577,6 +656,121 @@ export const api = {
   renewalReminders() {
     return request<any>('/v1/admin/renewal-reminders')
   },
+}
+
+interface AdminSseMessage {
+  event: string
+  data: string
+}
+
+/** 管理端 SSE 统一解析：带 Authorization 与载荷加密，错误响应走同一解密链路。 */
+async function streamSse(
+  path: string,
+  onMessage: (message: AdminSseMessage) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const url = apiUrl(path)
+  const pathQuery = pathWithQuery(url)
+  const session = await getPayloadSession()
+  const resp = await fetch(url, {
+    headers: {
+      Accept: 'text/event-stream',
+      ...authHeaders(),
+      ...payloadHeaders(session),
+    },
+    signal,
+  }).catch((error) => {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new ApiError(0, 'network_error', `无法连接服务端（${apiBaseLabel()}）`, path)
+  })
+  noteRequestId(resp.headers.get('x-request-id'))
+  if (!resp.ok || !resp.body) {
+    const text = await readResponseText({
+      response: resp,
+      session,
+      method: 'GET',
+      pathQuery,
+    })
+    throw await parseError(resp, path, text)
+  }
+
+  const encrypted = resp.headers.get('x-payload-sse') === '1'
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const blocks = buffer.split(/\r?\n\r?\n/)
+    buffer = blocks.pop() || ''
+    for (const block of blocks) {
+      const lines = block.split(/\r?\n/)
+      const dataLines = lines
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trim())
+        .join('')
+      if (!dataLines) continue
+      const eventLine = lines.find((line) => line.startsWith('event:'))
+      try {
+        const raw = encrypted ? await decryptSse(session, pathQuery, dataLines) : dataLines
+        onMessage({ event: eventLine?.slice(6).trim() || 'message', data: raw })
+      } catch {
+        // 忽略控制/心跳帧解析失败，保持流不中断
+      }
+    }
+  }
+}
+
+/** 订阅单条任务/写作运行的增量事件与状态变化。 */
+export async function streamTaskEvents(
+  taskId: string,
+  source: string | undefined,
+  since: number,
+  onEvent: (event: RunEvent) => void,
+  onStatus: (status: string) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const query = new URLSearchParams({ since: String(since) })
+  if (source) query.set('source', source)
+  await streamSse(
+    `/v1/admin/tasks/${encodeURIComponent(taskId)}/events?${query.toString()}`,
+    (message) => {
+      try {
+        if (message.event === 'status') {
+          const payload = JSON.parse(message.data) as { status?: string }
+          if (typeof payload.status === 'string') onStatus(payload.status)
+          return
+        }
+        if (message.event !== 'message') return
+        const event = JSON.parse(message.data) as RunEvent
+        if (typeof event.seq === 'number') onEvent(event)
+      } catch {
+        // 忽略非 JSON 控制帧
+      }
+    },
+    signal,
+  )
+}
+
+/** 运营看板聚合变更流：收到 refresh 后重查列表与概览。 */
+export async function streamTasksFeed(
+  onEvent: (event: AdminFeedEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  await streamSse(
+    '/v1/admin/tasks/stream',
+    (message) => {
+      if (!['ready', 'refresh', 'closed'].includes(message.event)) return
+      try {
+        const event = JSON.parse(message.data) as AdminFeedEvent
+        if (typeof event.active === 'number') onEvent(event)
+      } catch {
+        // 忽略非 JSON 控制帧
+      }
+    },
+    signal,
+  )
 }
 
 export type { SubscriptionRow, TaskRow }

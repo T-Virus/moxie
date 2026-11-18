@@ -181,3 +181,54 @@ def test_upload_cleanup_respects_retention(stub_client):
         )
     assert removed == 1
     assert not storage.exists(key)
+
+
+def test_upload_rejects_binary_disguised_as_text(stub_client):
+    """扩展名是 .txt 但内容是 PE/ELF/ZIP/PNG 魔数时必须 422。"""
+    client, headers, _account, _settings = stub_client
+    for magic in (b"MZ\x90\x00", b"\x7fELF\x02\x01", b"PK\x03\x04junk", b"\x89PNG\r\n\x1a\n"):
+        resp = client.post(
+            "/v1/uploads",
+            headers=headers,
+            files={"file": ("fake.txt", magic + b"\x00\x01binary", "text/plain")},
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["error"]["code"] == "source_content_binary"
+
+
+def test_upload_rejects_nul_bytes(stub_client):
+    """文本中出现 NUL 字节判为二进制，拒绝。"""
+    client, headers, _account, _settings = stub_client
+    resp = client.post(
+        "/v1/uploads",
+        headers=headers,
+        files={"file": ("nul.txt", b"hello\x00world", "text/plain")},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "source_content_binary"
+
+
+def test_upload_rejects_non_utf8(stub_client):
+    """非 UTF-8 字节序列（如 GBK 中文）判为编码不符，拒绝。"""
+    client, headers, _account, _settings = stub_client
+    resp = client.post(
+        "/v1/uploads",
+        headers=headers,
+        files={"file": ("gbk.txt", "中文".encode("gbk"), "text/plain")},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "source_content_encoding"
+
+
+def test_upload_accepts_valid_utf8_and_multibyte_at_boundary(stub_client):
+    """合法 UTF-8 文本（含中文）正常通过，头部边界切断多字节不误判。"""
+    client, headers, _account, settings = stub_client
+    # 构造长度略超 SNIFF_BYTES、且边界处正好是中文字符的文本
+    text = ("中文小说正文" * 2000)
+    resp = client.post(
+        "/v1/uploads",
+        headers=headers,
+        files={"file": ("good.txt", text.encode("utf-8"), "text/plain")},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["size"] == len(text.encode("utf-8"))

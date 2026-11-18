@@ -8,6 +8,7 @@ import json
 from pydantic import Field
 
 from ..contracts import SkillContext, StrictModel, call_json, list_of_dicts, text_of
+from ..entity_ids import foreshadow_id as _foreshadow_id
 from .base import BaseSkill
 
 # 热门/参考按篇幅产出全量章纲，遵循网文连载标准：
@@ -579,8 +580,12 @@ def _ledger_to_client(ledger: list[dict]) -> list[dict]:
         payoff = int(item.get("payoff_chapter") or 0)
         rows.append(
             {
+                "id": text_of(item.get("id")) or None,
+                "legacy_id": text_of(item.get("legacy_id")) or None,
                 "text": text_of(item.get("desc"))[:120],
                 "chapter": planted or None,
+                "planted_chapter": planted or None,
+                "payoff_chapter": payoff or None,
                 "payoff": f"第 {payoff} 章兑现" if payoff else "",
                 "status": "未回收",
             }
@@ -595,9 +600,11 @@ def _build_ledger(chapters: list[OutlineChapter]) -> list[dict]:
         desc = text_of(chapter.foreshadow)
         if not desc:
             continue
+        legacy = f"F{len(rows) + 1}"
         rows.append(
             {
-                "id": f"F{len(rows) + 1}",
+                "id": _foreshadow_id(desc) or legacy,
+                "legacy_id": legacy,
                 "desc": desc[:160],
                 "planted_chapter": index,
                 "payoff_chapter": min(len(chapters), index + 3),
@@ -865,9 +872,11 @@ def _ledger_of(data: dict, chapters: list[OutlineChapter]) -> list[dict]:
             continue
         if planted < 1 or payoff < planted:
             continue
+        legacy = text_of(item.get("id")) or f"F{len(rows) + 1}"
         rows.append(
             {
-                "id": text_of(item.get("id")) or f"F{len(rows) + 1}",
+                "id": _foreshadow_id(desc) or legacy,
+                "legacy_id": legacy,
                 "desc": desc[:160],
                 "planted_chapter": planted,
                 "payoff_chapter": payoff,

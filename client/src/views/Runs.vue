@@ -216,6 +216,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Audience, RunDetail, RunLength } from '@/types'
 import { listRuns } from '@/services/agentApi'
+import { useRunFeed } from '@/composables/useRunFeed'
 import { ApiError } from '@/services/http'
 import { resetSession, session } from '@/stores/session'
 import { MODE_LABEL, relativeTime } from '@/utils/format'
@@ -416,22 +417,18 @@ function titleInitial(title: string): string {
   return title.trim().charAt(0) || '书'
 }
 
-/** 有进行中的运行（含被运营暂停的）时静默刷新列表，状态徽章不再停在旧值 */
+/** 有进行中的运行（含被运营暂停的）时订阅账号级 SSE，状态变更由服务端推送 */
 const LIVE_STATUS = ['queued', 'running', 'paused']
-const LIST_POLL_INTERVAL = 6000
-let listTimer: number | null = null
+const runFeed = useRunFeed({
+  active: () => runs.value.some((item) => LIVE_STATUS.includes(item.status)),
+  refresh: () => {
+    if (!document.hidden) void load(true)
+  },
+  pollIntervalMs: 6000,
+})
 
 function syncListPolling(): void {
-  const live = runs.value.some((item) => LIVE_STATUS.includes(item.status))
-  if (live && listTimer === null) {
-    listTimer = window.setInterval(() => {
-      if (document.hidden) return
-      void load(true)
-    }, LIST_POLL_INTERVAL)
-  } else if (!live && listTimer !== null) {
-    window.clearInterval(listTimer)
-    listTimer = null
-  }
+  runFeed.sync(runs.value.some((item) => LIVE_STATUS.includes(item.status)))
 }
 
 async function load(silent = false): Promise<void> {
@@ -517,8 +514,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.clearTimeout(searchTimer)
-  if (listTimer !== null) window.clearInterval(listTimer)
-  listTimer = null
+  runFeed.stop()
   document.removeEventListener('pointerdown', onDocPointerDown)
 })
 </script>

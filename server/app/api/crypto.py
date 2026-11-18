@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from ..schemas import PublicKeyResponse
+
 router = APIRouter(prefix="/crypto", tags=["crypto"])
 
 
-@router.get("/public-key")
+@router.get("/public-key", response_model=PublicKeyResponse)
 def payload_public_key(request: Request):
     crypto = request.app.state.payload_crypto
     return crypto.public_key_payload()

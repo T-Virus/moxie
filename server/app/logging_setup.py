@@ -6,6 +6,8 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import re
+import secrets
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -63,8 +65,32 @@ def new_request_id(incoming: str | None = None) -> str:
     return incoming.strip()[:64] if incoming else uuid.uuid4().hex
 
 
+_TRACEPARENT_RE = re.compile(
+    r"^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})(?:-.*)?$", re.IGNORECASE
+)
+
+
+def parse_traceparent(value: str | None) -> str | None:
+    """解析 W3C traceparent，只取 32 位 trace-id；非法串一律忽略。"""
+    if not value:
+        return None
+    match = _TRACEPARENT_RE.match(value.strip())
+    if match is None or match.group(3).lower() == "00":
+        return None
+    return match.group(1).lower()
+
+
+def new_trace_id() -> str:
+    """生成 32 位十六进制 trace-id，格式与 W3C 对齐。"""
+    return secrets.token_hex(16)
+
+
+def new_span_id() -> str:
+    return secrets.token_hex(8)
+
+
 def set_trace_id(value: str | None) -> str:
-    """HTTP 请求复用 request_id；worker / scheduler 用任务号作为 trace_id。"""
+    """HTTP 请求优先复用上游 traceparent；worker / scheduler 用任务号作为 trace_id。"""
     trace_id = (value or "-").strip()[:64] or "-"
     trace_id_ctx.set(trace_id)
     return trace_id

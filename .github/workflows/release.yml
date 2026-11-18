@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            client/package-lock.json
+            admin/package-lock.json
+      - name: Install server dependencies
+        working-directory: server
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Build client and admin
+        run: |
+          (cd client && npm ci && npm run build)
+          (cd admin && npm ci && npm run build)
+      - name: Freeze server dependencies
+        working-directory: server
+        run: python -m pip freeze > ../release-server-requirements.txt
+      - name: Package release assets
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p release
+          cp release-server-requirements.txt "release/server-requirements-$TAG.txt"
+          zip -qr "release/moxie-web-$TAG.zip" client/dist admin/dist
+          tar -czf "release/moxie-server-$TAG.tar.gz" \
+            --exclude='server/.venv' --exclude='server/backups' \
+            --exclude='server/artifacts' --exclude='server/novel_server.db' \
+            server config scripts src
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          artifact-path: .
+          output-file: release/sbom.spdx.json
+          format: spdx-json
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign release assets
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          for asset in release/moxie-web-*.zip release/moxie-server-*.tar.gz release/sbom.spdx.json; do
+            cosign sign-blob --yes "$asset" --output-signature "$asset.sig"
+          done
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            release/moxie-web-*.zip
+            release/moxie-server-*.tar.gz
+            release/sbom.spdx.json
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body_path: CHANGELOG.md
+          prerelease: ${{ contains(github.ref_name, '-') }}

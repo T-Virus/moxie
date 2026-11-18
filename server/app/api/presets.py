@@ -15,7 +15,7 @@ from ..db import get_db
 from ..deps import AuthContext, get_auth
 from ..errors import ApiError
 from ..models import Preset
-from ..schemas import AdminPresetUpsert
+from ..schemas import AdminPresetUpsert, PresetCreateResponse, PresetsResponse
 
 router = APIRouter(tags=["presets"])
 
@@ -25,7 +25,7 @@ def _split_audience(raw: str | None) -> list[str]:
     return parts or ["all"]
 
 
-@router.get("/presets")
+@router.get("/presets", response_model=PresetsResponse)
 def list_presets(
     type: str | None = Query(default=None, max_length=64, description="单个预设类型"),
     types: str | None = Query(default=None, max_length=512, description="逗号分隔的多个类型"),
@@ -67,7 +67,7 @@ def _assert_custom_value(value: str) -> None:
         raise ApiError(422, "invalid_preset", "预设值不能为空或包含控制字符")
 
 
-@router.post("/presets", status_code=201)
+@router.post("/presets", status_code=201, response_model=PresetCreateResponse)
 def create_preset(
     payload: AdminPresetUpsert,
     auth: AuthContext = Depends(get_auth),

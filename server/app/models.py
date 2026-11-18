@@ -311,12 +311,34 @@ class NotificationDelivery(Base):
     next_retry_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
+class WebPushSubscription(Base):
+    """Web Push 订阅：endpoint 全局唯一，重复订阅覆盖同一行（同一浏览器只有一个订阅）。
+    仅保存推送所需的公钥与 auth secret，不保存任何业务数据。"""
+
+    __tablename__ = "web_push_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("endpoint", name="uq_webpush_endpoint"),
+        Index("idx_webpush_account_status", "account_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("accounts.id"), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(500), nullable=False)
+    p256dh: Mapped[str] = mapped_column(String(255), nullable=False)
+    auth: Mapped[str] = mapped_column(String(255), nullable=False)
+    device_label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
+
+
 class Task(Base):
     __tablename__ = "tasks"
     __table_args__ = (
         UniqueConstraint("account_id", "idempotency_key", name="uq_tasks_account_idem"),
         Index("idx_tasks_status_lease", "status", "lease_until"),
         Index("idx_tasks_account_time", "account_id", "created_at"),
+        Index("idx_tasks_retry_due", "status", "next_retry_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -336,6 +358,8 @@ class Task(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     lease_until: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # 失败重试的退避到点时间：queued 且未到点前 worker 不领取，由 scheduler 到点重投。
+    next_retry_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reserved_metric: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reserved_quantity: Mapped[int] = mapped_column(BIGINT, default=0, nullable=False)
@@ -711,9 +735,43 @@ class Preset(Base):
     )
 
 
+class AccountDeletionRequest(Base):
+    """账号注销申请：宽限期内保留账号，到期由 scheduler 统一清除。
+
+    status: pending / cancelled；到期清理后本行随账号一并删除，
+    完成事实写入 audit_logs（account.deleted），不长期留存可识别信息。
+    """
+
+    __tablename__ = "account_deletion_requests"
+    __table_args__ = (
+        Index("idx_account_deletions_purge", "status", "purge_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(BIGINT, ForeignKey("accounts.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
+    purge_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    cancelled_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    meta: Mapped[dict] = mapped_column(JSON_TYPE, default=dict, nullable=False)
+
+
+class OperationalSetting(Base):
+    """运营期可热改的配置（键值 JSON）：后台可视化维护，服务端读时带短 TTL 缓存。"""
+
+    __tablename__ = "operational_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
+    updated_by: Mapped[int | None] = mapped_column(BIGINT, nullable=True)
+
+
 __all__ = [
     "Base",
     "Account",
+    "AccountDeletionRequest",
     "Device",
     "OfflinePackage",
     "Preset",
@@ -731,6 +789,7 @@ __all__ = [
     "CreditGrant",
     "Notification",
     "NotificationDelivery",
+    "WebPushSubscription",
     "Order",
     "WebhookEvent",
     "Refund",
@@ -743,4 +802,5 @@ __all__ = [
     "AgentRunEvent",
     "StoredObject",
     "EmailVerification",
+    "OperationalSetting",
 ]

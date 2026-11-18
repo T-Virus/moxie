@@ -1,38 +1,52 @@
 # 工程化说明（CI / E2E / 压测 / 备份 / 监控）
 
-本文档说明新增的工程化能力与本地运行方式。所有命令均在 2026-11-04 本机实际执行，
-无法执行的条件单独标注。
+本文档说明新增的工程化能力与本地运行方式。无法在本机执行的条件单独标注。
+
+> 范围约定（2026-11-18）：后续工程化建设仅覆盖 `/server`、`/client`、`/admin` 三个在线项目。离线桌面端及其构建、E2E、打包链路按存量保留，不再新增能力或扩展门禁；i18n 与站点地图继续跳过。
+
+最近更新：2026-11-18（CI 最小权限/超时/覆盖率门禁/产物归档/失败通知，release SBOM/签名/来源证明，用户数据权利闭环，BYOK 会话入口、弱网退避、端到端 trace、告警与 SLO）。
 
 ## 1. CI/CD（GitHub Actions）
 
 ### `.github/workflows/ci.yml`
 
+当前在线版（server + client + admin）+ 离线 E2E 的合并门禁：
+
 | Job | 内容 | 失败定位 |
 | --- | --- | --- |
-| `server-tests` | Python 3.12 + `server/requirements.txt`，SQLite，`pytest -m "not live"` | 失败输出 + `server-pytest-report`（JUnit XML） |
-| `desktop-unittest` | Python 3.12，Ubuntu + Windows 矩阵，`python -m unittest discover -s tests` | 按步骤/平台定位 |
-| `web-build` | Node 22，`npm ci && npm run build`，上传 `web-dist` 产物 | 构建日志 + dist artifact |
-| `e2e` | 依赖 `web-build`，安装 Playwright Chromium，`npm test` | 失败上传 trace / 截图 / html 报告 |
+| `server-tests` | Python 3.12，SQLite + fakeredis，`pytest -m "not live"`，JUnit XML + coverage XML，覆盖率低于 70% 失败（本地实测 79.44%） | 失败输出 + `server-pytest-report` / `server-coverage` |
+| `migration-check` | 临时 SQLite `alembic upgrade head` + `alembic check`（迁移与模型零漂移） | 步骤日志 |
+| `web-apps` | Node 22，matrix=`client,admin`：`npm ci` → typecheck → lint → test → build，归档 `dist` | 按 app 区分步骤 + `<app>-dist` 制品 |
+| `dependency-audit` | `pip-audit -r server/requirements.txt --strict` + 三端 `npm audit --omit=dev --audit-level=high` | 步骤日志 |
+| `e2e-desktop` | 存量 job：依赖 web-apps，构建 web/dist + Playwright Chromium 跑离线冒烟；后续不再新增用例或能力 | trace / 截图 / HTML 报告 |
+| `ci-failure-notice` | 任一必需 job 失败时写 Job Summary；配置 `CI_FAILURE_WEBHOOK` 后推送值班机器人 | GitHub Actions run 摘要 / 群消息 |
 
-缓存：`actions/setup-python` 的 pip 缓存（`server/requirements.txt`、`tests/requirements-ci.txt`），
-`actions/setup-node` 的 npm 缓存（`web/package-lock.json`、`e2e/package-lock.json`）。
+所有 job 均设 `timeout-minutes`，workflow 顶层仅 `contents: read`；release 发布 job 才提升为 `contents: write` + `id-token: write`。缓存：pip 走 `server/requirements.txt`，npm 走各端 `package-lock.json`。
 
-### `.github/workflows/package.yml`（手动触发）
+### Release（`.github/workflows/release.yml`）
 
-- 输入 `version`（写入 `dist/version.json` 与产物名）与 `build_exe`（默认 false）。
-- `frontend` job：构建 `web/dist` + 版本清单，上传 `web-dist-<version>`。
-- `windows-exe` job（可选）：Windows runner 上用 Nuitka 执行 `python src/build_app.py --target win --force-web`，
-  上传 `dist/墨写.exe` + `version.json`。不要求真实代码签名。
+Tag 形如 `v*` 触发：重新构建 client/admin 与 server 源码包 → 生成 SPDX SBOM → cosign keyless 签名 → 构建来源证明（provenance attestation）→ 发布 GitHub Release。预发布 tag（含 `-`）自动标记为 prerelease，发布说明取 `CHANGELOG.md` 并附带自动生成的 commit notes。
 
-本地等价的通过项（已实测）：
+本地等价的通过项（2026-11-18 最终回归实测）：
 
 ```
-server pytest:   107 passed, 3 deselected in 137.17s
-desktop unittest: Ran 16 tests in 11.228s — OK
-web build:       ✓ built in 48.93s（vendor 1.59 MB，各页面按需分包）
+server pytest（全量,-m "not live"）: 422 passed，coverage 79.44%
+alembic upgrade head + check: No new upgrade operations detected
+client: typecheck OK · lint 0 error / 1 warning · test 57 passed · build OK
+admin:  typecheck OK · lint 0 error · test 18 passed · build OK
+scripts/check_skills.py --check: 硬校验 10 项通过，漂移 0
+workflow / monitoring YAML: 4 个文件 PyYAML 解析通过
 ```
 
-说明：CI 本身未在 GitHub runner 上执行（本机无 runner）；两份 workflow YAML 已用 PyYAML 解析校验。
+说明：CI 本身未在 GitHub runner 上执行（本机无 runner）；workflow YAML 已用 PyYAML 解析校验。
+client lint 仅剩 `BodyTab.vue` 一处已知 `v-html` 白名单提示，不阻断合并。后端全量有 2 条 SQLite `ResourceWarning`（测试进程 GC 阶段），不失败、不阻断发布；后续可补连接归属追踪。
+
+### 依赖版本管理
+
+- `server/requirements.txt`：每个依赖钉主版本上界（如 `>=2.0,<3`），避免破坏性升级。
+- `server/requirements.lock.txt`：精确版本锁文件，Dockerfile 优先用它构建（`test -f` 时选用），
+  缺失时回退到 requirements.txt。锁文件已于 2026-11-18 用 CPython 3.12.16 重新冻结，
+  与生产镜像 `python:3.12-slim` 对齐；`pip check` 无冲突，并用 3.12 环境跑通定向测试。
 
 ## 2. E2E（Playwright）
 
@@ -113,8 +127,11 @@ python ops/backup/sqlite_drill.py
 
 ## 5. 监控（ops/monitoring）
 
-- `prometheus.yml`：抓取 `api:8000/metrics`（compose）与 `host.docker.internal:8798`（本地）。
+- `prometheus.yml`：抓取 `api:8000/metrics`（compose）与 `host.docker.internal:8798`（本地），并通过 `rule_files` 引入 `alerts.yml`。
 - `grafana-dashboard.json`：队列深度、任务速率、模型调用/成本、回调失败、额度拒绝、限流、上传、Token 用量等面板。
+- `alerts.yml`：API 不可达、队列积压、租约回收、任务失败率、回调失败、模型成本突增、额度拒绝与认证限流告警。
+- `SLO.md`：试点期 SLI/目标、错误预算、端到端 trace-id 串联与告警响应级别。
+- 浏览器请求带 `X-Trace-Id` / W3C `Traceparent`，服务端回写并写入结构化日志；前端错误上报带 `trace_id`，以 `source_trace_id` 落日志，便于跨端串联。
 - 指标名已与 `server/app/metrics.py` 和实际 `/metrics` 输出核对（详见 `ops/monitoring/README.md`）。
 
 ## 6. 安全与依赖报告
@@ -129,9 +146,19 @@ cd web && npm audit --omit=dev --json > ../ops/reports/npm-audit-report.json
 - `pip-audit`：42 个依赖，**无已知漏洞**。
 - `npm audit --omit=dev`：prod 95 个依赖，**0 漏洞**（info/low/moderate/high/critical 均为 0）。
 
+- BYOK：在线端 Key 仅存 `sessionStorage`（键 `mx_byok_key`），关闭标签页即失效；不写 `localStorage`、不进 Vue store、不随任务参数落库。仅 `withByok` 的模型消费请求注入 `X-BYOK-Key`。
+- 弱网：client HTTP 层对网络错误与 502/503/504 自动重试，默认最多 2 次；指数退避（300ms 起、5s 上限）+ 25% 抖动，尊重 `Retry-After`，仅 GET/HEAD/OPTIONS 或带 `Idempotency-Key` 的请求重试。
+
 清单与待办见 [`docs/security-checklist.md`](security-checklist.md)。
 
-## 7. 目录速览
+## 7. 用户数据权利
+
+- `GET /v1/me/export`：导出账号、设备、订阅、用量、订单、任务、Agent 运行、法律同意与审计留痕等结构化数据；对象存储内容按上限内联，超限项给临时下载链接。密码哈希、令牌哈希、Web Push 密钥不出库。
+- `POST /v1/me/delete`：需密码 + 显式确认串 `DELETE_MY_ACCOUNT`；写注销申请、账号置 `closing`、撤销全部刷新会话，宽限期（默认 7 天）后由 scheduler 清除。
+- 管理端：`GET /v1/admin/account-deletions` 查看申请，`POST .../{id}/cancel` 撤销并恢复登录，`POST .../{id}/purge` 立即清除。
+- 清除逻辑集中在 `app/services/data_rights.py`，管理端硬删除与注销到期清除共用；会删除上传源文件、任务产物、Agent 产物、封面，并按外键拓扑清理全部业务子表。
+
+## 8. 目录速览
 
 ```
 .github/workflows/ci.yml        CI（pytest / unittest / web build / e2e）
@@ -140,13 +167,13 @@ tests/requirements-ci.txt       桌面端 unittest 的 CI 依赖
 e2e/                            Playwright 配置、临时服务启动器、6 条用例
 ops/loadtest/                   Locust / k6 / 本地一键压测 / 实测结果
 ops/backup/                     Postgres / MinIO / SQLite 演练与恢复文档
-ops/monitoring/                 Prometheus 抓取 + Grafana 看板
+ops/monitoring/                 Prometheus 抓取 + 告警规则 + SLO + Grafana 看板
 ops/reports/                    依赖审计报告、压测 CSV
 docs/security-checklist.md      安全核对项与待办
 docs/engineering.md             本文档
 ```
 
-## 8. 仍需条件
+## 9. 仍需条件
 
 | 项 | 原因 | 下一步 |
 | --- | --- | --- |

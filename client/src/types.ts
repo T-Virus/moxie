@@ -26,8 +26,8 @@ export interface GenreItem {
 export interface GenresResponse {
   items: GenreItem[]
   custom_allowed: boolean
-  /** 接口未就绪时前端使用内置预设，并把原因透传给页面 */
-  degraded?: string
+  /** 接口未就绪时前端使用内置预设，并把原因透传给页面；正常路径为 null */
+  degraded?: string | null
 }
 
 export interface GenreSelection {
@@ -46,6 +46,14 @@ export interface CreateRunOptions {
   adaptation_extra?: string
 }
 
+/** 参考改编的权利声明，随加密 body 提交，与服务端 RightsDeclaration 对齐 */
+export interface RightsDeclaration {
+  basis: 'own' | 'authorized' | 'public_domain'
+  rights_confirmed: true
+  ai_notice_ack: true
+  note?: string | null
+}
+
 export interface CreateRunPayload {
   mode: RunMode
   title: string
@@ -55,6 +63,8 @@ export interface CreateRunPayload {
   source_key?: string | null
   brief?: string | null
   options?: CreateRunOptions
+  /** 参考改编必填：结构化权利声明（走加密 body，服务端可信） */
+  rights?: RightsDeclaration | null
 }
 
 export interface CreateRunResponse {
@@ -62,9 +72,12 @@ export interface CreateRunResponse {
   /** 幂等命中已有运行时可能回传当前状态，而不是固定的 queued */
   status: RunStatus
   mode: RunMode
-  created_at: string
+  /** 契约 response_model 对可空时间戳补 null */
+  created_at: string | null
   /** 服务端在幂等命中时会返回 false */
-  created?: boolean
+  created: boolean
+  /** 是否成功入队（幂等命中为 false） */
+  enqueued: boolean
 }
 
 export interface Stage {
@@ -439,10 +452,14 @@ export interface IndexEntry {
 }
 
 export interface ForeshadowEntry {
+  id?: string
+  legacy_id?: string
   text?: string
   seed?: string
   payoff?: string
   chapter?: number
+  planted_chapter?: number
+  payoff_chapter?: number
   status?: string
 }
 
@@ -741,6 +758,13 @@ export interface RunEvent {
   at: string
 }
 
+/** 账号级运行变更流：只发 refresh 信号，客户端收到后重查列表。 */
+export interface RunFeedEvent {
+  type: 'ready' | 'refresh' | 'closed'
+  active: number
+  at?: number
+}
+
 export interface UploadResponse {
   source_key: string
   filename: string
@@ -808,9 +832,11 @@ export interface Subscription {
   current_start_at: string
   current_end_at: string
   days_left: number
-  provider: string
+  /** 契约 response_model 对可空字段补 null */
+  provider: string | null
   version: number
-  renewal_reminder?: boolean
+  /** 仅 /subscriptions/current 下发布尔，其余接口 response_model 补 null */
+  renewal_reminder: boolean | null
 }
 
 export interface PaymentProviderOption {
@@ -827,14 +853,18 @@ export interface QuotaMetric {
   used: number
   reserved: number
   remaining: number
-  pack_remaining?: number
-  total_remaining?: number
+  pack_remaining: number
+  total_remaining: number
 }
 
 export interface CreditPack {
-  metric?: string
-  remaining?: number
-  [key: string]: unknown
+  metric: string
+  granted: number
+  used: number
+  reserved: number
+  remaining: number
+  active_grants: number
+  next_expires_at: string | null
 }
 
 export interface QuotaSummary {
@@ -843,9 +873,8 @@ export interface QuotaSummary {
   period_end: string
   metrics: QuotaMetric[]
   /** 服务端 /v1/entitlements 的额度包合并视图字段名是 credits */
-  credits?: CreditPack[]
-  packs?: CreditPack[]
-  server_time?: string
+  credits: CreditPack[]
+  server_time: string
 }
 
 export interface RunListResult {
@@ -856,4 +885,32 @@ export interface RunListResult {
   next_offset?: number
   /** 服务端尚未提供列表接口时，使用本地记录并给出可读说明 */
   degraded?: string
+}
+
+/** 统一技能目录（10 环节）：与后端 /v1/skills 契约一致，前端不另存一份环节清单。 */
+export type SkillCoverage = 'full' | 'partial' | 'cloud_gap'
+
+export interface SkillEntry {
+  stages: string[]
+  cloud_skills: string[]
+  api: string[]
+}
+
+export interface SkillItem {
+  id: string
+  index: number
+  name: string
+  external: string | null
+  trigger: string[]
+  purpose: string
+  coverage: SkillCoverage
+  available: boolean
+  entry: SkillEntry
+}
+
+export interface SkillsCatalog {
+  items: SkillItem[]
+  degraded: string | null
+  schema_version: string | null
+  updated_at: string | null
 }

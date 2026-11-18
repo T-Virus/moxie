@@ -8,7 +8,7 @@ const props = withDefaults(defineProps<{
   message?: string
   endpoint?: string
   retryLabel?: string
-}>(), { kind: 'empty', retryLabel: '' })
+}>(), { kind: 'empty', title: '', message: '', endpoint: '', retryLabel: '' })
 
 defineEmits<{ (e: 'retry'): void }>()
 

@@ -12,6 +12,7 @@ import json
 from pydantic import Field
 
 from ..contracts import SkillContext, StrictModel, call_json, list_of_dicts, text_of
+from ..entity_ids import entity_id as _entity_id
 from .base import BaseSkill
 
 SYSTEM = "你是故事设定编辑，只输出 JSON。"
@@ -158,6 +159,7 @@ def _normalize_character(
             pov_chapters = [first]
     arc, arc_detail = _arc_of(item, role, stub=stub)
     return {
+        "id": item.get("id") or _entity_id("char", name),
         "name": name,
         "alias": text_of(item.get("alias")) or text_of(item.get("aliases")),
         "gender": text_of(item.get("gender")) or "未知",
@@ -232,6 +234,7 @@ def _normalize_faction(
             }
         ]
     return {
+        "id": item.get("id") or _entity_id("faction", name),
         "name": name,
         "type": faction_type,
         "category": category,
@@ -258,6 +261,7 @@ def _normalize_item(
     if not chapter_list and total_chapters > 0:
         chapter_list = list(range(first, min(total_chapters, first + 1) + 1))
     return {
+        "id": item.get("id") or _entity_id("item", name),
         "name": name,
         "category": CATEGORY_MAP.get(raw_category.lower(), CATEGORY_MAP.get(raw_category, raw_category)),
         "grade": text_of(item.get("grade")) or "未定阶",

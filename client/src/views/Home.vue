@@ -5,6 +5,8 @@
         <SegmentedTabs v-model="mode" :tabs="tabs" />
       </div>
 
+      <ComplianceGate ref="rightsGate" :source="gateSource" />
+
       <form class="composer" :aria-busy="submitting" @submit.prevent="submit">
         <div class="composer__title-row">
           <input
@@ -114,6 +116,7 @@ import { useRouter } from 'vue-router'
 import SegmentedTabs, { type SegmentedTab } from '@/components/SegmentedTabs.vue'
 import GenrePicker from '@/components/GenrePicker.vue'
 import FileUploadChip from '@/components/FileUploadChip.vue'
+import ComplianceGate from '@/components/ComplianceGate.vue'
 import type {
   Audience,
   GenreItem,
@@ -121,6 +124,7 @@ import type {
   RunLength,
   RunMode,
   CreateRunPayload,
+  RightsDeclaration,
 } from '@/types'
 import { fetchGenres, createRun, uploadSource } from '@/services/agentApi'
 import { GENRE_PRESETS, mergeGenres } from '@/utils/genrePresets'
@@ -167,6 +171,9 @@ const customAllowed = ref(true)
 const touched = ref(false)
 const submitting = ref(false)
 const titleInput = ref<HTMLInputElement | null>(null)
+/* 合规闸门：参考改编提交前必须采集结构化权利声明；取消则中止提交 */
+const rightsGate = ref<InstanceType<typeof ComplianceGate> | null>(null)
+const gateSource = computed(() => file.value?.name || '')
 /* 页面级提示：同一时间只显示一条，可关闭，不遮挡创作面板 */
 const toastText = ref('')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -290,6 +297,13 @@ async function submit(): Promise<void> {
     return
   }
 
+  // 参考改编：先过合规闸门，结构化声明随加密 body 提交；用户取消则不上传、不建任务。
+  let rights: RightsDeclaration | null = null
+  if (mode.value === 'reference') {
+    rights = (await rightsGate.value?.ask()) ?? null
+    if (!rights) return
+  }
+
   submitting.value = true
   try {
     let sourceKey: string | null = null
@@ -304,6 +318,7 @@ async function submit(): Promise<void> {
       length: length.value,
       genre: genre.value,
       source_key: sourceKey,
+      rights,
     }
     const created = await createRun(payload)
     clearDraft()

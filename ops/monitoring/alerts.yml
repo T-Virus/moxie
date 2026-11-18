@@ -1,0 +1,85 @@
+# Prometheus 告警规则（墨写服务端）
+# 在 prometheus.yml 中通过 rule_files 引入；阈值按试点期口径，后续按 SLO 文档调整。
+
+groups:
+  - name: moxie-availability
+    rules:
+      - alert: MoxieApiDown
+        expr: up{job=~"moxie-api|moxie-local"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "墨写 API 实例不可达"
+          description: "{{ $labels.instance }} 已连续 1 分钟无法抓取 /metrics。"
+
+  - name: moxie-queue
+    rules:
+      - alert: MoxieQueueBacklog
+        expr: moxie_queue_depth > 100 or moxie_agent_queue_depth > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "任务队列积压"
+          description: "普通/Agent 队列深度超过 100 且持续 10 分钟，请检查 worker 副本数与上游耗时。"
+
+      - alert: MoxieStuckTasksRequeued
+        expr: rate(moxie_tasks_requeued_total[10m]) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "租约回收频繁"
+          description: "租约超时重排超过 0.2/s，可能存在 worker 崩溃或单任务执行超时。"
+
+  - name: moxie-quality
+    rules:
+      - alert: MoxieTaskFailureRateHigh
+        expr: |
+          sum(rate(moxie_tasks_total{status="failed"}[10m]))
+          / clamp_min(sum(rate(moxie_tasks_total[10m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "任务失败率超过 5%"
+          description: "近 10 分钟任务失败率高于 SLO 错误预算，请查模型网关与任务事件。"
+
+      - alert: MoxieWebhookFailures
+        expr: sum(rate(moxie_webhook_failures_total[10m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "支付回调处理失败"
+          description: "近 10 分钟回调失败率超过 0.1/s，请核对渠道签名、密钥与订单状态。"
+
+  - name: moxie-cost-and-abuse
+    rules:
+      - alert: MoxieModelCostSpike
+        expr: increase(moxie_model_cost_cents_total[1h]) > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "模型成本 1 小时超过 100 元"
+          description: "请按 route=managed/byok/stub 与工序维度核对异常调用。"
+
+      - alert: MoxieQuotaRejectionSpike
+        expr: sum(rate(moxie_quota_rejections_total[10m])) > 2
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "额度拒绝突增"
+          description: "可能是套餐额度耗尽或计费口径异常，也可作为扩容/加购信号。"
+
+      - alert: MoxieAuthRateLimitSpike
+        expr: sum(rate(moxie_rate_limited_total{scope="auth_global"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "认证接口限流命中突增"
+          description: "请核对是否存在暴力破解或代理 IP 口径配置错误（TRUST_PROXY / XFF）。"

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -33,14 +32,25 @@ from .api import (
     payments,
     presets,
     rankings,
+    skills,
     tasks,
+    telemetry,
     uploads,
 )
+from .bootstrap import bootstrap_admins
 from .config import Settings
 from .db import Database
 from .deps import client_ip
 from .errors import install_exception_handlers
-from .logging_setup import configure_logging, new_request_id, request_id_ctx, set_trace_id
+from .logging_setup import (
+    configure_logging,
+    new_request_id,
+    new_span_id,
+    new_trace_id,
+    parse_traceparent,
+    request_id_ctx,
+    set_trace_id,
+)
 from .metrics import increment, render as render_metrics
 from .models import AgentRun, Task
 from .payload_middleware import PayloadCryptoMiddleware
@@ -133,6 +143,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ensure_plans(session)
             ensure_credit_packs(session, settings.credit_pack_validity_days)
             ensure_presets(session)
+            bootstrap_admins(session, settings.bootstrap_admin_emails)
 
         redis_client, backend = build_redis(settings)
         if backend != "redis":
@@ -226,15 +237,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "X-Payload-Nonce",
                 "X-Payload-Key",
                 "X-Payload-Sse",
+                "X-Trace-Id",
+                "Traceparent",
             ],
             max_age=settings.cors_max_age_seconds,
         )
 
     install_exception_handlers(app)
 
-    # 全局请求体大小限制：防止超大 body 写入造成资源耗尽 / 非法参数注入。
-    # 仅按 Content-Length 头判断（流式分块无该头时交由后续校验），默认 4MB。
-    MAX_REQUEST_BODY_BYTES = int(os.environ.get("MOXIE_MAX_BODY_BYTES", 4 * 1024 * 1024))
+    # 全局请求体大小限制：与载荷解密中间件共用 Settings.max_request_body_bytes。
+    MAX_REQUEST_BODY_BYTES = settings.max_request_body_bytes
 
     @app.middleware("http")
     async def limit_body_size(request: Request, call_next):
@@ -268,15 +280,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         request_id = new_request_id(request.headers.get("x-request-id"))
+        trace_id = set_trace_id(
+            parse_traceparent(request.headers.get("traceparent"))
+            or (request.headers.get("x-trace-id") or "").strip()[:64]
+            or new_trace_id()
+        )
+        span_id = new_span_id()
         request.state.request_id = request_id
+        request.state.trace_id = trace_id
         token = request_id_ctx.set(request_id)
-        set_trace_id(request_id)
         started = time.perf_counter()
         status_code = 500
         try:
             response = await call_next(request)
             status_code = response.status_code
             response.headers["x-request-id"] = request_id
+            response.headers["x-trace-id"] = trace_id
+            response.headers["traceparent"] = f"00-{trace_id}-{span_id}-01"
             return response
         finally:
             elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -292,6 +312,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request_id_ctx.reset(token)
             set_trace_id("-")
 
+    # 严格 CSP：同源脚本/样式/连接，禁内联脚本与插件对象。
+    # Swagger UI（/docs、/redoc、/openapi.json）自带内联脚本，单独用宽松策略豁免，
+    # 避免开发环境文档被打不开；生产默认关闭 docs，见 main.py 的 docs_url 逻辑。
+    strict_csp = (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; "
+        "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    )
+    docs_csp = "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         resp = await call_next(request)
@@ -299,10 +329,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("X-Frame-Options", "DENY")
         resp.headers.setdefault("Referrer-Policy", "no-referrer")
-        resp.headers.setdefault(
-            "Content-Security-Policy",
-            "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        path = request.url.path
+        csp = (
+            docs_csp
+            if path.startswith(("/docs", "/redoc", "/openapi.json"))
+            else strict_csp
         )
+        resp.headers.setdefault("Content-Security-Policy", csp)
         resp.headers.setdefault(
             "Permissions-Policy",
             "geolocation=(), camera=(), microphone=(), payment=()",
@@ -390,11 +423,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin.health_router)
     app.include_router(crypto.router, prefix=prefix)
     app.include_router(auth.router, prefix=prefix)
+    app.include_router(auth.account_router, prefix=prefix)
     app.include_router(devices.router, prefix=prefix)
     app.include_router(license.router, prefix=prefix)
     app.include_router(tasks.router, prefix=prefix)
     app.include_router(agent_runs.router, prefix=prefix)
     app.include_router(presets.router, prefix=prefix)
+    app.include_router(skills.router, prefix=prefix)
     app.include_router(rankings.router, prefix=prefix)
     app.include_router(uploads.router, prefix=prefix)
     app.include_router(artifacts.router, prefix=prefix)
@@ -405,7 +440,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(payments.router, prefix=prefix)
     app.include_router(downloads.router, prefix=prefix)
     app.include_router(admin.admin_router, prefix=prefix)
+    app.include_router(skills.admin_router, prefix=prefix)
     app.include_router(gateway.router, prefix=prefix)
+    app.include_router(telemetry.router, prefix=prefix)
 
     @app.get("/metrics", include_in_schema=False)
     def metrics(request: Request):

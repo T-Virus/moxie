@@ -26,8 +26,10 @@ import time
 from collections import Counter
 
 from paths import book_dir, book_chapters, book_decomposed
+from entity_ids import entity_id as _entity_id, normalize_name as _normalize_name  # noqa: E402
 
 INDEX_NAME = "memory_index.json"
+INDEX_VERSION = 2         # 2026-11-18：条目加稳定实体 ID / chapter_id，统一与云端索引字段
 HEAD_CHARS = 220          # 章首片段（出场状态 / 时间地点）
 TAIL_CHARS = 260          # 章尾片段（悬念落点）
 RECENT_SUMMARIES = 3      # 无论检索结果如何都带的「近 N 章摘要」
@@ -134,6 +136,7 @@ def build_index(book, force=False):
         text, mt = _chapter_text(book, no)
         entry = idx["chapters"].get(str(no))
         dirty = (meta_dirty or entry is None
+                 or int(entry.get("version") or 1) < INDEX_VERSION
                  or float(entry.get("mtime") or 0) != float(mt)
                  or str(entry.get("summary") or "") != str(c.get("summary") or ""))
         if not dirty:
@@ -141,12 +144,22 @@ def build_index(book, force=False):
             continue
         plain = re.sub(r"\s+", "", text)
         hits = [n for n in nouns if n in plain]
+        roles = _as_list(c.get("roles"))
+        factions = _as_list(c.get("factions"))
+        items = _as_list(c.get("items"))
         live[str(no)] = {
+            "version": INDEX_VERSION,
             "no": no,
+            "chapter_id": str(c.get("chapter_id") or "").strip() or None,
             "title": str(c.get("title") or "").strip(),
             "summary": str(c.get("summary") or "").strip(),
             "scene": str(c.get("scene") or "").strip(),
-            "roles": _as_list(c.get("roles")),
+            "roles": roles,
+            "factions": factions,
+            "items": items,
+            "role_ids": [_entity_id("char", n) for n in roles],
+            "faction_ids": [_entity_id("faction", n) for n in factions],
+            "item_ids": [_entity_id("item", n) for n in items],
             "points": [str(p).strip() for p in _as_list(c.get("points") or c.get("key_events"))][:8],
             "chars": len(text),
             "mtime": mt,
@@ -157,7 +170,7 @@ def build_index(book, force=False):
             "tf": Counter(_bigrams(text)).most_common(200) if text else [],
             "tf_total": max(1, len(_bigrams(text))),
         }
-    idx.update({"built_at": time.time(), "meta_mtime": ch_mtime,
+    idx.update({"version": INDEX_VERSION, "built_at": time.time(), "meta_mtime": ch_mtime,
                 "nouns": nouns, "chapters": live})
     try:
         os.makedirs(book_dir(book), exist_ok=True)

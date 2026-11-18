@@ -22,6 +22,7 @@
         <div class="topbar__spacer" />
 
         <div v-if="session.account" class="topbar__user">
+          <PushToggle />
           <span class="topbar__email" :title="session.account.email || ''">
             {{ session.account.email }}
           </span>
@@ -44,6 +45,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import PushToggle from '@/components/PushToggle.vue'
 import { logout } from '@/services/authApi'
 import { refreshSession, resetSession, session } from '@/stores/session'
 import brandIcon from '@/assets/brand-icon.png'
@@ -53,6 +55,7 @@ const navItems = computed(() =>
     ? [
         { to: '/', label: '创作' },
         { to: '/runs', label: '我的作品' },
+        { to: '/skills', label: '技能' },
         { to: '/plans', label: '我的订阅' },
         { to: '/tools', label: '工具' },
       ]

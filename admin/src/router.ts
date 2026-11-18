@@ -78,6 +78,26 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '预设值维护', permission: 'presets:read' },
       },
       {
+        path: 'skills',
+        component: () => import('./views/Skills.vue'),
+        meta: { title: '技能目录', permission: 'skills:read' },
+      },
+      {
+        path: 'telemetry-config',
+        component: () => import('./views/TelemetryConfig.vue'),
+        meta: { title: '可观测配置', permission: 'telemetry:read' },
+      },
+      {
+        path: 'backups',
+        component: () => import('./views/Backups.vue'),
+        meta: { title: '备份管理', permission: 'backup:read' },
+      },
+      {
+        path: 'model-usage',
+        component: () => import('./views/ModelUsage.vue'),
+        meta: { title: '模型消费统计', permission: 'usage:read' },
+      },
+      {
         path: 'forbidden',
         component: () => import('./views/Forbidden.vue'),
         meta: { title: '权限不足', public: true },

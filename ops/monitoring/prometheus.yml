@@ -15,13 +15,16 @@
 #            moxie_uploads_total / moxie_upload_bytes_total
 #            moxie_upload_rejected_total{reason}
 #            moxie_uploads_deleted_total
-#   gauge:   moxie_queue_depth（抓取时从数据库实时计算）
+#   gauge:   moxie_queue_depth / moxie_agent_queue_depth（抓取时从数据库实时计算）
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     service: moxie-server
+
+rule_files:
+  - alerts.yml
 
 scrape_configs:
   - job_name: moxie-api

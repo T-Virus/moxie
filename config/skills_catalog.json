@@ -1,0 +1,524 @@
+{
+  "schema_version": "1.0",
+  "updated_at": "2026-11-18",
+  "purpose": "网文创作 10 环节技能体系的唯一事实源（SSOT）。桌面工序绑定、云端 SkillRegistry、文档对照表、一致性校验脚本都以此为准；任何一环的改动必须同步本文件与 scripts/check_skills.py 的校验规则。",
+  "conventions": {
+    "coverage_values": [
+      "full",
+      "partial",
+      "cloud_gap"
+    ],
+    "desktop_stages_source": "src/studio.py#BIND_STAGES",
+    "desktop_bindings_source": "config/studio.json#bindings",
+    "cloud_registry_source": "server/app/agents/registry.py#build_registry",
+    "paths_root": "仓库根目录，所有 files 项使用相对路径",
+    "writes_form": "writes 分两种形态：data/<书>/... 为桌面端落盘；AgentRunStep.output#... 与 *.json 为云端 checkpoint/artifact。声明必须与代码实际产出一致，未落盘的规划字段只能写进 gap，不得写进 writes",
+    "write_rule": "新增/下线环节 → 改本文件 → 运行 python scripts/check_skills.py --check；校验失败不得提交"
+  },
+  "items": [
+    {
+      "id": "scan",
+      "index": 1,
+      "name": "选题与扫榜",
+      "external": "story-long-scan",
+      "trigger": [
+        "/story-long-scan",
+        "扫榜",
+        "选题",
+        "榜单"
+      ],
+      "purpose": "扫描目标平台近期榜单，整理热门题材标签与开篇特点，筛选创作方向；只读公开元数据，不读原本书、不抓正文。",
+      "coverage": "partial",
+      "desktop": {
+        "stages": [],
+        "files": [],
+        "api": [],
+        "note": "桌面端无扫榜入口，不复活 config/workflow.json 遗留管线"
+      },
+      "cloud": {
+        "skills": [],
+        "files": [
+          "server/app/api/rankings.py",
+          "server/app/services/rankings.py"
+        ],
+        "api": [
+          "GET /v1/rankings"
+        ],
+        "note": "已有 6 站公开元数据抓取；缺 Top20 阅读量口径归一、选书 gate 与权利确认闭环"
+      },
+      "ssot": "榜单快照由 rankings 服务产出；选书与权利确认写入 compliance_ack，二者不得由 LLM 互相覆盖",
+      "writes": [
+        "AgentRunStep.output#genre_research",
+        "rankings:v2 缓存（Redis + 进程内，非文件落盘）"
+      ],
+      "next": [
+        "analyze"
+      ],
+      "gap": "榜单仅入 Redis/进程缓存，未落 data/rankings 文件；缺选书 gate、Top20 六列契约与 compliance_ack 权利确认落盘；见 docs/技能体系对照与补全-2026-11-17.md",
+      "reference": "worldwonderer/oh-story-claudecode"
+    },
+    {
+      "id": "analyze",
+      "index": 2,
+      "name": "拆书与结构分析",
+      "external": "story-long-analyze",
+      "trigger": [
+        "/story-long-analyze",
+        "拆书",
+        "拆文",
+        "结构分析"
+      ],
+      "purpose": "分析参考作品如何制造冲突、何时埋线索、人物关系如何推动剧情，输出可复用的结构笔记。",
+      "coverage": "full",
+      "desktop": {
+        "stages": [
+          "decompose"
+        ],
+        "files": [
+          "src/decompose.py",
+          "src/craft.py",
+          "src/prompts.py"
+        ],
+        "api": [
+          "POST /api/run?stage=decompose"
+        ],
+        "note": "SYSTEM/REFERENCE/OUTLINE/MERGE 四套提示词 + decompose_guide 写作公式"
+      },
+      "cloud": {
+        "skills": [
+          "outline_decompose"
+        ],
+        "files": [
+          "server/app/agents/skills/outline_decompose.py"
+        ],
+        "api": [],
+        "note": "REFERENCE 模式下 segmented 节点承接拆书"
+      },
+      "ssot": "拆解结果落 data/<书>/decomposed.json；提示词覆盖只在 config/studio.json#prompt_overrides，不改内置默认",
+      "writes": [
+        "data/<书>/decomposed.json"
+      ],
+      "next": [
+        "character",
+        "outline",
+        "memory"
+      ],
+      "gap": null,
+      "reference": "worldwonderer/oh-story-claudecode"
+    },
+    {
+      "id": "character",
+      "index": 3,
+      "name": "人设与角色设计",
+      "external": "character-design",
+      "trigger": [
+        "/character-design",
+        "人设",
+        "角色卡",
+        "角色设计"
+      ],
+      "purpose": "递进问答整理目标、动机、说话习惯与成长变化，生成角色卡；明确角色当前知道什么、不知道什么。",
+      "coverage": "full",
+      "desktop": {
+        "stages": [
+          "decompose",
+          "adapt"
+        ],
+        "files": [
+          "src/story_bible.py",
+          "src/entities.py",
+          "client/src/components/workspace/CharactersTab.vue"
+        ],
+        "api": [],
+        "note": "CARD_FIELDS 角色卡字段 + apply_renames/sync_document 改名同步"
+      },
+      "cloud": {
+        "skills": [
+          "character_graph",
+          "lore_extract",
+          "settings_pack"
+        ],
+        "files": [
+          "server/app/agents/skills/character_graph.py",
+          "server/app/agents/skills/lore_extract.py",
+          "server/app/agents/skills/settings_pack.py"
+        ],
+        "api": [],
+        "note": "三技能分别产出关系图、实体抽取与设定包"
+      },
+      "ssot": "角色实体以 story_bible.CARD_FIELDS 为准；改名经 entities.apply_renames 同步到卡片/章节/关系，禁止直接改展示名",
+      "writes": [
+        "data/<书>/decomposed.json#characters",
+        "data/<书>/storymap.json#nodes"
+      ],
+      "next": [
+        "outline",
+        "write",
+        "consistency"
+      ],
+      "gap": "稳定 ID 已双端落盘并用于跨端 claim 关联；改名同步仍依赖文本替换，历史正文不会自动改写",
+      "reference": "Mochocyang/QMAI#character-design"
+    },
+    {
+      "id": "outline",
+      "index": 4,
+      "name": "大纲与路线规划",
+      "external": "novel-creator",
+      "trigger": [
+        "/novel-creator",
+        "大纲",
+        "路线",
+        "章节规划"
+      ],
+      "purpose": "规划全书主线与阶段目标，把近期剧情拆到具体章节，明确每章推进哪条线、发生什么变化。",
+      "coverage": "full",
+      "desktop": {
+        "stages": [
+          "decompose",
+          "expand_outline"
+        ],
+        "files": [
+          "src/decompose.py",
+          "src/craft.py"
+        ],
+        "api": [
+          "POST /api/run?stage=decompose"
+        ],
+        "note": "FRAMEWORK 写作框架 + OUTLINE_PROMPT 大纲整理"
+      },
+      "cloud": {
+        "skills": [
+          "outline"
+        ],
+        "files": [
+          "server/app/agents/skills/outline.py"
+        ],
+        "api": [],
+        "note": "HOT/REFERENCE/CUSTOM 三模式均有 outline 节点"
+      },
+      "ssot": "主线/节拍由 outline 节点拥有写权；volumes 只写派生 beat_map，不回写 structure.beat.*",
+      "writes": [
+        "data/<书>/decomposed.json#structure",
+        "AgentRunStep.output#outline"
+      ],
+      "next": [
+        "write",
+        "consistency"
+      ],
+      "gap": null,
+      "reference": "worldwonderer/oh-story-claudecode"
+    },
+    {
+      "id": "memory",
+      "index": 5,
+      "name": "记忆与状态管理",
+      "external": "webnovel-writer",
+      "trigger": [
+        "/webnovel-query",
+        "记忆",
+        "状态",
+        "前情"
+      ],
+      "purpose": "把角色状态、章节摘要、时间线与未回收伏笔记入项目资料；写新章前自动提取，写完后自动更新新事实。",
+      "coverage": "full",
+      "desktop": {
+        "stages": [],
+        "files": [
+          "src/memory.py",
+          "src/paths.py",
+          "src/entity_ids.py"
+        ],
+        "api": [
+          "/api/memory/status",
+          "/api/memory/search"
+        ],
+        "note": "BM25 + 专名加权检索，memory_index.json(v2) 按 mtime 增量重建，条目带稳定实体 ID（entity_ids.py），build_context 注入 prompt"
+      },
+      "cloud": {
+        "skills": [
+          "chapter_summarize",
+          "chapter_write"
+        ],
+        "files": [
+          "server/app/agents/skills/chapter_summarize.py",
+          "server/app/agents/memory.py",
+          "server/app/agents/entity_ids.py",
+          "server/app/agents/skills/chapter_write.py"
+        ],
+        "api": [],
+        "note": "章节概括入库 + agents/memory.py#build_context（BM25 二元语法 + 专名加权 + 近 N 章脉络）在 chapter_expand 写正文前注入；2026-11-18 与桌面共用索引格式（v2 + 稳定实体 ID），可通过 options.desktop_memory_index 直接导入桌面 memory_index.json"
+      },
+      "ssot": "实体 ID 算法由 src/entity_ids.py 与 server/app/agents/entity_ids.py 双端镜像实现，test_unified_memory.py 锁定一致；桌面记忆索引由 src/memory.py 独占写权，云端摘要存 AgentRunStep.output，二者不互相覆盖",
+      "writes": [
+        "data/<书>/memory_index.json",
+        "AgentRunStep.output#chapter_summarize",
+        "AgentRunStep.output#chapter_expand"
+      ],
+      "next": [
+        "write",
+        "review",
+        "consistency"
+      ],
+      "gap": "桌面与云端已共用索引格式（v2）与稳定实体 ID；云端可通过 options.desktop_memory_index 导入桌面索引，无需重算",
+      "reference": "lingfengQAQ/webnovel-writer"
+    },
+    {
+      "id": "write",
+      "index": 6,
+      "name": "正文生成",
+      "external": "story-long-write",
+      "trigger": [
+        "/story-long-write",
+        "正文",
+        "初稿",
+        "续写",
+        "扩写"
+      ],
+      "purpose": "围绕人物选择与剧情变化把细纲扩写为符合文风的正文草稿，由作者确认取舍而非 AI 自由发挥。",
+      "coverage": "full",
+      "desktop": {
+        "stages": [
+          "expand_outline",
+          "expand_continue",
+          "expand_expand",
+          "expand_rewrite",
+          "expand_selection"
+        ],
+        "files": [
+          "src/expand.py"
+        ],
+        "api": [
+          "/api/expand/chapter"
+        ],
+        "note": "5 个正文工序 + expand_polish/expand_selection，均可独立绑定模型"
+      },
+      "cloud": {
+        "skills": [
+          "chapter_write",
+          "humanizer"
+        ],
+        "files": [
+          "server/app/agents/skills/chapter_write.py",
+          "server/app/agents/skills/humanizer.py",
+          "server/app/agents/memory.py"
+        ],
+        "api": [],
+        "note": "2026-11-18 恢复 chapter_expand 节点（skill=chapter_write，chaptered=True）入三图：逐章写作 + 前文记忆注入 + humanizer 去 AI 味。默认黄金三章；options.body_start/body_chapters/body_segment 支持全本分段调度（章号稳定、跨段记忆、额度上限由 agent_cloud_body_max_chapters 控制）"
+      },
+      "ssot": "正文以章为单位落 chapters.json；云端规范正文读 polish→chapter_expand，review/consolidate 不再消费空 state",
+      "writes": [
+        "data/<书>/chapters.json",
+        "data/<书>/polish_report.json",
+        "AgentRunStep.output#chapter_expand",
+        "AgentRunStep.output#polish"
+      ],
+      "next": [
+        "polish",
+        "review",
+        "memory"
+      ],
+      "gap": "云端正文默认黄金三章；全本通过 options 分段调度（每 run 一段，章号稳定、跨段记忆继承），额度上限受 Settings 控制",
+      "reference": "worldwonderer/oh-story-claudecode"
+    },
+    {
+      "id": "polish",
+      "index": 7,
+      "name": "润色与去 AI 味",
+      "external": "humanizer",
+      "trigger": [
+        "/humanizer",
+        "润色",
+        "去AI味",
+        "降AI"
+      ],
+      "purpose": "检查机械重复、解释过满、对话僵硬与笔墨失衡，识别 AI 痕迹模式并点对点替换。",
+      "coverage": "full",
+      "desktop": {
+        "stages": [
+          "expand_polish",
+          "expand_rewrite"
+        ],
+        "files": [
+          "src/expand.py",
+          "src/review.py",
+          "src/craft.py"
+        ],
+        "api": [],
+        "note": "DE_AI_BRIEF/DE_AI_GUIDE + AI_TASTE_PROMPT + craft.ai_taste 公式库"
+      },
+      "cloud": {
+        "skills": [
+          "humanizer"
+        ],
+        "files": [
+          "server/app/agents/skills/humanizer.py"
+        ],
+        "api": [],
+        "note": "云端 humanizer 技能（2026-11-18）：复用 DE_AI_GUIDE 的删/调/补/禁/自检规则，输出润色正文 + 万能词/机械连接词/三段式排比/段末小结/解释式对话五类痕迹清单；置于 chapter_expand 之后"
+      },
+      "ssot": "润色只改正文表达，不改设定事实；润色结果落 polish 节点，规范正文读 polish→chapter_expand，涉及角色/伏笔的改写回 owner 环节同步",
+      "writes": [
+        "data/<书>/chapters.json",
+        "data/<书>/polish_report.json",
+        "AgentRunStep.output#polish"
+      ],
+      "next": [
+        "review",
+        "consistency"
+      ],
+      "gap": "覆盖五类高频痕迹；blader/humanizer 的 25+ 细粒度模式清单仅做核心子集，可在提示词层继续扩写",
+      "reference": "blader/humanizer"
+    },
+    {
+      "id": "review",
+      "index": 8,
+      "name": "审稿与逻辑核查",
+      "external": "story-review",
+      "trigger": [
+        "/story-review",
+        "审稿",
+        "逻辑核查",
+        "会诊"
+      ],
+      "purpose": "从结构、人设、叙事与一致性角度排查动机不成立、前后冲突与伏笔未回收，给出可定位原文的修改建议。",
+      "coverage": "full",
+      "desktop": {
+        "stages": [
+          "review"
+        ],
+        "files": [
+          "src/review.py"
+        ],
+        "api": [
+          "/api/review/run",
+          "/api/review/batch",
+          "/api/review/report"
+        ],
+        "note": "ALL_CHECKS 9 项 + run_review，报告落 data/<书>/review/"
+      },
+      "cloud": {
+        "skills": [
+          "consistency_review",
+          "compliance_review",
+          "review_merge"
+        ],
+        "files": [
+          "server/app/agents/skills/consistency_review.py",
+          "server/app/agents/skills/compliance_review.py",
+          "server/app/agents/skills/review_merge.py"
+        ],
+        "api": [],
+        "note": "三个审查技能 + 合并节点"
+      },
+      "ssot": "审稿只产结论与 patch 建议，不直接改 owner 字段；修改由 author/owner 环节回写并触发下游标脏",
+      "writes": [
+        "data/<书>/review/",
+        "AgentRunStep.output#*_review"
+      ],
+      "next": [
+        "consistency"
+      ],
+      "gap": null,
+      "reference": "worldwonderer/oh-story-claudecode"
+    },
+    {
+      "id": "consistency",
+      "index": 9,
+      "name": "连续性自查",
+      "external": "consistency-checker",
+      "trigger": [
+        "/consistency-check",
+        "连续性",
+        "伏笔",
+        "时间线"
+      ],
+      "purpose": "对角色、伏笔、时间线做四维核查，每章写完输出连续性核查表，定位前后设定打架。",
+      "coverage": "partial",
+      "desktop": {
+        "stages": [
+          "storymap",
+          "review"
+        ],
+        "files": [
+          "src/storymap.py",
+          "src/entities.py",
+          "src/review.py"
+        ],
+        "api": [
+          "/api/run?stage=storymap"
+        ],
+        "note": "build_foreshadows / fallback_conflicts / sync_document / apply_chapter_no_map；伏笔带稳定 fs: ID 与 planted/payoff 分列"
+      },
+      "cloud": {
+        "skills": [
+          "consistency_review",
+          "continuity_check"
+        ],
+        "files": [
+          "server/app/agents/skills/consistency_review.py",
+          "server/app/agents/skills/continuity_check.py",
+          "server/app/agents/entity_ids.py"
+        ],
+        "api": [],
+        "note": "consistency_review 规则体检 + continuity_check 四维核查表与 claim 交叉比对；2026-11-18 台账按 fs: 稳定 ID 对齐（桌面 chapter=回收章已消歧），claim 以实体 ID 为主键，支持 options.desktop_ledger/foreshadow_ledger 导入"
+      },
+      "ssot": "伏笔台账由 storymap.foreshadows 独占写权；稳定 ID 算法与 memory 环节共用 entity_ids.py 双端镜像；云端核查表只读台账不改 owner 字段",
+      "writes": [
+        "AgentRunStep.output#outline#foreshadow_ledger",
+        "foreshadow_ledger.json",
+        "AgentRunStep.output#continuity_check",
+        "continuity_check.json"
+      ],
+      "next": [],
+      "gap": "四维核查表、claim 交叉比对、稳定实体 ID 均已落盘；桌面 storymap.json#foreshadows 已带 fs: ID，可通过 options.desktop_ledger 显式导入做跨端比对",
+      "reference": "HongZhaochen/ConsistencyChecker（学术框架，项目仅借用思路）"
+    },
+    {
+      "id": "cover",
+      "index": 10,
+      "name": "封面与物料生成",
+      "external": "inkos-story-cover",
+      "trigger": [
+        "/inkos-story-cover",
+        "封面",
+        "物料"
+      ],
+      "purpose": "按书名、笔名、题材与目标尺寸生成封面方案，检查书名/署名裁切，确保画面与内容相符。",
+      "coverage": "full",
+      "desktop": {
+        "stages": [
+          "cover"
+        ],
+        "files": [
+          "src/cover.py"
+        ],
+        "api": [
+          "/api/cover/generate",
+          "/api/cover/presets",
+          "/api/cover/translate"
+        ],
+        "note": "generate_cover / preset_list / translate_prompt；BIND_STAGES 已声明 cover 工序"
+      },
+      "cloud": {
+        "skills": [
+          "cover_plan"
+        ],
+        "files": [
+          "server/app/services/cover.py",
+          "server/app/agents/skills/cover_plan.py"
+        ],
+        "api": [],
+        "note": "cover_plan Agent 技能复用 services/cover.py#build_prompt，产出封面方案（提示词/风格/版式/尺寸/书名署名裁切检查）入三图；实际出图仍由 cover API 按方案生成"
+      },
+      "ssot": "封面底图与提示词以 src/cover.py 预设为准；书名/署名文本取自大纲 book_meta，不得在封面环节另存一份",
+      "writes": [
+        "data/<书>/cover/",
+        "AgentRunStep.output#cover_plan",
+        "cover_plan.json"
+      ],
+      "next": [],
+      "gap": "封面方案已入三图并落 cover_plan.json；提示词翻译/底图生成仍由 services/cover.py 在 API 层执行，技能层只编排方案",
+      "reference": "Narcooo/inkos#inkos-story-cover"
+    }
+  ]
+}

@@ -151,8 +151,8 @@ def write_artifacts(storage, run: RunView, state: dict) -> list[dict]:
         )
         written.append({"name": "decomposed.json"})
 
-    # 只有真正写过正文的节点才产出章节正文/手稿；参考创作不写正文。
-    chapters = (state.get("chapter_expand") or {}).get("chapters") or []
+    # 正文取润色后的规范正文（polish → chapter_expand 回退）；三图均已恢复正文链。
+    chapters = (state.get("polish") or {}).get("chapters") or (state.get("chapter_expand") or {}).get("chapters") or []
     if chapters:
         storage.put_json(
             f"{prefix}/chapters.json",
@@ -205,6 +205,44 @@ def write_artifacts(storage, run: RunView, state: dict) -> list[dict]:
             {"book_title": run.title, "chapters": summaries},
         )
         written.append({"name": "chapter_summaries.json"})
+
+    polish = state.get("polish") or {}
+    if polish.get("chapters"):
+        storage.put_json(
+            f"{prefix}/polish_report.json",
+            {
+                "book_title": run.title,
+                "total_traces": polish.get("total_traces") or 0,
+                "model_used": bool(polish.get("model_used")),
+                "chapters": [
+                    {
+                        "chapter": item.get("chapter"),
+                        "trace_count": item.get("trace_count") or 0,
+                        "source": item.get("source") or "",
+                        "traces": item.get("traces") or [],
+                    }
+                    for item in polish["chapters"]
+                    if isinstance(item, dict)
+                ],
+            },
+        )
+        written.append({"name": "polish_report.json"})
+
+    continuity = state.get("continuity_check") or {}
+    if continuity.get("checks") or continuity.get("claims"):
+        storage.put_json(
+            f"{prefix}/continuity_check.json",
+            {"book_title": run.title, **continuity},
+        )
+        written.append({"name": "continuity_check.json"})
+
+    cover_plan = state.get("cover_plan") or {}
+    if cover_plan.get("plan"):
+        storage.put_json(
+            f"{prefix}/cover_plan.json",
+            {"book_title": run.title, **cover_plan},
+        )
+        written.append({"name": "cover_plan.json"})
 
     graph_state = state.get("character_graph") or {}
     for name, key in (

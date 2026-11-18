@@ -13,6 +13,14 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .contracts import text_of
+from .memory import build_context, from_desktop_index
+
+# 云端正文链默认篇幅：黄金三章。限制 adapt_chapters / managed_chars 额度占用。
+# 全本分段调度：options.body_start / body_chapters 可指定窗口（第几章起、写几章），
+# 或 options.body_segment（第几段，按 body_chapters 大小切片），逐段串行完成整本；
+# 默认值仍是黄金三章，保证未显式配置的 run 行为不变。上限由 Settings 注入 extra。
+CLOUD_BODY_CHAPTERS = 3
+CLOUD_BODY_MAX_CHAPTERS = 2000
 
 
 @dataclass(frozen=True)
@@ -94,6 +102,19 @@ def _state(state: dict, node_id: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _body_chapters(state: dict) -> list[dict]:
+    """规范正文：润色后正文优先，回退到原始写作正文。
+
+    humanizer 在 2026-11-18 进入三图，state["polish"] 含去 AI 味后的章节；
+    概括/体检/实体抽取/产物落盘统一读这里，避免发布未润色的初稿。
+    """
+    for key in ("polish", "chapter_expand", "chapter_write"):
+        chapters = [item for item in (_state(state, key).get("chapters") or []) if isinstance(item, dict)]
+        if chapters:
+            return chapters
+    return []
+
+
 def _hot_research(run: RunView, state: dict, extra: dict) -> dict:
     return {
         "title": run.title,
@@ -105,7 +126,8 @@ def _hot_research(run: RunView, state: dict, extra: dict) -> dict:
 
 
 def _hot_outline(run: RunView, state: dict, extra: dict) -> dict:
-    # 热门创作输出全书大纲与全部章节概括，但正文仍只写黄金三章。
+    # 热门创作输出全书大纲与全部章节概括；正文链已在 outline 之后恢复为
+    # chapter_expand（chaptered=True，黄金三章），详见 graphs 中节点声明。
     return {
         "title": run.title,
         "audience": run.audience,
@@ -144,7 +166,13 @@ def _hot_settings(run: RunView, state: dict, extra: dict) -> dict:
 
 
 def _publish(run: RunView, state: dict, extra: dict) -> dict:
-    """发布包：三种模式通用导出。hot 多带 positioning/settings；reference/custom 这些字段为空 dict。"""
+    """发布包：三种模式通用导出。
+
+    publish_pack 的 output_model 只保留 tags/blurb/cover_prompt 等包装字段，
+    传进来的 chapters 会被裁剪，不落到 state["publish"]。正文产物始终由
+    artifacts.write_artifacts 从 state["chapter_expand"] 生成；2026-11-18
+    正文链恢复后该 checkpoint 非空，发布包仍只负责包装材料，不含正文。
+    """
     return {
         "title": run.title,
         "genre_name": run.genre_name,
@@ -157,17 +185,18 @@ def _publish(run: RunView, state: dict, extra: dict) -> dict:
 
 
 def _summarize(run: RunView, state: dict, extra: dict) -> dict:
-    """全量章节概括：有正文时用正文，无正文模式直接用章纲生成。
+    """全量章节概括：黄金三章已有正文时用正文，其余章节用完整章纲生成。
 
-    hot 的正文只覆盖前三章，reference/custom 不写正文，但任务结果必须覆盖全书所有卷章，
-    因此以完整章纲为基础合并正文，而不是只截取已写章节。
+    2026-11-18 正文链恢复后，state["chapter_expand"] 含黄金三章正文；以下合并逻辑
+    按章号把正文覆盖到完整章纲上，未写正文的章节仍来自章纲。任务结果需覆盖全书
+    所有卷章，因此始终以完整章纲为基础。
     """
     outline = list((_state(state, "outline") or {}).get("chapters") or [])
     outline_data = _state(state, "outline")
     # 章级规划字段：目标字数与叙事视角来自整书大纲，逐章透传给概括技能
     default_words = int(outline_data.get("chapter_words_target") or 0)
     person = text_of(outline_data.get("person"))
-    written = list((_state(state, "chapter_expand") or {}).get("chapters") or [])
+    written = _body_chapters(state)
     written_by_no = {
         int(item.get("chapter") or index): item
         for index, item in enumerate(written, 1)
@@ -228,7 +257,7 @@ def _lore(run: RunView, state: dict, extra: dict) -> dict:
             or []
         ),
         "items": adapted.get("items") or decomposed.get("items") or settings.get("items") or [],
-        "chapters": _state(state, "chapter_expand").get("chapters") or [],
+        "chapters": _body_chapters(state),
         "outline": outline.get("chapters") or [],
     }
 
@@ -249,14 +278,15 @@ def _review_input(run: RunView, state: dict, extra: dict) -> dict:
     """review 双路径体检：优先取正文节点的 chapters，没有就用章纲做体检。
 
     可能的正文来源（按优先级）：
-    - chapter_expand：hot 模式黄金三章
-    - chapter_write：未来章节节点
+    - polish：humanizer 润色后的正文（2026-11-18 起三图均有该节点）
+    - chapter_expand：黄金三章原始正文
+    - chapter_write：历史章节节点
     - adaptation：reference 模式改编产出的章节
     - chapter_summarize：兜底——如果上述都没有，用章节概括作为输入
     如果上述都没有，最后退化为只看 outline 章纲。
     """
     outline_chapters = list(_state(state, "outline").get("chapters") or [])
-    candidate_nodes = ("chapter_expand", "chapter_write", "adaptation", "chapter_summarize")
+    candidate_nodes = ("polish", "chapter_expand", "chapter_write", "adaptation", "chapter_summarize")
     body_chapters: list[dict] | None = None
     for node_key in candidate_nodes:
         chapters = list(_state(state, node_key).get("chapters") or [])
@@ -330,6 +360,143 @@ def _decompose(run: RunView, state: dict, extra: dict) -> dict:
         "title": run.title,
         "source_text": (extra or {}).get("source_text") or "",
         "target_chapters": int((extra or {}).get("target_chapters") or 0),
+    }
+
+
+def _body_window(chapters: list[dict], options: dict, extra: dict) -> list[dict]:
+    """计算本次 run 的正文窗口（全本分段调度的核心）。
+
+    - 无 options：取前 CLOUD_BODY_CHAPTERS 章（默认黄金三章，行为不变）。
+    - ``body_start`` + ``body_chapters``：从第 N 章起写 M 章。
+    - ``body_segment``（1-based）+ ``body_chapters``：按窗口大小切第 K 段。
+    上限取 extra["body_max_chapters"]（由 Settings 注入），缺省 CLOUD_BODY_MAX_CHAPTERS。
+    每章注入稳定的 ``chapter`` 章号，跨段不重编号。
+    """
+    size = int(extra.get("body_default_chapters") or CLOUD_BODY_CHAPTERS)
+    try:
+        size = max(1, min(int(options.get("body_chapters") or size), int(extra.get("body_max_chapters") or CLOUD_BODY_MAX_CHAPTERS)))
+    except (TypeError, ValueError):
+        size = CLOUD_BODY_CHAPTERS
+    start = 1
+    segment = options.get("body_segment")
+    if segment not in (None, ""):
+        try:
+            start = (max(1, int(segment)) - 1) * size + 1
+        except (TypeError, ValueError):
+            start = 1
+    elif options.get("body_start") not in (None, ""):
+        try:
+            start = max(1, int(options["body_start"]))
+        except (TypeError, ValueError):
+            start = 1
+    begin_index = max(0, start - 1)
+    window = chapters[begin_index : begin_index + size]
+    out: list[dict] = []
+    for offset, chapter in enumerate(window):
+        row = dict(chapter)
+        row["chapter"] = int(chapter.get("chapter") or (begin_index + offset + 1))
+        out.append(row)
+    return out
+
+
+def _expand(run: RunView, state: dict, extra: dict) -> dict:
+    """正文节点 builder：取一个正文窗口（默认黄金三章），注入跨章记忆。
+
+    全本分段调度由 ``options.body_start/body_chapters/body_segment`` 控制窗口；
+    前情检索用 build_context 生成，写入 chapter_write.memory_context，
+    写第 N 章时能读到前序章节的人名、钩子与已写正文（跨段记忆）。
+    """
+    outline = _state(state, "outline")
+    chapters = [dict(item) for item in (outline.get("chapters") or []) if isinstance(item, dict)]
+    options = (extra or {}).get("options") or {}
+    # 统一记忆索引：若导入桌面 memory_index.json，用它替代章纲做检索源，
+    # 云端与桌面共用同一套稳定 ID / 摘要 / 专名 / 词频，避免两套索引各算各的。
+    index_source = chapters
+    desktop_index = options.get("desktop_memory_index")
+    if isinstance(desktop_index, dict):
+        imported = from_desktop_index(desktop_index)
+        if imported:
+            index_source = imported
+    # 跨段记忆：上一分段已写正文作为检索源并入，保证第 2 段能接住第 1 段的人名/伏笔。
+    # 同章号时用已写正文覆盖章纲条目（content 含真实专名/结尾），而非跳过。
+    prior = [dict(item) for item in (_state(state, "chapter_expand").get("chapters") or []) if isinstance(item, dict)]
+    if prior:
+        # 若是导入的桌面索引，保持其结构并按需覆盖；否则基于章纲列表
+        index_source = [dict(item) for item in index_source]
+        pos_of: dict[int, int] = {}
+        for pos, item in enumerate(index_source):
+            no = int(item.get("no") or item.get("chapter") or 0)
+            if no:
+                pos_of[no] = pos
+        for row in prior:
+            no = int(row.get("no") or row.get("chapter") or 0)
+            if not no:
+                continue
+            if no in pos_of and any(str(row.get(k) or "") for k in ("content", "head", "tail")):
+                # 合并：保留章纲字段，补入已写正文的 content/summary
+                merged = {**index_source[pos_of[no]], **{k: v for k, v in row.items() if v}}
+                index_source[pos_of[no]] = merged
+            elif no not in pos_of:
+                index_source.append(row)
+                pos_of[no] = len(index_source) - 1
+    selected = _body_window(chapters, options, extra)
+    with_memory: list[dict] = []
+    for chapter in selected:
+        row = dict(chapter)
+        # build_context 只看前序章节；此时正文未生成，用章纲概括（或导入的桌面索引/已写正文）做索引源
+        row["memory_context"] = build_context(index_source, row)
+        with_memory.append(row)
+    return {
+        "title": run.title,
+        "genre_name": run.genre_name,
+        "story_bible": outline.get("story_bible") or _settings_bible(_state(state, "settings")),
+        "chapters": with_memory,
+    }
+
+
+def _polish(run: RunView, state: dict, extra: dict) -> dict:
+    """润色节点 builder：把黄金三章正文交给 humanizer 去 AI 味。"""
+    return {
+        "title": run.title,
+        "genre_name": run.genre_name,
+        "chapters": [dict(item) for item in (_state(state, "chapter_expand").get("chapters") or []) if isinstance(item, dict)],
+    }
+
+
+def _continuity(run: RunView, state: dict, extra: dict) -> dict:
+    """连续性核查 builder：汇总云端台账与可选导入的桌面台账做交叉比对。"""
+    outline = _state(state, "outline")
+    options = (extra or {}).get("options") or {}
+    return {
+        "title": run.title,
+        "chapters": [dict(item) for item in (_state(state, "chapter_summarize").get("chapters") or []) if isinstance(item, dict)],
+        "outline": [dict(item) for item in (outline.get("chapters") or []) if isinstance(item, dict)],
+        "foreshadow_ledger": [dict(item) for item in (outline.get("foreshadow_ledger") or []) if isinstance(item, dict)],
+        "desktop_ledger": [dict(item) for item in (options.get("desktop_ledger") or []) if isinstance(item, dict)],
+        "settings": _state(state, "settings"),
+        "characters": [dict(item) for item in (_state(state, "character_graph").get("characters") or []) if isinstance(item, dict)],
+    }
+
+
+def _cover(run: RunView, state: dict, extra: dict) -> dict:
+    """封面方案 builder：从大纲 book_meta / 定位卡取书名署名，交给 cover_plan 技能。"""
+    outline = _state(state, "outline")
+    positioning = _state(state, "positioning")
+    book_meta = {
+        **{k: v for k, v in outline.items() if k in ("author", "themes", "story_bible")},
+        **(outline.get("book_meta") or {}),
+    }
+    options = (extra or {}).get("options") or {}
+    return {
+        "title": run.title,
+        "genre_name": run.genre_name,
+        "author": text_of(book_meta.get("author")) or text_of((outline.get("story_bible") or {}).get("author")),
+        "outline": book_meta,
+        "prompt": text_of(options.get("cover_prompt")),
+        "style": text_of(options.get("cover_style")) or "gold",
+        "layout": text_of(options.get("cover_layout")) or "top",
+        "width": int(options.get("cover_width") or 600),
+        "height": int(options.get("cover_height") or 800),
     }
 
 
@@ -408,11 +575,21 @@ HOT = Graph(
         NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),
         # 阶段4 大纲拆解：总纲 → 分卷 → 章纲（冲突/反转/伏笔/结尾钩子）
         NodeSpec("outline", "outline", "大纲拆解", ("settings",), _hot_outline, serial=True, retry_policy="soft"),
+        # 阶段4.5 正文闭环（2026-11-18 恢复）：黄金三章 → 润色，再进入概括/体检
+        NodeSpec(
+            "chapter_expand",
+            "chapter_write",
+            "黄金三章正文",
+            ("outline",),
+            _expand,
+            chaptered=True,
+        ),
+        NodeSpec("polish", "humanizer", "去 AI 味润色", ("chapter_expand",), _polish),
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
             "章节概括",
-            ("outline",),
+            ("outline", "chapter_expand", "polish"),
             _summarize,
             serial=True,
         ),
@@ -423,12 +600,19 @@ HOT = Graph(
             ("outline", "chapter_summarize", "settings"),
             _lore,
         ),
+        NodeSpec(
+            "continuity_check",
+            "continuity_check",
+            "连续性四维核查表",
+            ("outline", "chapter_summarize", "character_graph"),
+            _continuity,
+        ),
         # 阶段5 质检发布：consistency + compliance 并发执行，然后 review_merge 聚合
         NodeSpec(
             "consistency_review",
             "consistency_review",
             "设定一致性体检",
-            ("outline", "chapter_summarize", "character_graph"),
+            ("outline", "chapter_summarize", "character_graph", "continuity_check"),
             _consistency_input,
         ),
         NodeSpec(
@@ -445,11 +629,12 @@ HOT = Graph(
             ("consistency_review", "compliance_review"),
             _review_merge,
         ),
+        NodeSpec("cover_plan", "cover_plan", "封面方案", ("outline", "positioning", "settings"), _cover),
         NodeSpec(
             "publish",
             "publish_pack",
             "发布包",
-            ("review_merge", "outline", "positioning", "settings"),
+            ("review_merge", "outline", "positioning", "settings", "cover_plan"),
             _publish,
         ),
     ),
@@ -473,12 +658,21 @@ REFERENCE = Graph(
         NodeSpec("adaptation", "adaptation", "去抄袭改编", ("outline_decompose",), _adaptation),
         # Layer 2：outline 依赖 settings + adaptation
         NodeSpec("outline", "outline", "新书大纲", ("settings", "adaptation"), _reference_outline, serial=True, retry_policy="soft"),
-        # Layer 3：summarize + lore 并发
+        # Layer 3：正文闭环 —— 黄金三章 → 润色 → 概括/抽取
+        NodeSpec(
+            "chapter_expand",
+            "chapter_write",
+            "黄金三章正文",
+            ("outline",),
+            _expand,
+            chaptered=True,
+        ),
+        NodeSpec("polish", "humanizer", "去 AI 味润色", ("chapter_expand",), _polish),
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
             "章节概括",
-            ("outline",),
+            ("outline", "chapter_expand", "polish"),
             _summarize,
             serial=True,
         ),
@@ -489,12 +683,19 @@ REFERENCE = Graph(
             ("settings", "adaptation", "outline", "chapter_summarize"),
             _lore,
         ),
+        NodeSpec(
+            "continuity_check",
+            "continuity_check",
+            "连续性四维核查表",
+            ("outline", "chapter_summarize", "character_graph"),
+            _continuity,
+        ),
         # Layer 4：consistency + compliance 并发，然后 merge
         NodeSpec(
             "consistency_review",
             "consistency_review",
             "设定一致性体检",
-            ("outline", "chapter_summarize", "character_graph"),
+            ("outline", "chapter_summarize", "character_graph", "continuity_check"),
             _consistency_input,
         ),
         NodeSpec(
@@ -511,12 +712,13 @@ REFERENCE = Graph(
             ("consistency_review", "compliance_review"),
             _review_merge,
         ),
-        # Layer 5：publish
+        # Layer 5：封面方案 + publish
+        NodeSpec("cover_plan", "cover_plan", "封面方案", ("outline", "positioning", "settings"), _cover),
         NodeSpec(
             "publish",
             "publish_pack",
             "发布包",
-            ("review_merge", "outline", "positioning", "settings"),
+            ("review_merge", "outline", "positioning", "settings", "cover_plan"),
             _publish,
         ),
     ),
@@ -531,12 +733,21 @@ CUSTOM = Graph(
         NodeSpec("settings", "settings_pack", "设定生成", ("positioning",), _hot_settings),
         # Layer 2：outline 依赖 settings
         NodeSpec("outline", "outline", "大纲规划", ("settings",), _custom_outline, serial=True, retry_policy="soft"),
-        # Layer 3：summarize + lore 并发
+        # Layer 3：正文闭环 —— 黄金三章 → 润色 → 概括/抽取
+        NodeSpec(
+            "chapter_expand",
+            "chapter_write",
+            "黄金三章正文",
+            ("outline",),
+            _expand,
+            chaptered=True,
+        ),
+        NodeSpec("polish", "humanizer", "去 AI 味润色", ("chapter_expand",), _polish),
         NodeSpec(
             "chapter_summarize",
             "chapter_summarize",
             "章节概括",
-            ("outline",),
+            ("outline", "chapter_expand", "polish"),
             _summarize,
             serial=True,
         ),
@@ -547,12 +758,19 @@ CUSTOM = Graph(
             ("settings", "outline", "chapter_summarize"),
             _lore,
         ),
+        NodeSpec(
+            "continuity_check",
+            "continuity_check",
+            "连续性四维核查表",
+            ("outline", "chapter_summarize", "character_graph"),
+            _continuity,
+        ),
         # Layer 4：consistency + compliance 并发，然后 merge
         NodeSpec(
             "consistency_review",
             "consistency_review",
             "设定一致性体检",
-            ("outline", "chapter_summarize", "character_graph"),
+            ("outline", "chapter_summarize", "character_graph", "continuity_check"),
             _consistency_input,
         ),
         NodeSpec(
@@ -569,12 +787,13 @@ CUSTOM = Graph(
             ("consistency_review", "compliance_review"),
             _review_merge,
         ),
-        # Layer 5：publish
+        # Layer 5：封面方案 + publish
+        NodeSpec("cover_plan", "cover_plan", "封面方案", ("outline", "positioning", "settings"), _cover),
         NodeSpec(
             "publish",
             "publish_pack",
             "发布包",
-            ("review_merge", "outline", "positioning", "settings"),
+            ("review_merge", "outline", "positioning", "settings", "cover_plan"),
             _publish,
         ),
     ),

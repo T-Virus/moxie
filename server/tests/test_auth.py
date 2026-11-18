@@ -3,6 +3,12 @@
 
 from __future__ import annotations
 
+import jwt
+from sqlalchemy import select
+
+from app.models import RefreshSession
+from app.security import token_hash
+
 
 def test_register_returns_tokens_and_me(client, account):
     assert account["token_type"] == "bearer"
@@ -135,3 +141,34 @@ def test_resend_verification_does_not_leak_account_existence(client):
     assert resend.status_code == 200
     # 不暴露该邮箱是否注册
     assert "verify_url" not in resend.json()
+
+
+def test_refresh_rejects_sub_mismatching_session_owner(client, account):
+    """refresh 的 token 声明账号必须与会话归属账号一致（纵深防御）。
+
+    模拟 JWT 密钥泄露/弱值场景：攻击者拿自己合法登录的会话 sid，
+    伪造成另一个账号的 refresh token。即使 token_hash 能命中会话行，
+    account_id 校验也必须拒绝，防止横向换发他人 access token。
+    """
+    settings = client.app.state.settings
+    refresh_token = account["refresh_token"]
+    payload = jwt.decode(refresh_token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+
+    # 用同一 secret 把 sub 改成另一个账号（模拟弱/泄露密钥下的伪造）
+    attacker_sub = "999999"
+    forged_payload = dict(payload)
+    forged_payload["sub"] = attacker_sub
+    forged = jwt.encode(forged_payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+    # 把伪造 token 的 hash 写到真实会话行，令 token_hash 查询仍能命中该会话。
+    with client.app.state.db.session() as session:
+        row = session.scalar(
+            select(RefreshSession).where(RefreshSession.session_id == payload["sid"])
+        )
+        assert row is not None
+        row.token_hash = token_hash(forged)
+        session.commit()
+
+    response = client.post("/v1/auth/refresh", json={"refresh_token": forged})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_refresh"

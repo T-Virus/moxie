@@ -9,6 +9,9 @@ import {
   type PayloadSession,
 } from './payloadCrypto'
 import type { AuthResponse } from '@/types'
+import { byokHeaders } from './byok'
+import { resetTraceId, traceHeaders } from './trace'
+import { noteRequestId, reportApiError } from './errorReporter'
 
 configurePayloadCrypto(`${API_BASE}/crypto/public-key`)
 
@@ -73,6 +76,7 @@ export function clearSession(): void {
   sessionStorage.removeItem(ACCESS_KEY)
   sessionStorage.removeItem(REFRESH_KEY)
   sessionStorage.removeItem(ACCOUNT_KEY)
+  resetTraceId()
 }
 
 export function readAccount() {
@@ -189,18 +193,72 @@ export interface RequestOptions {
   body?: BodyInit | null
   headers?: Record<string, string>
   signal?: AbortSignal
+  /** 请求超时毫秒数；0 表示关闭超时（大文件上传等长请求用）。默认 60s。 */
+  timeoutMs?: number
   /** 跳过 Authorization（登录/注册） */
   anonymous?: boolean
   /** 只发一次，不做 401 刷新重试（刷新接口自身） */
   noRetry?: boolean
+  /** 仅在模型消费类接口注入会话级 X-BYOK-Key；普通接口不会携带 */
+  withByok?: boolean
+  /** 网络错误/502/503/504 的最大重试次数；默认 2，0 表示不重试 */
+  retry?: number
+}
+
+const RETRY_BASE_MS = 300
+const RETRY_MAX_MS = 5000
+const RETRYABLE_STATUS = new Set([502, 503, 504])
+const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+function parseRetryAfter(value: string | null): number {
+  if (!value) return 0
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
+  const at = Date.parse(value)
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : 0
+}
+
+/** 指数退避 + 25% 抖动；Retry-After 更大时以其为准，避免打爆正在恢复的服务。 */
+export function backoffDelay(
+  attempt: number,
+  retryAfter: string | null = null,
+  random: () => number = Math.random,
+): number {
+  const base = Math.min(RETRY_BASE_MS * 2 ** Math.max(0, attempt), RETRY_MAX_MS)
+  const jitter = Math.max(0, Math.min(1, random())) * base * 0.25
+  return Math.min(RETRY_MAX_MS, Math.max(parseRetryAfter(retryAfter), base + jitter))
+}
+
+function retryPermitted(method: string, headers: Headers, opts: RequestOptions): boolean {
+  if (opts.noRetry || (opts.retry ?? 2) <= 0) return false
+  return IDEMPOTENT_METHODS.has(method) || headers.has('Idempotency-Key')
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 默认请求超时：避免网络挂起时 fetch 永远 pending。长请求用 timeoutMs: 0 关闭。 */
+const DEFAULT_TIMEOUT_MS = 60_000
+
+/** 把外部 signal 与超时 signal 组合；timeoutMs<=0 时只返回外部 signal。 */
+function combinedSignal(external: AbortSignal | undefined, timeoutMs: number): AbortSignal | undefined {
+  if (timeoutMs <= 0) return external
+  const timeout = AbortSignal.timeout(timeoutMs)
+  if (!external) return timeout
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([external, timeout])
+  // 老浏览器降级：外部 signal 已中断时直接返回，否则以超时为主
+  return external.aborted ? external : timeout
 }
 
 /** 提交前统一去掉字符串首尾空白；口令/令牌/密钥/正文等敏感字段保留原样。 */
 const NO_TRIM_KEYS = new Set([
-  'password', 'refresh_token', 'token', 'signature', 'api_key', 'secret', 'content',
+  'password', 'refresh_token', 'token', 'signature', 'api_key', 'secret',
+  // 正文/提示词/通知正文等长文本保留原始空白；短文本与标识统一 trim。
+  'content', 'body', 'prompt',
 ])
 
-function trimPayload(value: unknown, key = ''): unknown {
+export function trimPayload(value: unknown, key = ''): unknown {
   if (typeof value === 'string') return NO_TRIM_KEYS.has(key) ? value : value.trim()
   if (Array.isArray(value)) return value.map((item) => trimPayload(item, key))
   if (value && typeof value === 'object') {
@@ -228,6 +286,10 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
   const headers = new Headers(opts.headers)
   const token = getAccessToken()
   if (!opts.anonymous && token) headers.set('Authorization', `Bearer ${token}`)
+  Object.entries(traceHeaders()).forEach(([name, value]) => headers.set(name, value))
+  if (opts.withByok) {
+    Object.entries(byokHeaders()).forEach(([name, value]) => headers.set(name, value))
+  }
   if (opts.body && !(opts.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
@@ -247,18 +309,49 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
     }
   }
 
+  const maxRetries = opts.noRetry ? 0 : Math.max(0, opts.retry ?? 2)
   let resp: Response
-  try {
-    resp = await fetch(url, {
-      method,
-      body,
-      headers,
-      signal: opts.signal,
-    })
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err
-    throw new ApiError(0, 'network_error', '无法连接服务端，请检查网络与后端地址')
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      resp = await fetch(url, {
+        method,
+        body,
+        headers,
+        signal: combinedSignal(opts.signal, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      })
+    } catch (err) {
+      // 调用方主动取消：原样抛出，让上层 AbortController 逻辑处理
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
+      const retryable = retryPermitted(method, headers, opts) && !opts.signal?.aborted
+      if (retryable && attempt < maxRetries) {
+        await wait(backoffDelay(attempt))
+        continue
+      }
+      // 超时：单独错误码，便于 UI 提示「请求超时可重试」而非笼统的网络错误
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        const error = new ApiError(0, 'timeout', '请求超时，请检查网络后重试')
+        reportApiError(error, pathQuery)
+        throw error
+      }
+      const error = new ApiError(0, 'network_error', '无法连接服务端，请检查网络与后端地址')
+      reportApiError(error, pathQuery)
+      throw error
+    }
+
+    if (
+      RETRYABLE_STATUS.has(resp.status) &&
+      retryPermitted(method, headers, opts) &&
+      !opts.signal?.aborted &&
+      attempt < maxRetries
+    ) {
+      await wait(backoffDelay(attempt, resp.headers.get('retry-after')))
+      continue
+    }
+    break
   }
+
+  // 回填服务端 requestId：JS 全局异常无请求上下文时用最近一次 id 做链路关联
+  noteRequestId(resp.headers.get('x-request-id'))
 
   if (resp.status === 401 && !opts.anonymous && !opts.noRetry) {
     const refreshed = await ensureRefresh()
@@ -280,6 +373,7 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
       resetPayloadCrypto()
       return apiFetch<T>(path, { ...opts, noRetry: true })
     }
+    reportApiError(error, pathQuery)
     throw error
   }
   return parsed as T

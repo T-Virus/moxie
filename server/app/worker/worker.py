@@ -91,8 +91,14 @@ def run_task_job(task_id: str) -> str:
                 status = _run(session, task, settings, storage)
                 session.commit()
                 if status == "queued":
-                    # 批量让出后本 RQ job 已结束：必须重新投递，否则任务永久滞留 queued（孤儿）
-                    if enqueue_task(settings, task_id):
+                    # 失败重试的退避未到点时不立即重投，否则会形成秒级空转重投；
+                    # 交给 scheduler 的 dispatch_retry_due 到点后统一入队。
+                    from ..db import utcnow
+
+                    if task.next_retry_at is not None and task.next_retry_at > utcnow():
+                        logger.info("task %s retry deferred until %s, skip re-enqueue", task_id, task.next_retry_at)
+                    elif enqueue_task(settings, task_id):
+                        # 批量让出后本 RQ job 已结束：必须重新投递，否则任务永久滞留 queued（孤儿）
                         logger.info("task %s rescheduled, re-enqueued", task_id)
                     else:
                         logger.warning("task %s rescheduled but re-enqueue failed（本地模式可用 --loop 执行）", task_id)
@@ -174,8 +180,17 @@ def run_once() -> int:
     try:
         with db.session() as session:
             storage = build_storage(settings, db.session_factory, session=session)
+            from ..db import utcnow
+
+            now = utcnow()
             task = session.scalar(
-                select(Task).where(Task.status == "queued").order_by(Task.created_at.asc()).limit(1)
+                select(Task)
+                .where(
+                    Task.status == "queued",
+                    (Task.next_retry_at.is_(None) | (Task.next_retry_at <= now)),
+                )
+                .order_by(Task.created_at.asc())
+                .limit(1)
             )
             if task is not None:
                 set_trace_id(task.id)

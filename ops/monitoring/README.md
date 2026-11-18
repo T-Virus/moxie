@@ -8,9 +8,9 @@
 
 | 指标 | 类型 | 标签 |
 | --- | --- | --- |
-| `moxie_queue_depth` | gauge | — |
+| `moxie_queue_depth` / `moxie_agent_queue_depth` | gauge | — |
 | `moxie_tasks_total` | counter | `status`（succeeded/failed/canceled） |
-| `moxie_tasks_requeued_total` | counter | — |
+| `moxie_tasks_requeued_total` / `moxie_task_retries_total` | counter | — |
 | `moxie_model_calls_total` | counter | `route`（managed/byok/stub） |
 | `moxie_model_tokens_total` | counter | — |
 | `moxie_model_cost_cents_total` | counter | — |
@@ -19,11 +19,20 @@
 | `moxie_quota_rejections_total` | counter | `metric` |
 | `moxie_rate_limited_total` | counter | `scope` |
 | `moxie_usage_alerts_total` | counter | — |
+| `moxie_client_error_reports_total` | counter | `result`, `source` |
+| `moxie_agent_runs_total` / `moxie_agent_runs_started_total` | counter | `status`, `mode` / `mode` |
+| `moxie_skill_calls_total` / `moxie_skill_duration_seconds_total` | counter | `skill`, `status` / `skill` |
 | `moxie_uploads_total` / `moxie_upload_bytes_total` | counter | — |
 | `moxie_upload_rejected_total` | counter | `reason` |
 | `moxie_uploads_deleted_total` | counter | — |
 
 计数器为进程内累加（多 worker 各自暴露，Prometheus 按实例聚合）；看板一律用 `rate()/increase()`。
+
+## 告警与 SLO
+
+- `alerts.yml`：队列积压、租约回收、任务失败率、回调失败、模型成本突增、额度拒绝与认证限流突增。
+- `SLO.md`：试点期 SLI/目标、错误预算、端到端 trace-id 串联方式与告警响应级别。
+- `prometheus.yml` 已通过 `rule_files` 引入 `alerts.yml`。
 
 ## 接入方式
 

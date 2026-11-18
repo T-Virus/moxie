@@ -21,6 +21,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from paths import book_dir, book_chapters, book_decomposed  # noqa: E402
+from entity_ids import foreshadow_id as _foreshadow_id                  # noqa: E402
 from deepseek_common import DEFAULT_MODEL, chat_json, resolve_base_url         # noqa: E402
 from story_bible import RELATION_KINDS, all_relations, all_faction_relations  # noqa: E402
 
@@ -271,8 +272,9 @@ def build_foreshadows(plot, fields):
         cut = re.split(r"(揭晓|回收|揭露|道出|水落石出|真相|浮出|最终|后来|终于|第\d+[章回])", text, 1)
         seed = cut[0].strip("，。；：、 ")
         payoff = (cut[1] + (cut[2] if len(cut) > 2 else "")).strip("，。；：、 ") if len(cut) > 1 else ""
-        out.append({"text": text, "seed": seed[:42], "payoff": payoff[:42],
-                    "chapter": pay_ch, "status": "已回收" if pay_ch or payoff else "待确认"})
+        out.append({"id": _foreshadow_id(seed or text), "text": text, "seed": seed[:42], "payoff": payoff[:42],
+                    "chapter": pay_ch, "planted_chapter": 0, "payoff_chapter": pay_ch or 0,
+                    "status": "已回收" if pay_ch or payoff else "待确认"})
     for s in _as_list((plot or {}).get("foreshadow")) or []:
         _add(s)
     for line in re.split(r"[\n；;]+", _s(fields.get("foreshadow"))):

@@ -6,13 +6,12 @@
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -28,18 +27,30 @@ from ..schemas import (
     AgentCollectionsUpdateRequest,
     AgentCoverRequest,
     AgentInfoUpdateRequest,
+    AgentRunActionResponse,
+    AgentRunCoverDeleteResponse,
+    AgentRunCoverResponse,
     AgentRunCreateRequest,
+    AgentRunDeleteResponse,
     AgentResumeRequest,
+    CreateAgentRunResponse,
+    GenresResponse,
 )
 from ..services.audit import write_audit
+from ..services.compliance import enforce_rights_declaration
 from ..services.cover import generate_cover, save_uploaded_cover
+from ..services.sse import (
+    FEED_MAX_TICKS,
+    FEED_POLL_SECONDS,
+    SSE_MAX_TICKS,
+    SSE_POLL_SECONDS,
+    sse_context,
+    sse_response,
+)
 from ..services.storage import book_slug
 from ..worker import enqueue_agent_run
 
 router = APIRouter(tags=["agent"])
-
-SSE_POLL_SECONDS = 0.2
-SSE_MAX_TICKS = 300  # 最长保持 60s；客户端可按 since 重新连接
 
 
 def _store_byok(request: Request, run_id: str) -> None:
@@ -53,7 +64,7 @@ def _store_byok(request: Request, run_id: str) -> None:
         pass
 
 
-@router.get("/genres")
+@router.get("/genres", response_model=GenresResponse)
 def genres(db: Session = Depends(get_db)):
     """题材目录：统一从 presets 表读取 type='genre' 的系统预设。"""
     rows = db.scalars(
@@ -77,7 +88,7 @@ def genres(db: Session = Depends(get_db)):
     return {"items": items, "custom_allowed": True}
 
 
-@router.post("/agent-runs", status_code=201)
+@router.post("/agent-runs", status_code=201, response_model=CreateAgentRunResponse)
 def create_agent_run(
     payload: AgentRunCreateRequest,
     request: Request,
@@ -85,17 +96,21 @@ def create_agent_run(
     db: Session = Depends(get_db),
 ):
     settings = request.app.state.settings
+    rights_summary: dict = {"rights_confirmed": False, "consent_recorded": False}
     if payload.mode == "reference":
         if not (payload.source_key or "").strip():
             raise ApiError(422, "source_key_required", "reference 模式必须提供 source_key")
-        if settings.legal_gate_enabled:
-            confirmed = request.headers.get("x-rights-confirmed", "").lower() in ("1", "true", "yes")
-            if not confirmed:
-                raise ApiError(
-                    422,
-                    "rights_confirmation_required",
-                    "参考改编前必须确认已获得参考作品使用权（X-Rights-Confirmed: true）",
-                )
+        # 服务端合规闸门：可信声明走加密 body，明文头仅作旧客户端兼容回退；
+        # 校验通过后写 LegalConsent + 审计留痕（见 services.compliance）。
+        rights_summary = enforce_rights_declaration(
+            db,
+            request=request,
+            account_id=auth.account.id,
+            settings=settings,
+            declaration=payload.rights,
+            source_key=payload.source_key,
+            action="agent_run.rights_consent",
+        )
         # 延迟导入，避免与 services.tasks ↔ runners 的既有导入顺序形成环
         from ..runners.decompose import validate_source_params
 
@@ -140,7 +155,12 @@ def create_agent_run(
             request=request,
             target_type="agent_run",
             target_id=run.id,
-            meta={"mode": run.mode, "title": run.title, "metric": run.reserved_metric},
+            meta={
+                "mode": run.mode,
+                "title": run.title,
+                "metric": run.reserved_metric,
+                "rights": rights_summary,
+            },
         )
     db.commit()
     db.refresh(run)
@@ -217,6 +237,52 @@ def list_agent_runs(
         "offset": offset,
         "next_offset": offset + len(items) if offset + len(items) < total else None,
     }
+
+
+RUN_FEED_STATUSES = ("queued", "running", "paused")
+
+
+@router.get("/agent-runs/stream")
+def agent_runs_stream(request: Request, auth: AuthContext = Depends(get_auth)):
+    """账号级运行变更流：只发 refresh 信号，前端收到后重查列表。
+
+    列表状态由服务端聚合判定，客户端不再为列表单独定时轮询；
+    单条运行的过程日志仍走 /{run_id}/events，避免 N+1 连接。
+    """
+    frame, headers = sse_context(request)
+    database = request.app.state.db
+    account_id = auth.account.id
+
+    def _signature() -> tuple[int, str, str]:
+        with database.session() as session:
+            row = session.execute(
+                select(
+                    func.count(AgentRun.id),
+                    func.max(AgentRun.updated_at),
+                    func.max(AgentRun.created_at),
+                ).where(
+                    AgentRun.account_id == account_id,
+                    AgentRun.status.in_(RUN_FEED_STATUSES),
+                )
+            ).one()
+        return (
+            int(row[0] or 0),
+            row[1].isoformat() if row[1] else "",
+            row[2].isoformat() if row[2] else "",
+        )
+
+    def _stream():
+        current = _signature()
+        yield f"event: ready\ndata: {frame({'type': 'ready', 'active': current[0]})}\n\n"
+        for _ in range(FEED_MAX_TICKS):
+            time.sleep(FEED_POLL_SECONDS)
+            nxt = _signature()
+            if nxt != current:
+                current = nxt
+                yield f"event: refresh\ndata: {frame({'type': 'refresh', 'active': nxt[0], 'at': time.time()})}\n\n"
+        yield f"event: end\ndata: {frame({'type': 'closed', 'since': current[0]})}\n\n"
+
+    return sse_response(_stream(), headers)
 
 
 @router.get("/agent-runs/{run_id}")
@@ -549,7 +615,7 @@ def update_agent_run_collections(
     return run_to_dict(db, run, storage=request.app.state.storage)
 
 
-@router.post("/agent-runs/{run_id}/cover")
+@router.post("/agent-runs/{run_id}/cover", response_model=AgentRunCoverResponse)
 def generate_agent_run_cover(
     run_id: str,
     payload: AgentCoverRequest,
@@ -585,7 +651,7 @@ def generate_agent_run_cover(
     return {"run_id": run.id, "cover_url": cover["url"], "cover": cover}
 
 
-@router.post("/agent-runs/{run_id}/cover/upload")
+@router.post("/agent-runs/{run_id}/cover/upload", response_model=AgentRunCoverResponse)
 def upload_agent_run_cover(
     run_id: str,
     request: Request,
@@ -642,7 +708,7 @@ def get_agent_run_cover(
     )
 
 
-@router.delete("/agent-runs/{run_id}/cover")
+@router.delete("/agent-runs/{run_id}/cover", response_model=AgentRunCoverDeleteResponse)
 def delete_agent_run_cover(
     run_id: str,
     request: Request,
@@ -680,16 +746,7 @@ def agent_run_events(
 ):
     get_run(db, auth.account.id, run_id)
     database = request.app.state.db
-    payload_key = getattr(request.state, "payload_key", None)
-    crypto = request.app.state.payload_crypto
-    sse_encrypted = payload_key is not None
-    path_with_query = request.url.path + (f"?{request.url.query}" if request.url.query else "")
-
-    def _frame(payload: dict) -> str:
-        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        if sse_encrypted:
-            return crypto.encrypt_sse(payload_key, raw, path_with_query)
-        return raw.decode("utf-8")
+    frame, headers = sse_context(request)
 
     def _stream():
         last = since
@@ -720,23 +777,16 @@ def agent_run_events(
                     ]
             for item in payloads:
                 last = item["seq"]
-                yield f"data: {_frame(item)}\n\n"
+                yield f"data: {frame(item)}\n\n"
             if status in ("succeeded", "failed", "canceled", "paused", "missing"):
                 break
             time.sleep(SSE_POLL_SECONDS)
-        yield f"event: end\ndata: {_frame({'status': 'closed', 'since': last})}\n\n"
+        yield f"event: end\ndata: {frame({'status': 'closed', 'since': last})}\n\n"
 
-    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-    if sse_encrypted:
-        headers["X-Payload-Sse"] = "1"
-    return StreamingResponse(
-        _stream(),
-        media_type="text/event-stream",
-        headers=headers,
-    )
+    return sse_response(_stream(), headers)
 
 
-@router.post("/agent-runs/{run_id}/cancel")
+@router.post("/agent-runs/{run_id}/cancel", response_model=AgentRunActionResponse)
 def cancel_agent_run(
     run_id: str,
     request: Request,
@@ -759,7 +809,7 @@ def cancel_agent_run(
     return {"run_id": run.id, "status": run.status, "changed": changed}
 
 
-@router.post("/agent-runs/{run_id}/pause")
+@router.post("/agent-runs/{run_id}/pause", response_model=AgentRunActionResponse)
 def pause_agent_run(
     run_id: str,
     request: Request,
@@ -816,7 +866,7 @@ def resume_agent_run(
     return run_to_dict(db, run, storage=request.app.state.storage)
 
 
-@router.delete("/agent-runs/{run_id}")
+@router.delete("/agent-runs/{run_id}", response_model=AgentRunDeleteResponse)
 def delete_agent_run(
     run_id: str,
     request: Request,

@@ -21,9 +21,16 @@ from .services.payload_crypto import (
 
 logger = logging.getLogger("moxie.payload")
 
+
+class PayloadTooLarge(Exception):
+    """载荷解密层读取到的请求体超过配置上限。"""
+
 _EXEMPT_EXACT = {
     "/v1/crypto/public-key",
     "/v1/uploads",
+    # 错误上报必须明文可达：加密会话本身失效时正是最需要上报的场景，
+    # 若走加密会因拿不到会话而失败，形成"错误无法上报"的死循环。
+    "/v1/telemetry/client-error",
 }
 _EXEMPT_PREFIXES = (
     "/v1/downloads",
@@ -73,6 +80,7 @@ class PayloadCryptoMiddleware:
         self.app = app
         self.settings = settings
         self.crypto = crypto
+        self.max_body_bytes = max(1, int(getattr(settings, "max_request_body_bytes", 4 * 1024 * 1024)))
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http" or not self.settings.payload_encryption_enabled:
@@ -108,7 +116,12 @@ class PayloadCryptoMiddleware:
         except Exception:  # noqa: BLE001
             return await self._error(send, 400, "payload_key_invalid", "客户端公钥无效")
 
-        body, disconnected = await self._read_body(receive)
+        try:
+            body, disconnected = await self._read_body(receive)
+        except PayloadTooLarge:
+            return await self._error(
+                send, 413, "payload_too_large", "请求体超过大小限制"
+            )
         if disconnected:
             return
         if body:
@@ -169,14 +182,19 @@ class PayloadCryptoMiddleware:
             self._wrap_send(send, key, key_id, scope, path_query),
         )
 
-    @staticmethod
-    async def _read_body(receive) -> tuple[bytes, bool]:
+    async def _read_body(self, receive) -> tuple[bytes, bool]:
+        """带上限地读取请求体：必须在载荷解密前执行，防止 chunked 绕过全局限制。"""
         chunks: list[bytes] = []
+        total = 0
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
                 return b"", True
-            chunks.append(message.get("body", b""))
+            chunk = message.get("body", b"")
+            total += len(chunk)
+            if total > self.max_body_bytes:
+                raise PayloadTooLarge
+            chunks.append(chunk)
             if not message.get("more_body", False):
                 return b"".join(chunks), False
 

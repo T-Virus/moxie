@@ -117,7 +117,11 @@ def test_subscription_adjust_extend_and_quota_adjust(client, headers, app, accou
     duplicate = client.post(
         f"/v1/admin/accounts/{account_id}/quota-adjustments", headers=headers, json=body
     )
+    # 幂等命中只返回 duplicate + event_id（契约的其余字段可选），不能因 response_model 报 500
+    assert duplicate.status_code == 200, duplicate.text
+    assert set(duplicate.json()) == {"duplicate", "event_id", "adjustment", "audit", "before", "after"}
     assert duplicate.json()["duplicate"] is True
+    assert duplicate.json()["adjustment"] is None
 
     history = client.get(
         f"/v1/admin/accounts/{account_id}/quota-adjustments", headers=headers

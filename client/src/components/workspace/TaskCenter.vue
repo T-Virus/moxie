@@ -121,6 +121,7 @@ import AppDialog from '@/components/AppDialog.vue'
 import ErrorDialog from '@/components/ErrorDialog.vue'
 import type { RunDetail } from '@/types'
 import { cancelRun, getRun, listRuns, pauseRun, resumeRun } from '@/services/agentApi'
+import { useRunFeed } from '@/composables/useRunFeed'
 import { ApiError } from '@/services/http'
 import { STATUS_TONE, statusLabel } from '@/utils/format'
 
@@ -132,9 +133,6 @@ const TERMINAL = ['succeeded', 'failed', 'canceled']
 /** 停止请求：running 的任务要等引擎在章节/段落边界落 paused，轮询确认避免「停止中…」悬挂 */
 const STOP_POLL_INTERVAL = 2000
 const STOP_POLL_TIMEOUT = 30000
-/** 存在未结束任务时的列表刷新间隔：状态标记不再依赖用户手动点「刷新」 */
-const LIST_POLL_INTERVAL = 4000
-
 const items = ref<RunDetail[]>([])
 const page = ref(1)
 const total = ref(0)
@@ -147,8 +145,6 @@ const notice = ref<{ title: string; message: string; tone: 'error' | 'warn' | 'i
 /** 每秒推进一次，仅用于「生成中」行的耗时文本刷新 */
 const now = ref(Date.now())
 let tickTimer: number | null = null
-let listTimer: number | null = null
-
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const hasNext = computed(() => nextOffset.value !== undefined)
 
@@ -245,21 +241,20 @@ function syncTick(): void {
 }
 
 /**
- * 存在未结束任务（含 paused）时定时静默刷新列表。
- * 此前只有手动点「刷新」或切换任务才会重查，导致停止/完成/被运营终止后
- * 徽章一直停在旧状态，前端看起来「状态改不了」。
+ * 存在未结束任务（含 paused）时订阅账号级 SSE；服务端状态变更推送 refresh。
+ * SSE 不可用时自动降级为 4 秒轮询，界面状态标记仍会跟随。
  */
+const runFeed = useRunFeed({
+  active: () => items.value.some((task) => !TERMINAL.includes(task.status)),
+  refresh: () => {
+    if (busyId.value) return // 操作进行中不打断按钮态
+    void load(true)
+  },
+  pollIntervalMs: 4000,
+})
+
 function syncListPolling(): void {
-  const active = items.value.some((task) => !TERMINAL.includes(task.status))
-  if (active && listTimer === null) {
-    listTimer = window.setInterval(() => {
-      if (busyId.value) return // 操作进行中不打断按钮态
-      void load(true)
-    }, LIST_POLL_INTERVAL)
-  } else if (!active && listTimer !== null) {
-    window.clearInterval(listTimer)
-    listTimer = null
-  }
+  runFeed.sync(items.value.some((task) => !TERMINAL.includes(task.status)))
 }
 
 function errorText(err: unknown, fallback: string): string {
@@ -397,9 +392,8 @@ watch([() => props.currentId, () => props.status], () => load())
 onMounted(() => load())
 onBeforeUnmount(() => {
   if (tickTimer !== null) window.clearInterval(tickTimer)
-  if (listTimer !== null) window.clearInterval(listTimer)
   tickTimer = null
-  listTimer = null
+  runFeed.stop()
 })
 </script>
 

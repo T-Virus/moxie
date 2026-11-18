@@ -24,6 +24,7 @@ REQUIRED_TABLES = {
     "credit_grants",
     "notifications",
     "notification_deliveries",
+    "web_push_subscriptions",
     "refunds",
     "invoice_requests",
 }
