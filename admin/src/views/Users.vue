@@ -12,8 +12,10 @@ import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pager from '../components/Pager.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import UiSelect from '../components/UiSelect.vue'
 
 const role = getRole()
 const canWrite = computed(() => can(role, 'users:write'))
@@ -190,6 +192,15 @@ async function submitBan() {
 }
 
 const roleLabel: Record<string, string> = { admin: '管理员', support: '客服', user: '用户' }
+
+function userActions(row: UserRow): RowAction[] {
+  const actions: RowAction[] = [{ label: '详情', run: () => openDetail(row) }]
+  if (canWrite.value && row.email) actions.push({ label: '重置密码', run: () => openReset(row) })
+  if (canWrite.value && row.status === 'active') actions.push({ label: '封禁', tone: 'danger', run: () => openBan(row, 'ban') })
+  else if (canWrite.value && row.status === 'banned') actions.push({ label: '解封', run: () => openBan(row, 'unban') })
+  if (canWrite.value && row.role !== 'admin') actions.push({ label: '删除', tone: 'danger', run: () => openDelete(row) })
+  return actions
+}
 </script>
 
 <template>
@@ -205,12 +216,18 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
       <div class="tb-group tb-search">
         <input v-model="q" class="input" placeholder="搜索邮箱 / 手机号 / 账号 ID" />
       </div>
-      <select v-model="status" class="select tb-select" @change="search">
-        <option value="">全部状态</option>
-        <option value="active">启用</option>
-        <option value="banned">已封禁</option>
-        <option value="disabled">已停用</option>
-      </select>
+      <UiSelect
+        v-model="status"
+        class="tb-select"
+        variant="toolbar"
+        placeholder="全部状态"
+        :options="[
+          { value: 'active', label: '启用' },
+          { value: 'banned', label: '已封禁' },
+          { value: 'disabled', label: '已停用' },
+        ]"
+        @change="search"
+      />
       <button class="btn sm" type="submit" :disabled="loading">查询</button>
       <div class="spacer"></div>
       <span class="muted" style="font-size: 12px">共 {{ total === null ? '—' : formatNumber(total) }} 个账号</span>
@@ -236,7 +253,7 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
               <th style="width: 96px">状态</th>
               <th>订阅</th>
               <th style="width: 80px">设备</th>
-              <th style="width: 128px">创建时间</th>
+              <th>创建时间</th>
               <th style="width: 205px">操作</th>
             </tr>
           </thead>
@@ -244,28 +261,23 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
             <tr v-for="row in rows" :key="row.id">
               <td class="mono">#{{ row.id }}</td>
               <td>
-                <div>{{ row.email || row.phone || '—' }}</div>
-                <div v-if="row.email && row.phone" class="muted" style="font-size: 11.5px">{{ row.phone }}</div>
+                <div class="truncate" :title="[row.email, row.phone].filter(Boolean).join(' · ')">
+                  {{ [row.email, row.phone].filter(Boolean).join(' · ') || '—' }}
+                </div>
               </td>
               <td><span class="badge" :class="row.role === 'admin' ? 'purple' : 'muted'">{{ roleLabel[row.role] || row.role }}</span></td>
               <td><StatusBadge :value="row.status" dot /></td>
               <td>
-                <template v-if="row.subscription">
-                  <div>{{ planLabel(row.subscription) }}</div>
-                  <div style="margin-top: 3px"><StatusBadge :value="row.subscription.status" /></div>
-                </template>
+                <span v-if="row.subscription" class="sub-line" :title="`${planLabel(row.subscription)} · ${row.subscription.status}`">
+                  <span class="truncate">{{ planLabel(row.subscription) }}</span>
+                  <StatusBadge :value="row.subscription.status" />
+                </span>
                 <span v-else class="muted">—</span>
               </td>
               <td class="num">{{ row.devices_count ?? '—' }}</td>
-              <td class="muted">{{ formatTime(row.created_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(row.created_at) }}</td>
               <td>
-                <div class="actions">
-                  <button class="btn ghost sm" @click="openDetail(row)">详情</button>
-                  <button v-if="canWrite && row.email" class="btn ghost sm" @click="openReset(row)">重置密码</button>
-                  <button v-if="canWrite && row.status === 'active'" class="btn danger-ghost sm" @click="openBan(row, 'ban')">封禁</button>
-                  <button v-else-if="canWrite && row.status === 'banned'" class="btn ghost sm" @click="openBan(row, 'unban')">解封</button>
-                  <button v-if="canWrite && row.role !== 'admin'" class="btn danger-ghost sm" @click="openDelete(row)">删除</button>
-                </div>
+                <RowActions :actions="userActions(row)" />
               </td>
             </tr>
           </tbody>
@@ -311,8 +323,8 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
               <td>{{ device.platform }}</td>
               <td>{{ device.name || '—' }}</td>
               <td><StatusBadge :value="device.status" /></td>
-              <td class="muted">{{ formatTime(device.last_seen_at) }}</td>
-              <td class="muted">{{ formatTime(device.created_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(device.last_seen_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(device.created_at) }}</td>
             </tr>
           </tbody>
         </table>
@@ -329,7 +341,7 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
               <td>{{ task.type || '—' }}</td>
               <td><StatusBadge :value="task.status" /></td>
               <td class="num">{{ task.progress ?? 0 }}%</td>
-              <td class="muted">{{ formatTime(task.created_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(task.created_at) }}</td>
             </tr>
           </tbody>
         </table>
@@ -428,4 +440,5 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
 
 <style scoped>
 .state-loading { padding: 10px 0; }
+.sub-line { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; white-space: nowrap; }
 </style>

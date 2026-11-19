@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiBaseLabel, getAdminPerformance, getHealth, getReady, probeEndpoint, type ProbeOutcome } from '../api'
-import { can, hiddenNavLabels, ROLE_LABEL, type Permission } from '../roles'
+import { hiddenNavLabels, ROLE_LABEL } from '../roles'
 import { getAccount, getRole } from '../session'
 import type { AdminPerformance } from '../types'
 import { formatTime } from '../ui'
 import Icon from '../components/Icon.vue'
 import PageHeader from '../components/PageHeader.vue'
-import StateBlock from '../components/StateBlock.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
+
+const router = useRouter()
+
+function probeActions(item: ProbeRow): RowAction[] {
+  return [{ label: '前往', tone: 'primary', run: () => router.push(item.page) }]
+}
 
 interface ProbeRow {
   key: string
@@ -31,19 +38,6 @@ const PROBES: ProbeRow[] = [
   { key: 'notifications', label: '通知记录', path: '/v1/admin/notifications?page=1&page_size=1', page: '/alerts', note: '成功 / 失败 / 重试' },
   { key: 'audit', label: '审计日志', path: '/v1/admin/audit-logs?page=1&page_size=1', page: '/audit', note: '服务端过滤 / 分页' },
   { key: 'reminders', label: '续费提醒', path: '/v1/admin/renewal-reminders', page: '/subscriptions', note: '已有接口' },
-]
-
-const CAPABILITIES: { label: string; permission: Permission }[] = [
-  { label: '用户查看与详情', permission: 'users:read' },
-  { label: '封禁 / 解封用户', permission: 'users:write' },
-  { label: '订阅与套餐调整', permission: 'subscriptions:write' },
-  { label: '额度手工调整', permission: 'quota:write' },
-  { label: '退款审批', permission: 'refunds:write' },
-  { label: '开票 / 作废', permission: 'invoices:write' },
-  { label: '对账查询与导出', permission: 'reconcile:read' },
-  { label: '任务重试', permission: 'tasks:write' },
-  { label: '告警与通知', permission: 'alerts:read' },
-  { label: '审计日志查询', permission: 'audit:read' },
 ]
 
 const account = ref(getAccount())
@@ -132,19 +126,18 @@ onMounted(() => {
     </div>
   </div>
 
-  <div class="overview-grid">
-    <div class="card" style="margin: 0">
+  <div class="overview-page">
+    <div class="overview-left">
+    <div class="card session-card">
       <div class="card-head">
         <div class="card-title">当前会话</div>
-        <div class="spacer"></div>
-        <span class="role-chip" :class="role || ''">{{ roleLabel }}</span>
       </div>
       <div class="kv-grid">
         <div class="kv"><span class="k">账号</span><span class="v">{{ account?.email || account?.phone || '—' }}</span></div>
         <div class="kv"><span class="k">账号 ID</span><span class="v mono">#{{ account?.id ?? '—' }}</span></div>
         <div class="kv"><span class="k">账号状态</span><span class="v">{{ account?.status || '—' }}</span></div>
         <div class="kv"><span class="k">创建时间</span><span class="v">{{ formatTime(account?.created_at) }}</span></div>
-        <div class="kv"><span class="k">接口地址</span><span class="v mono">{{ apiBaseLabel() }}</span></div>
+        <div class="kv"><span class="k">接口地址</span><span class="v">{{ apiBaseLabel() }}</span></div>
         <div class="kv"><span class="k">会话存储</span><span class="v">浏览器 sessionStorage（不写入 URL / 日志）</span></div>
       </div>
 
@@ -171,29 +164,9 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="card" style="margin: 0">
-      <div class="card-head">
-        <div class="card-title">角色能力</div>
-        <div class="spacer"></div>
-        <span class="badge muted">{{ roleLabel }}</span>
-      </div>
-      <div class="perm-list">
-        <div v-for="item in CAPABILITIES" :key="item.permission" class="perm-row">
-          <Icon :name="can(role, item.permission) ? 'check' : 'ban'" :size="15"
-            :style="{ color: can(role, item.permission) ? 'var(--green)' : 'var(--text-3)' }" />
-          <span class="name">{{ item.label }}</span>
-          <span class="spacer" style="flex: 1"></span>
-          <span class="badge" :class="can(role, item.permission) ? 'ok' : 'muted'">
-            {{ can(role, item.permission) ? '可用' : '无权限' }}
-          </span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
+  <div class="card perf-card">
     <div class="card-head">
-      <div class="card-title">API 性能快照<span class="sub">进程内统计，刷新页面重新读取</span></div>
+      <div class="card-title">API 性能快照<span class="sub">进程内统计</span></div>
       <div class="spacer"></div>
       <button class="btn ghost sm" @click="loadPerformance">
         <Icon name="refresh" :size="14" />刷新
@@ -207,7 +180,7 @@ onMounted(() => {
         <div class="kv"><span class="k">P99</span><span class="v mono">{{ performance.p99_ms ?? '—' }} ms</span></div>
         <div class="kv"><span class="k">5xx 错误率</span><span class="v mono">{{ (performance.error_rate * 100).toFixed(2) }}%</span></div>
       </div>
-      <div v-if="performance.routes.length" class="table-wrap" style="margin-top: 12px">
+      <div v-if="performance.routes.length" class="table-wrap perf-table">
         <table class="data-table">
           <thead><tr><th>路由</th><th>请求数</th><th>P95</th><th>P99</th><th>错误率</th></tr></thead>
           <tbody>
@@ -223,48 +196,64 @@ onMounted(() => {
       </div>
     </template>
   </div>
+    </div>
 
-  <div class="card">
+  <div class="card probes-card">
     <div class="card-head">
       <div class="card-title">服务端管理接口就绪情况<span class="sub">共 {{ PROBES.length }} 项，可用 {{ readyCount }} 项，未实现 {{ missingCount }} 项</span></div>
       <div class="spacer"></div>
       <span class="badge" :class="missingCount > 0 ? 'warn' : 'ok'">{{ missingCount > 0 ? '存在缺口' : '全部可用' }}</span>
     </div>
-    <div class="table-wrap readiness-table">
+    <div class="table-wrap readiness-table probes-table">
       <table class="data-table">
         <thead>
           <tr>
-            <th>模块</th><th>方法</th><th>接口</th><th>状态</th><th>说明</th><th style="width: 90px">操作</th>
+            <th>模块</th><th>接口</th><th style="width: 96px">状态</th><th style="width: 56px">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="item in PROBES" :key="item.key">
             <td>{{ item.label }}</td>
-            <td class="mono">GET</td>
             <td class="mono truncate" :title="item.path">{{ item.path }}</td>
             <td>
               <span class="probe-status" :class="stateClass(probes[item.key]?.state)">
                 <i class="dot"></i>{{ stateText(probes[item.key]?.state) }}
               </span>
-              <span v-if="probes[item.key]?.httpStatus" class="muted mono" style="margin-left: 6px">
-                {{ probes[item.key]?.httpStatus }}
-              </span>
             </td>
-            <td class="muted">{{ probes[item.key]?.message || item.note }}</td>
-            <td><router-link class="btn ghost sm" :to="item.page">前往</router-link></td>
+            <td><RowActions :actions="probeActions(item)" /></td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div v-if="missingCount > 0" class="notice warn" style="margin: 14px 0 0">
-      <div class="notice-body">
-        <div class="notice-title">缺口说明</div>
-        <div>标记为「未实现」的接口会在对应页面显示错误态；请以服务端 OpenAPI 为准检查路由与权限。</div>
-      </div>
-    </div>
   </div>
-
-  <div v-if="probing && readyCount === 0 && missingCount === 0" class="card">
-    <StateBlock kind="loading" title="正在检测接口状态…" message="并行探测服务端管理接口，请稍候。" />
-  </div>
+</div>
 </template>
+
+<style scoped>
+/* 概览按视口高度排布：左列会话 + 性能、右列接口就绪，各卡片内部滚动，
+   首次加载不出现整页滚动条；窄屏改为单列堆叠 */
+.overview-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 14px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.overview-left { display: flex; flex-direction: column; gap: 14px; min-height: 0; min-width: 0; }
+.session-card { margin: 0; flex: none; }
+.perf-card {
+  margin: 0; flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.perf-table { flex: 1 1 auto; min-height: 0; margin-top: 12px; }
+.probes-card {
+  margin: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.probes-table { flex: 1 1 auto; min-height: 0; }
+@media (max-width: 1080px) {
+  .overview-page { grid-template-columns: 1fr; grid-template-rows: auto auto; }
+  .perf-card { flex: none; }
+  .perf-table { max-height: 200px; }
+}
+</style>

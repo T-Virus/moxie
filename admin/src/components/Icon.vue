@@ -15,6 +15,8 @@ const paths: Record<string, string> = {
   refresh: 'M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.5 15',
   search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16M21 21l-4.35-4.35',
   close: 'M18 6L6 18M6 6l12 12',
+  'chevron-left': 'M15 18l-6-6 6-6',
+  'chevron-right': 'M9 18l6-6-6-6',
   info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M12 8h.01M12 12v5',
   warning: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
   check: 'M20 6L9 17l-5-5',
@@ -28,6 +30,15 @@ const paths: Record<string, string> = {
   play: 'M5 3l16 9-16 9z',
   retry: 'M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.5 15',
   'telemetry-config': 'M3 3v18h18M7 15l4-5 3 3 5-7',
+  'account-deletions': 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M18 8l5 5M23 8l-5 5',
+  'four-ledger': 'M4 5h16v14H4zM4 10h16M10 10v9M16 10v9',
+  'task-dead-letters': 'M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z',
+  'model-configs': 'M4 7h16M4 17h16M7 4v6M17 14v6M3 12h6l2-3 2 6 2-3h6',
+  'offline-packages': 'M12 2l8 4v12l-8 4-8-4V6zM4 6l8 4 8-4M12 10v12',
+  presets: 'M4 6h16M4 12h16M4 18h10M18 15v6M15 18h6',
+  skills: 'M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z',
+  backups: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h4M8 17h4',
+  'model-usage': 'M4 20V10M10 20V4M16 20v-7M22 20H2M2 20h20',
 }
 </script>
 

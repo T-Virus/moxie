@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import AuthShell from '../components/AuthShell.vue'
 import { api, apiBaseLabel, errorMessage } from '../api'
 
 const email = ref('')
@@ -31,56 +32,58 @@ async function submit() {
 </script>
 
 <template>
-  <div class="login-page">
-    <div class="login-card">
-      <div class="login-brand">
-        <div class="brand-logo">墨</div>
-        <div>
-          <div class="brand-name">墨写 · 管理后台</div>
-          <div class="brand-sub">MOXIE OPERATIONS</div>
-        </div>
+  <AuthShell>
+    <div class="auth-head">
+      <div class="auth-kicker">ACCOUNT RECOVERY</div>
+      <h2 class="auth-title">找回密码</h2>
+      <p class="auth-desc">输入管理账号邮箱，我们会发送一封重置密码邮件；链接 30 分钟内有效，仅在本管理后台打开。</p>
+    </div>
+
+    <template v-if="sent">
+      <div class="notice info">{{ message }}</div>
+      <div v-if="devUrl" class="notice warn auth-dev-link" style="margin-top: 12px">
+        本地调试（未配置邮件服务）：<a :href="devUrl" target="_blank" rel="noopener">直接打开重置链接</a>
       </div>
+      <router-link class="auth-action" to="/login">返回登录</router-link>
+    </template>
 
-      <div class="login-title">找回密码</div>
-      <p class="login-desc">输入管理账号邮箱，我们会发送一封重置密码邮件；链接 30 分钟内有效，仅在本管理后台打开。</p>
-
-      <template v-if="sent">
-        <div class="notice" style="margin-bottom: 14px">{{ message }}</div>
-        <div v-if="devUrl" class="notice warn" style="margin-bottom: 14px; word-break: break-all">
-          本地调试（未配置邮件服务）：<a :href="devUrl" target="_blank" rel="noopener">直接打开重置链接</a>
-        </div>
-        <router-link class="btn" to="/login" style="height: 38px; display: flex; align-items: center; justify-content: center">
-          返回登录
-        </router-link>
-      </template>
-
-      <form v-else class="login-form" @submit.prevent="submit">
-        <div class="field">
-          <label for="forgot-email">登录邮箱<span class="required">*</span></label>
+    <form v-else class="auth-form" @submit.prevent="submit">
+      <div class="field">
+        <label for="forgot-email">登录邮箱</label>
+        <div class="auth-input-wrap">
+          <svg class="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 6h16v12H4zM4 7l8 6 8-6" />
+          </svg>
           <input
             id="forgot-email"
             v-model="email"
-            class="input"
+            class="input auth-input--icon"
             type="email"
             autocomplete="email"
             placeholder="you@example.com"
             :disabled="submitting"
-            @keyup.enter="submit"
           />
         </div>
+      </div>
 
-        <div v-if="error" class="notice error" style="margin: 0">{{ error }}</div>
+      <div v-if="error" class="notice error" role="alert">{{ error }}</div>
 
-        <button class="btn" type="submit" :disabled="submitting" style="height: 38px">
-          <span v-if="submitting" class="spinner" style="width: 15px; height: 15px"></span>
-          {{ submitting ? '发送中…' : '发送重置邮件' }}
-        </button>
+      <button class="btn auth-submit" type="submit" :disabled="submitting">
+        <span v-if="submitting" class="spinner" style="width: 15px; height: 15px" />
+        {{ submitting ? '发送中…' : '发送重置邮件' }}
+        <svg v-if="!submitting" class="auth-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+      </button>
+    </form>
 
-        <div class="login-foot" style="padding-top: 4px">
-          <div><router-link to="/login">返回登录</router-link></div>
-          <div>接口地址：<span class="mono">{{ apiBaseLabel() }}</span></div>
-        </div>
-      </form>
+    <div class="auth-links">
+      <router-link to="/login">返回登录</router-link>
     </div>
-  </div>
+
+    <div class="auth-foot">
+      <div class="auth-foot-row"><span>接口地址</span><code class="mono">{{ apiBaseLabel() }}</code></div>
+      <div class="auth-foot-hint">重置链接仅发送至已注册的管理员或客服邮箱。</div>
+    </div>
+  </AuthShell>
 </template>

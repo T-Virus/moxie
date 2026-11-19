@@ -144,9 +144,11 @@ router.beforeEach(async (to) => {
     if (to.path === '/login' && loadSession()) return '/overview'
     return true
   }
+  // 先记录跳转前是否有会话：首次访问（从未登录）不弹提示，只有令牌失效才提示
+  const hadSession = Boolean(loadSession())
   const ready = await ensureSession()
   if (!ready) {
-    notifyLoginNotice('请先登录管理后台')
+    if (hadSession) notifyLoginNotice('登录已失效，请重新登录')
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   const permission = to.meta.permission as Permission | undefined

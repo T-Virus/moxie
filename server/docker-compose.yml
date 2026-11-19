@@ -111,6 +111,8 @@ services:
       - ../input:/data/input:ro
       - ../dist:/app/dist:ro
       - ../mobile/dist:/app/mobile/dist:ro
+      # 统一技能目录（config/skills_catalog.json）只读挂载，否则容器内找不到清单会降级报错
+      - ../config:/app/config:ro
       - artifactdata:/var/lib/moxie/artifacts
       - backupdata:/app/backups
     depends_on:
@@ -156,6 +158,7 @@ services:
     volumes:
       - ../src:/src:ro
       - ../input:/data/input:ro
+      - ../config:/app/config:ro
       - artifactdata:/var/lib/moxie/artifacts
     depends_on:
       postgres:
@@ -190,6 +193,7 @@ services:
     command: ["python", "-m", "app.scheduler"]
     volumes:
       - ../src:/src:ro
+      - ../config:/app/config:ro
       - artifactdata:/var/lib/moxie/artifacts
       - backupdata:/app/backups
     depends_on:

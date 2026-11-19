@@ -12,8 +12,11 @@ import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pager from '../components/Pager.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import UiSegmented from '../components/UiSegmented.vue'
+import UiSelect from '../components/UiSelect.vue'
 
 const role = getRole()
 const canRefund = computed(() => can(role, 'refunds:write'))
@@ -184,6 +187,21 @@ async function submitDecision() {
     decisionSubmitting.value = false
   }
 }
+
+function orderActions(row: OrderRow): RowAction[] {
+  const actions: RowAction[] = [{ label: '详情', run: () => openOrder(row) }]
+  if (canRefund.value && row.status === 'paid') {
+    actions.push({ label: '退款', tone: 'danger', run: () => openDecision('direct', { order: row }) })
+  }
+  return actions
+}
+
+function refundActions(item: RefundRow): RowAction[] {
+  return [
+    { label: '通过', run: () => openDecision('approve', { refund: item }) },
+    { label: '拒绝', tone: 'danger', run: () => openDecision('reject', { refund: item }) },
+  ]
+}
 </script>
 
 <template>
@@ -209,23 +227,35 @@ async function submitDecision() {
       <div class="tb-group tb-search">
         <input v-model="q" class="input" placeholder="搜索订单号 / 外部单号 / 账号" />
       </div>
-      <select v-model="status" class="select tb-select" @change="search">
-        <option value="">全部状态</option>
-        <option value="created">已创建</option>
-        <option value="pending">待支付</option>
-        <option value="paid">已支付</option>
-        <option value="failed">支付失败</option>
-        <option value="refunded">已退款</option>
-        <option value="partially_refunded">部分退款</option>
-        <option value="canceled">已取消</option>
-      </select>
-      <select v-model="provider" class="select tb-select" @change="search">
-        <option value="">全部渠道</option>
-        <option value="wechat">微信支付</option>
-        <option value="alipay">支付宝</option>
-        <option value="stripe">Stripe</option>
-        <option value="mock">Mock / 测试</option>
-      </select>
+      <UiSelect
+        v-model="status"
+        class="tb-select"
+        variant="toolbar"
+        placeholder="全部状态"
+        :options="[
+          { value: 'created', label: '已创建' },
+          { value: 'pending', label: '待支付' },
+          { value: 'paid', label: '已支付' },
+          { value: 'failed', label: '支付失败' },
+          { value: 'refunded', label: '已退款' },
+          { value: 'partially_refunded', label: '部分退款' },
+          { value: 'canceled', label: '已取消' },
+        ]"
+        @change="search"
+      />
+      <UiSelect
+        v-model="provider"
+        class="tb-select"
+        variant="toolbar"
+        placeholder="全部渠道"
+        :options="[
+          { value: 'wechat', label: '微信支付' },
+          { value: 'alipay', label: '支付宝' },
+          { value: 'stripe', label: 'Stripe' },
+          { value: 'mock', label: 'Mock / 测试' },
+        ]"
+        @change="search"
+      />
       <button class="btn sm" type="submit" :disabled="loading">查询</button>
     </form>
 
@@ -257,9 +287,9 @@ async function submitDecision() {
           <tbody>
             <tr v-for="row in rows" :key="row.id">
               <td>
-                <div class="mono">#{{ row.id }}</div>
-                <div v-if="row.external_order_no" class="muted mono truncate" style="font-size: 11px" :title="row.external_order_no">
-                  {{ row.external_order_no }}
+                <div class="truncate" :title="row.external_order_no ? `#${row.id} · ${row.external_order_no}` : `#${row.id}`">
+                  <span class="mono">#{{ row.id }}</span>
+                  <span v-if="row.external_order_no" class="muted mono small"> · {{ row.external_order_no }}</span>
                 </div>
               </td>
               <td>{{ accountLabel(row) }}</td>
@@ -268,14 +298,8 @@ async function submitDecision() {
               <td class="muted">{{ row.provider }}</td>
               <td class="muted">{{ row.kind || '—' }}<span v-if="row.cycle"> · {{ row.cycle }}</span></td>
               <td class="num">{{ formatMoney(row.refunded_cents || 0, row.currency) }}</td>
-              <td class="muted">{{ formatTime(row.created_at) }}</td>
-              <td>
-                <div class="actions">
-                  <button class="btn ghost sm" @click="openOrder(row)">详情</button>
-                  <button v-if="canRefund && row.status === 'paid'" class="btn danger-ghost sm"
-                    @click="openDecision('direct', { order: row })">退款</button>
-                </div>
-              </td>
+              <td class="muted cell-time">{{ formatTime(row.created_at) }}</td>
+              <td><RowActions :actions="orderActions(row)" /></td>
             </tr>
           </tbody>
         </table>
@@ -288,14 +312,13 @@ async function submitDecision() {
     <div class="card-head">
       <div class="card-title">退款审批<span class="sub">待审批 {{ pendingRefunds.length }} 条 / 全部 {{ refundRows.length }} 条</span></div>
       <div class="spacer"></div>
-      <div class="tabs">
-        <button :class="{ active: refundTab === 'pending' }" @click="refundTab = 'pending'">
-          待审批<span class="count">{{ pendingRefunds.length }}</span>
-        </button>
-        <button :class="{ active: refundTab === 'all' }" @click="refundTab = 'all'">
-          全部<span class="count">{{ refundRows.length }}</span>
-        </button>
-      </div>
+      <UiSegmented
+        v-model="refundTab"
+        :options="[
+          { value: 'pending', label: '待审批', count: pendingRefunds.length },
+          { value: 'all', label: '全部', count: refundRows.length },
+        ]"
+      />
       <button class="btn ghost sm" :disabled="refundLoading" @click="loadRefunds">
         <Icon name="refresh" :size="14" />刷新
       </button>
@@ -330,27 +353,19 @@ async function submitDecision() {
             <td class="num">{{ formatMoney(item.amount_cents, item.currency) }}</td>
             <td><StatusBadge :value="item.status" dot /></td>
             <td>
-              <div class="truncate" :title="item.reason || item.note || ''">{{ item.reason || item.note || '—' }}</div>
-              <div v-if="item.note && item.reason" class="muted truncate" style="font-size: 11.5px">{{ item.note }}</div>
+              <div class="truncate" :title="[item.reason, item.note].filter(Boolean).join(' · ') || ''">
+                {{ item.reason || '—' }}<template v-if="item.note"> · {{ item.note }}</template>
+              </div>
             </td>
-            <td class="muted">{{ formatTime(item.requested_at) }}</td>
+            <td class="muted cell-time">{{ formatTime(item.requested_at) }}</td>
             <td class="muted">{{ item.provider }}</td>
             <td>
-              <div v-if="canRefund" class="actions">
-                <button class="btn ghost sm" @click="openDecision('approve', { refund: item })">通过</button>
-                <button class="btn danger-ghost sm" @click="openDecision('reject', { refund: item })">拒绝</button>
-              </div>
-              <span v-else class="muted" style="font-size: 12px">只读</span>
+              <RowActions v-if="canRefund" :actions="refundActions(item)" />
+              <span v-else class="muted">只读</span>
             </td>
           </tr>
         </tbody>
       </table>
-    </div>
-    <div class="notice info" style="margin: 14px 0 0">
-      <div class="notice-body">
-        通过 / 拒绝使用 <span class="inline-code">POST /v1/admin/refunds/{id}/approve|reject</span>；
-        直接退款使用 <span class="inline-code">POST /v1/admin/orders/{id}/refund</span>。操作会写入审计日志。
-      </div>
     </div>
   </div>
 
@@ -391,8 +406,8 @@ async function submitDecision() {
               <td class="num">{{ formatMoney(item.amount_cents, item.currency) }}</td>
               <td><StatusBadge :value="item.status" /></td>
               <td class="truncate" :title="item.reason || item.note || ''">{{ item.reason || item.note || '—' }}</td>
-              <td class="muted">{{ formatTime(item.requested_at) }}</td>
-              <td class="muted">{{ formatTime(item.succeeded_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(item.requested_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(item.succeeded_at) }}</td>
             </tr>
           </tbody>
         </table>
@@ -409,7 +424,14 @@ async function submitDecision() {
   <Modal v-if="decisionOpen" :title="decisionTitle"
     :subtitle="decisionRefund ? `退款 #${decisionRefund.id} · 订单 #${decisionRefund.order_id}` : decisionOrder ? `订单 #${decisionOrder.id} · ${accountLabel(decisionOrder)}` : ''"
     size="narrow" @close="decisionOpen = false">
-    <div class="form-grid" style="grid-template-columns: 1fr">
+    <div class="notice info">
+      <div class="notice-body">
+        <div>{{ decisionMode === 'approve'
+          ? '通过后系统将按原支付渠道发起退款，结果以渠道回执为准。'
+          : decisionMode === 'reject' ? '拒绝后用户会收到通知，退款申请关闭。' : '直接退款将立即向原支付渠道发起，请确认金额与原因。' }}</div>
+      </div>
+    </div>
+    <form id="refund-decision-form" class="form-grid single-col" @submit.prevent="submitDecision">
       <div v-if="decisionMode === 'direct'" class="field">
         <label>退款金额（元）</label>
         <input v-model="decisionAmount" class="input" type="number" min="0.01" step="0.01" placeholder="留空表示全额退款" />
@@ -421,11 +443,11 @@ async function submitDecision() {
           :placeholder="decisionMode === 'reject' ? '请说明拒绝原因，将回传给用户' : '例如：用户重复支付，原路退回'"></textarea>
         <span class="hint">内容会写入审计日志，请勿填写敏感凭据。</span>
       </div>
-    </div>
-    <div v-if="decisionError" class="notice error" style="margin: 12px 0 0">{{ decisionError }}</div>
+      <div v-if="decisionError" class="notice error span-2">{{ decisionError }}</div>
+    </form>
     <template #footer>
-      <button class="btn ghost sm" :disabled="decisionSubmitting" @click="decisionOpen = false">取消</button>
-      <button class="btn" :class="decisionMode === 'reject' ? 'danger' : ''" :disabled="decisionSubmitting" @click="submitDecision">
+      <button class="btn ghost" :disabled="decisionSubmitting" @click="decisionOpen = false">取消</button>
+      <button class="btn" :class="decisionMode === 'reject' ? 'danger' : ''" type="submit" form="refund-decision-form" :disabled="decisionSubmitting">
         {{ decisionSubmitting ? '提交中…' : (decisionMode === 'approve' ? '确认通过' : decisionMode === 'reject' ? '确认拒绝' : '确认退款') }}
       </button>
     </template>

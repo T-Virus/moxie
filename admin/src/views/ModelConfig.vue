@@ -4,11 +4,14 @@ import { api, errorMessage, normalizeList } from '../api'
 import { can } from '../roles'
 import { getRole } from '../session'
 import { pushToast } from '../toast'
+import { confirm } from '../dialog'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import UiSelect from '../components/UiSelect.vue'
 
 const role = getRole()
 const canWrite = computed(() => can(role, 'model_config:write'))
@@ -116,7 +119,7 @@ async function remove(row: any) {
     pushToast('default 兜底配置不可删除，可清空 Key 并停用')
     return
   }
-  if (!confirm(`确认删除「${row.label}」的模型配置？删除后将回退到 default/环境变量。`)) return
+  if (!await confirm({ title: '删除模型配置', message: `确认删除「${row.label}」的模型配置？删除后将回退到 default / 环境变量。`, danger: true, confirmText: '确认删除' })) return
   deleting.value = true
   try {
     await api.deleteModelConfig(row.step_key)
@@ -157,6 +160,126 @@ function recBadge(row: any): { text: string; cls: string } {
   if (rec.optional && !row.configured) return { text: '免费兜底', cls: 'muted' }
   return row.recommended_match ? { text: '已采用', cls: 'ok' } : { text: '可优化', cls: 'muted' }
 }
+
+interface CommonModel {
+  label: string
+  provider: string
+  model: string
+  base_url: string
+}
+
+/** 市场通用模型：不走工序推荐，作为可选的通用候选（OpenAI 兼容端点） */
+const COMMON_MODELS: CommonModel[] = [
+  { label: 'GPT-4o', provider: 'openai', model: 'gpt-4o', base_url: '' },
+  { label: 'GPT-4o mini', provider: 'openai', model: 'gpt-4o-mini', base_url: '' },
+  { label: 'GPT-4.1', provider: 'openai', model: 'gpt-4.1', base_url: '' },
+  { label: 'o3-mini', provider: 'openai', model: 'o3-mini', base_url: '' },
+  { label: 'DeepSeek Chat', provider: 'deepseek', model: 'deepseek-chat', base_url: '' },
+  { label: 'DeepSeek Reasoner', provider: 'deepseek', model: 'deepseek-reasoner', base_url: '' },
+  { label: '智谱 GLM-4-Plus', provider: 'zhipu', model: 'glm-4-plus', base_url: '' },
+  { label: '智谱 GLM-4-Flash', provider: 'zhipu', model: 'glm-4-flash', base_url: '' },
+  { label: '智谱 GLM-4-Air', provider: 'zhipu', model: 'glm-4-air', base_url: '' },
+  { label: '通义千问 Max', provider: 'custom', model: 'qwen-max', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { label: '通义千问 Plus', provider: 'custom', model: 'qwen-plus', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { label: '通义千问 Turbo', provider: 'custom', model: 'qwen-turbo', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { label: 'Kimi (Moonshot 8K)', provider: 'custom', model: 'moonshot-v1-8k', base_url: 'https://api.moonshot.cn/v1' },
+  { label: 'Kimi (Moonshot 32K)', provider: 'custom', model: 'moonshot-v1-32k', base_url: 'https://api.moonshot.cn/v1' },
+  { label: '豆包 (Ark 32K)', provider: 'custom', model: 'doubao-pro-32k', base_url: 'https://ark.cn-beijing.volces.com/api/v3' },
+]
+
+/** 本工序推荐：首选 + 备选（来自服务端按工序特征给出的推荐表） */
+const recOptions = computed(() => {
+  const rec = editing.value?.recommendation
+  if (!rec) return []
+  const options: { value: string; label: string }[] = []
+  if (rec.primary) options.push({ value: String(rec.primary.model), label: `${rec.primary.model}（首选）` })
+  for (const alt of rec.alternatives || []) {
+    options.push({ value: String(alt.model), label: `${alt.model}（备选）` })
+  }
+  return options
+})
+
+const recReason = computed(() => editing.value?.recommendation?.reason || '')
+
+/**
+ * 通用模型里同样标出「推荐」：
+ * 依据本工序推荐表的模型特征（快/省 vs 强推理/长上下文）映射到对应的市场模型，
+ * 让通用清单也带上下文字，而不是一堆平铺选项。
+ */
+const recommendedCommonModels = computed(() => {
+  const rec = editing.value?.recommendation
+  if (!rec) return new Set<string>()
+  const names = [rec.primary?.model, ...(rec.alternatives || []).map((alt: any) => alt?.model)]
+    .filter(Boolean)
+    .map((name: unknown) => String(name))
+  const cheap = names.some(name => /flash|zhuque|mini|turbo/i.test(name))
+  const strong = names.some(name => /pro|-m3|kimi|max|reasoner/i.test(name))
+  const picked = new Set<string>()
+  if (cheap) ['gpt-4o-mini', 'deepseek-chat', 'glm-4-flash', 'qwen-turbo'].forEach(model => picked.add(model))
+  if (strong) ['gpt-4o', 'deepseek-reasoner', 'glm-4-plus', 'qwen-max', 'moonshot-v1-32k'].forEach(model => picked.add(model))
+  return picked
+})
+
+/** 市场通用模型：与工序无关的可选清单，命中工序特征的排到最前并标注「推荐」 */
+const commonOptions = computed(() => {
+  const list = COMMON_MODELS.map(item => {
+    const recommended = recommendedCommonModels.value.has(item.model)
+    return {
+      value: `common:${item.provider}:${item.model}`,
+      recommended,
+      label: `${providerLabel[item.provider] || item.provider} · ${item.model}${recommended ? '（推荐）' : ''}`,
+    }
+  })
+  return list.sort((a, b) => Number(b.recommended) - Number(a.recommended))
+})
+
+/** 合并下拉：按工序推荐 + 通用模型（通用里命中工序特征的标「推荐」并排在最前） */
+const modelOptions = computed(() => {
+  const options: { value: string; label: string; disabled?: boolean }[] = []
+  if (recOptions.value.length) {
+    options.push({ value: '__rec_head', label: '按工序推荐', disabled: true })
+    options.push(...recOptions.value)
+  }
+  if (!isCoverStep.value) {
+    options.push({ value: '__common_head', label: '通用模型', disabled: true })
+    options.push(...commonOptions.value)
+  }
+  return options
+})
+
+function applyModelChoice(value: string) {
+  if (!value || value.startsWith('__')) return
+  if (value.startsWith('common:')) applyCommon(value)
+  else applyRecommended(value)
+}
+
+/** 选中按工序推荐的模型 */
+function applyRecommended(value: string) {
+  const rec = editing.value?.recommendation
+  if (!rec || !value) return
+  const hit = [rec.primary, ...(rec.alternatives || [])].find((entry: any) => entry && entry.model === value)
+  if (hit) applyRec(hit)
+}
+
+/** 选中市场通用模型 */
+function applyCommon(value: string) {
+  const hit = COMMON_MODELS.find(item => `common:${item.provider}:${item.model}` === value)
+  if (!hit) return
+  form.provider = KNOWN_PROVIDERS.includes(hit.provider) ? hit.provider : 'custom'
+  form.model = hit.model
+  form.base_url = hit.base_url
+  saveError.value = ''
+  testResult.value = ''
+}
+
+function configActions(row: any): RowAction[] {
+  const actions: RowAction[] = []
+  if (canWrite.value) {
+    actions.push({ label: '编辑', run: () => openEdit(row) })
+    if (row.step_key !== 'default') actions.push({ label: '删除', tone: 'danger', run: () => remove(row) })
+  }
+  return actions
+}
 </script>
 
 <template>
@@ -196,8 +319,7 @@ function recBadge(row: any): { text: string; cls: string } {
           <tbody>
             <tr v-for="row in rows" :key="row.step_key">
               <td>
-                <div>{{ row.label }}</div>
-                <div class="muted" style="font-size: 11.5px">{{ row.step_key }}</div>
+                <div class="cell-ellipsis" :title="`${row.label} · ${row.step_key}`">{{ row.label }}</div>
               </td>
               <td>
                 <span class="badge" :class="row.source === 'env' ? 'muted' : (row.source === 'default' ? 'purple' : '')">
@@ -205,35 +327,25 @@ function recBadge(row: any): { text: string; cls: string } {
                 </span>
               </td>
               <td>{{ providerLabel[row.provider] || row.provider }}</td>
-              <td class="mono">{{ row.model || '—' }}</td>
+              <td class="mono"><span class="cell-ellipsis" :title="row.model || ''">{{ row.model || '—' }}</span></td>
               <td>
-                <template v-if="row.recommendation">
-                  <div
+                <div v-if="row.recommendation" class="rec-line">
+                  <span
                     v-if="row.recommendation.primary"
-                    class="mono"
-                    style="font-size: 12px"
-                    :title="row.recommendation.reason"
-                  >
-                    {{ row.recommendation.primary.model }}
-                  </div>
-                  <div v-else class="muted" style="font-size: 12px" :title="row.recommendation.reason">
-                    图片接口
-                  </div>
+                    class="mono rec-model"
+                    :title="row.recommendation.primary.model"
+                  >{{ row.recommendation.primary.model }}</span>
+                  <span v-else class="muted rec-model" :title="row.recommendation.reason">图片接口</span>
                   <span class="badge" :class="recBadge(row).cls">{{ recBadge(row).text }}</span>
-                </template>
+                </div>
                 <span v-else class="muted">—</span>
               </td>
-              <td class="mono" style="font-size: 12px">{{ row.base_url }}</td>
+              <td class="mono"><span class="cell-ellipsis" :title="row.base_url">{{ row.base_url }}</span></td>
               <td>{{ row.key_set ? '已填' : '—' }}</td>
               <td>
                 <StatusBadge :value="row.enabled ? 'active' : 'disabled'" dot />
               </td>
-              <td>
-                <div class="actions">
-                  <button v-if="canWrite" class="btn ghost sm" @click="openEdit(row)">编辑</button>
-                  <button v-if="canWrite && row.step_key !== 'default'" class="btn danger-ghost sm" @click="remove(row)">删除</button>
-                </div>
-              </td>
+              <td><RowActions v-if="canWrite" :actions="configActions(row)" /></td>
             </tr>
           </tbody>
         </table>
@@ -247,62 +359,57 @@ function recBadge(row: any): { text: string; cls: string } {
     </template>
   </div>
 
-  <Modal v-if="editOpen" title="编辑模型配置" :subtitle="editing ? editing.label : ''" size="narrow" @close="editOpen = false">
-    <div v-if="editing && editing.recommendation" class="field">
-      <label>按工序推荐</label>
-      <template v-if="editing.recommendation.primary">
-        <div class="rec-list">
-          <button type="button" class="rec-chip primary" @click="applyRec(editing.recommendation.primary)">
-            <span class="rec-tag">首选</span>{{ editing.recommendation.primary.model }}
-          </button>
-          <button
-            v-for="alt in editing.recommendation.alternatives"
-            :key="alt.model"
-            type="button"
-            class="rec-chip"
-            @click="applyRec(alt)"
-          >
-            {{ alt.model }}
-          </button>
-        </div>
-        <div class="rec-traits">
-          <span v-for="t in editing.recommendation.primary.traits" :key="t" class="badge muted">{{ t }}</span>
-        </div>
-      </template>
-      <span class="hint">{{ editing.recommendation.reason }}</span>
+  <Modal v-if="editOpen" title="编辑模型配置" :subtitle="editing ? editing.label : ''" @close="editOpen = false">
+    <div class="form-grid">
+      <div v-if="modelOptions.length" class="field span-2">
+        <label>推荐 / 通用模型</label>
+        <UiSelect
+          :model-value="''"
+          placeholder="选择按工序推荐的模型，或市场通用模型"
+          :options="modelOptions"
+          @change="applyModelChoice(String($event))"
+        />
+      </div>
+      <div v-if="recReason" class="span-2 rec-reason">
+        <span class="hint">{{ recReason }}</span>
+      </div>
+      <div class="field">
+        <label>供应商</label>
+        <UiSelect
+          v-model="form.provider"
+          :options="[
+            { value: 'edgeone', label: 'EdgeOne 网关（推荐，OpenAI 兼容）' },
+            { value: 'openai', label: 'OpenAI' },
+            { value: 'deepseek', label: 'DeepSeek' },
+            { value: 'zhipu', label: '智谱 BigModel' },
+            { value: 'custom', label: '自定义' },
+          ]"
+        />
+      </div>
+      <div class="field">
+        <label>模型名称<span class="required">*</span></label>
+        <input v-model="form.model" class="input mono" placeholder="@makers/deepseek-v4-flash" />
+      </div>
+      <div class="field span-2">
+        <label>网关地址（base_url）</label>
+        <input v-model="form.base_url" class="input mono" placeholder="https://ai-gateway.edgeone.link/v1" />
+        <span class="hint">留空则按供应商默认：EdgeOne 用 ai-gateway.edgeone.link/v1，其余用服务端 llm_base_url。</span>
+      </div>
+      <div class="field span-2">
+        <label>API Key</label>
+        <input v-model="form.api_key" type="password" class="input mono" autocomplete="off" placeholder="留空 = 不改动已存 Key" />
+        <span class="hint">当前已存 Key：{{ editing && editing.key_set ? '已填写（输入新值将覆盖）' : '未填写' }}。落库前加密存储。</span>
+      </div>
+      <div class="field span-2">
+        <label class="checkbox">
+          <input type="checkbox" v-model="form.enabled" /> 启用该工序配置
+        </label>
+      </div>
     </div>
-    <div class="field">
-      <label>供应商</label>
-      <select v-model="form.provider" class="select">
-        <option value="edgeone">EdgeOne 网关（推荐，OpenAI 兼容）</option>
-        <option value="openai">OpenAI</option>
-        <option value="deepseek">DeepSeek</option>
-        <option value="zhipu">智谱 BigModel</option>
-        <option value="custom">自定义</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>模型名称<span class="required">*</span></label>
-      <input v-model="form.model" class="input" placeholder="@makers/deepseek-v4-flash 或 gpt-4o 等" />
-    </div>
-    <div class="field">
-      <label>网关地址（base_url）</label>
-      <input v-model="form.base_url" class="input mono" placeholder="https://ai-gateway.edgeone.link/v1" />
-      <span class="hint">留空则按供应商默认：EdgeOne 用 ai-gateway.edgeone.link/v1，其余用服务端 llm_base_url。</span>
-    </div>
-    <div class="field">
-      <label>API Key</label>
-      <input v-model="form.api_key" type="password" class="input mono" autocomplete="off" placeholder="留空 = 不改动已存 Key" />
-      <span class="hint">当前已存 Key：{{ editing && editing.key_set ? '已填写（输入新值将覆盖）' : '未填写' }}。落库前加密存储。</span>
-    </div>
-    <div class="field row">
-      <label class="checkbox">
-        <input type="checkbox" v-model="form.enabled" /> 启用该工序配置
-      </label>
-    </div>
-    <div v-if="saveError" class="notice error" style="margin: 8px 0 0">{{ saveError }}</div>
-    <div v-if="testResult" class="notice" :class="testResult.startsWith('调用成功') ? 'ok' : 'error'" style="margin: 8px 0 0">{{ testResult }}</div>
-    <div v-if="isCoverStep" class="hint" style="margin-top: 8px">
+
+    <div v-if="saveError" class="notice error">{{ saveError }}</div>
+    <div v-if="testResult" class="notice" :class="testResult.startsWith('调用成功') ? 'info' : 'error'">{{ testResult }}</div>
+    <div v-if="isCoverStep" class="notice info">
       封面走图片生成接口（images/generations），「测试连接」不适用。填入国内图片模型（如智谱 CogView，自带免费额度）与该平台 Key 后才会走该接口；Key 留空则自动回退 Pollinations 免费 flux。
     </div>
     <template #footer>
@@ -317,20 +424,11 @@ function recBadge(row: any): { text: string; cls: string } {
 
 <style scoped>
 .state-loading { padding: 10px 0; }
-.field { margin-bottom: 14px; }
-.field.row { margin-bottom: 6px; }
-.field > label { display: block; font-size: 12.5px; margin-bottom: 6px; color: var(--text-2); }
-.required { color: var(--red); }
-.hint { display: block; font-size: 11.5px; color: var(--text-3); margin-top: 4px; }
-.checkbox { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.rec-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
-.rec-chip {
-  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px;
-  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--card);
-  color: var(--text-2); font-size: 12.5px; cursor: pointer;
-}
-.rec-chip:hover { border-color: var(--primary); color: var(--text); }
-.rec-chip.primary { border-color: var(--primary); background: var(--primary-bg); color: var(--text); }
-.rec-tag { font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: var(--primary); color: #fff; }
-.rec-traits { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 4px; }
+.checkbox { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+/* 表格：列宽足够时单行展示，超出部分省略，不换行撑高行 */
+.cell-ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rec-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.rec-line .badge { flex: none; }
+.rec-reason .hint { display: block; margin-top: -6px; }
 </style>

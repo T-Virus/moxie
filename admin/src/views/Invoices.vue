@@ -10,8 +10,10 @@ import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pager from '../components/Pager.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import UiSelect from '../components/UiSelect.vue'
 
 const role = getRole()
 const canWrite = computed(() => can(role, 'invoices:write'))
@@ -94,6 +96,13 @@ async function submitAction() {
     submitting.value = false
   }
 }
+
+function invoiceActions(row: InvoiceRow): RowAction[] {
+  const actions: RowAction[] = []
+  if (canWrite.value && row.status === 'requested') actions.push({ label: '开具', run: () => openAction(row, 'issue') })
+  if (canWrite.value && row.status === 'issued') actions.push({ label: '作废', tone: 'danger', run: () => openAction(row, 'void') })
+  return actions
+}
 </script>
 
 <template>
@@ -113,12 +122,17 @@ async function submitAction() {
 
   <div class="card">
     <div class="toolbar">
-      <select v-model="status" class="select tb-select" @change="changeStatus">
-        <option value="">全部状态</option>
-        <option value="requested">待开票</option>
-        <option value="issued">已开具</option>
-        <option value="voided">已作废</option>
-      </select>
+      <UiSelect
+        v-model="status"
+        variant="toolbar"
+        placeholder="全部状态"
+        :options="[
+          { value: 'requested', label: '待开票' },
+          { value: 'issued', label: '已开具' },
+          { value: 'voided', label: '已作废' },
+        ]"
+        @change="changeStatus"
+      />
       <div class="spacer"></div>
       <span class="muted" style="font-size: 12px">共 {{ formatNumber(total) }} 条开票记录</span>
     </div>
@@ -154,24 +168,24 @@ async function submitAction() {
               <td class="mono">#{{ row.id }}</td>
               <td class="mono">#{{ row.order_id }}</td>
               <td>
-                <div>{{ row.title }}</div>
-                <div v-if="row.note" class="muted truncate" style="font-size: 11.5px" :title="row.note">{{ row.note }}</div>
+                <div class="truncate" :title="[row.title, row.note].filter(Boolean).join(' · ')">
+                  {{ row.title }}<template v-if="row.note"> · {{ row.note }}</template>
+                </div>
               </td>
               <td>
-                <div class="mono" style="font-size: 11.5px">{{ row.tax_no || '—' }}</div>
-                <div class="muted" style="font-size: 11.5px">{{ row.email || accountLabel(row) }}</div>
+                <div class="truncate" :title="`${row.tax_no || '—'} · ${row.email || accountLabel(row)}`">
+                  <span class="mono small">{{ row.tax_no || '—' }}</span>
+                  <span class="muted small"> · {{ row.email || accountLabel(row) }}</span>
+                </div>
               </td>
               <td class="num">{{ formatMoney(row.amount_cents) }}</td>
               <td><StatusBadge :value="row.status" dot /></td>
-              <td class="muted">{{ formatTime(row.created_at) }}</td>
-              <td class="muted">{{ formatTime(row.issued_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(row.created_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(row.issued_at) }}</td>
               <td class="mono muted">{{ row.admin_id ? `#${row.admin_id}` : '—' }}</td>
               <td>
-                <div class="actions">
-                  <button v-if="canWrite && row.status === 'requested'" class="btn ghost sm" @click="openAction(row, 'issue')">开具</button>
-                  <button v-if="canWrite && row.status === 'issued'" class="btn danger-ghost sm" @click="openAction(row, 'void')">作废</button>
-                  <span v-if="!canWrite || (row.status !== 'requested' && row.status !== 'issued')" class="muted" style="font-size: 12px">—</span>
-                </div>
+                <RowActions v-if="canWrite && (row.status === 'requested' || row.status === 'issued')" :actions="invoiceActions(row)" />
+                <span v-else class="muted">—</span>
               </td>
             </tr>
           </tbody>
@@ -184,7 +198,7 @@ async function submitAction() {
   <Modal v-if="actionOpen" :title="actionMode === 'issue' ? '开具发票' : '作废发票'"
     :subtitle="target ? `发票 #${target.id} · 订单 #${target.order_id} · ${target.title}` : ''" size="narrow"
     @close="actionOpen = false">
-    <div class="notice" :class="actionMode === 'issue' ? 'info' : 'warn'" style="margin-bottom: 14px">
+    <div class="notice" :class="actionMode === 'issue' ? 'info' : 'warn'">
       {{ actionMode === 'issue'
         ? '开具后将把发票状态置为 issued，并通过通知渠道发送给用户（以服务端实现为准）。'
         : '作废将把发票状态置为 voided，不会自动重新开票。' }}
@@ -194,7 +208,7 @@ async function submitAction() {
       <textarea v-model="note" class="textarea"
         :placeholder="actionMode === 'issue' ? '可填写发票号或开票备注' : '请说明作废原因，将写入审计日志'"></textarea>
     </div>
-    <div v-if="actionError" class="notice error" style="margin: 12px 0 0">{{ actionError }}</div>
+    <div v-if="actionError" class="notice error">{{ actionError }}</div>
     <template #footer>
       <button class="btn ghost sm" :disabled="submitting" @click="actionOpen = false">取消</button>
       <button class="btn" :class="actionMode === 'void' ? 'danger' : ''" :disabled="submitting" @click="submitAction">

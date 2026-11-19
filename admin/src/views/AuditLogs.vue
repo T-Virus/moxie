@@ -3,16 +3,15 @@ import { onMounted, ref } from 'vue'
 import { api, errorMessage, normalizeList } from '../api'
 import type { AuditRow } from '../types'
 import { compactJson, formatNumber, formatTime, prettyJson } from '../ui'
-import { useVirtualRows } from '../utils/useVirtualRows'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pager from '../components/Pager.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import StateBlock from '../components/StateBlock.vue'
+import UiDate from '../components/UiDate.vue'
 
-// 审计日志单页最多取 200 条，表体定高虚拟滚动，只渲染视口附近的行。
-const ROW_HEIGHT = 44
-const VIEWPORT_HEIGHT = 528
+// 单页最多 200 条，直接整页渲染，表格区自适应高度并在内部滚动（不用虚拟滚动，避免行高与占位不一致）
 const actorId = ref('')
 const action = ref('')
 const targetType = ref('')
@@ -21,7 +20,6 @@ const startDate = ref('')
 const endDate = ref('')
 
 const rows = ref<AuditRow[]>([])
-const { range, visibleRows, onScroll, resetScroll } = useVirtualRows(rows, ROW_HEIGHT, VIEWPORT_HEIGHT, 6)
 const loading = ref(false)
 const error = ref('')
 const page = ref(1)
@@ -59,13 +57,11 @@ async function load() {
 
 function submit() {
   page.value = 1
-  resetScroll()
   void load()
 }
 
 function setPage(next: number) {
   page.value = next
-  resetScroll()
   void load()
 }
 
@@ -85,6 +81,9 @@ const detailRow = ref<AuditRow | null>(null)
 function openDetail(row: AuditRow) {
   detailRow.value = row
   detailOpen.value = true
+}
+function detailActions(row: AuditRow): RowAction[] {
+  return [{ label: '详情', tone: 'primary', run: () => openDetail(row) }]
 }
 
 onMounted(load)
@@ -117,25 +116,17 @@ onMounted(load)
       </div>
       <div class="field">
         <label>开始日期</label>
-        <input v-model="startDate" class="input" type="date" />
+        <UiDate v-model="startDate" placeholder="选择开始日期" />
       </div>
       <div class="field">
         <label>结束日期</label>
-        <input v-model="endDate" class="input" type="date" />
+        <UiDate v-model="endDate" placeholder="选择结束日期" />
       </div>
       <div class="span-2" style="display: flex; gap: 8px">
         <button class="btn sm" type="submit" :disabled="loading">{{ loading ? '查询中…' : '查询' }}</button>
         <button class="btn ghost sm" type="button" :disabled="loading" @click="resetFilters">清空筛选</button>
       </div>
     </form>
-
-    <div class="notice info" style="margin: 14px 0 0">
-      <div class="notice-body">
-        查询使用 <span class="inline-code">GET /v1/admin/audit-logs</span> 的服务端过滤与分页参数
-        <span class="inline-code">actor_id / action / target_type / target_id / start_at / end_at / page / page_size</span>；
-        其中操作类型、对象类型与对象 ID 为精确匹配。
-      </div>
-    </div>
   </div>
 
   <div class="card">
@@ -153,12 +144,12 @@ onMounted(load)
       <StateBlock kind="empty" :title="total ? '没有更多匹配的审计记录' : '暂无匹配的审计记录'"
         :message="total ? '当前页没有记录，可返回上一页。' : '尝试放宽操作类型、对象或时间条件。'" />
     </div>
-    <div v-else>
-      <div class="table-wrap vtable" :style="{ maxHeight: `${VIEWPORT_HEIGHT + 40}px` }" @scroll.passive="onScroll">
+    <template v-else>
+      <div class="table-wrap vtable">
         <table class="data-table vtable">
           <thead>
             <tr>
-              <th style="width: 136px">时间</th>
+              <th style="width: 150px">时间</th>
               <th style="width: 90px">操作人</th>
               <th>操作</th>
               <th style="width: 200px">对象</th>
@@ -168,24 +159,26 @@ onMounted(load)
             </tr>
           </thead>
           <tbody>
-            <tr v-if="range.paddingTop" class="vtable-spacer" :style="{ height: `${range.paddingTop}px` }"><td :colspan="7" /></tr>
-            <tr v-for="row in visibleRows" :key="row.id" class="vtable-row">
-              <td class="muted">{{ formatTime(row.created_at) }}</td>
+            <tr v-for="row in rows" :key="row.id" class="vtable-row">
+              <td class="muted"><span class="cell-clip">{{ formatTime(row.created_at) }}</span></td>
               <td class="mono">{{ row.actor_id ? `#${row.actor_id}` : '—' }}</td>
-              <td class="mono">{{ row.action }}</td>
+              <td class="mono"><span class="cell-clip">{{ row.action }}</span></td>
               <td class="mono">
-                {{ row.target_type || '—' }}<template v-if="row.target_id"> #{{ row.target_id }}</template>
+                <span class="cell-clip" :title="row.target_type || row.target_id || ''">
+                  {{ row.target_type || '—' }}<template v-if="row.target_id"> #{{ row.target_id }}</template>
+                </span>
               </td>
               <td class="mono muted">{{ row.ip || '—' }}</td>
-              <td class="mono truncate" :title="compactJson(row.meta)">{{ compactJson(row.meta) }}</td>
-              <td><button class="btn ghost sm" @click="openDetail(row)">详情</button></td>
+              <td class="mono">
+                <span class="cell-clip" :title="compactJson(row.meta)">{{ compactJson(row.meta) }}</span>
+              </td>
+              <td><RowActions :actions="detailActions(row)" /></td>
             </tr>
-            <tr v-if="range.paddingBottom" class="vtable-spacer" :style="{ height: `${range.paddingBottom}px` }"><td :colspan="7" /></tr>
           </tbody>
         </table>
       </div>
       <Pager :page="page" :page-size="pageSize" :total="total" :loading="loading" @update:page="setPage" />
-    </div>
+    </template>
   </div>
 
   <Modal v-if="detailOpen" title="审计记录详情" :subtitle="detailRow ? `#${detailRow.id} · ${detailRow.action}` : ''"
@@ -208,3 +201,14 @@ onMounted(load)
     </template>
   </Modal>
 </template>
+
+<style scoped>
+/* 虚拟滚动按固定行高 44px 计算：单元格内容必须单行省略，换行会把行撑高导致整表错位 */
+.cell-clip {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

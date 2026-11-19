@@ -12,8 +12,12 @@ import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pager from '../components/Pager.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import UiSegmented from '../components/UiSegmented.vue'
+import UiSelect from '../components/UiSelect.vue'
+import UiDate from '../components/UiDate.vue'
 
 const role = getRole()
 const canAdjust = computed(() => can(role, 'subscriptions:write'))
@@ -211,6 +215,13 @@ async function submitQuota() {
 function auditDetail(row: AuditRow): string {
   return compactJson(row.meta)
 }
+
+function subscriptionActions(row: SubscriptionRow): RowAction[] {
+  const actions: RowAction[] = []
+  if (canAdjust.value) actions.push({ label: '调整订阅', run: () => openModal(row, 'subscription') })
+  if (canQuota.value) actions.push({ label: '额度调整', run: () => openModal(row, 'quota') })
+  return actions
+}
 </script>
 
 <template>
@@ -233,14 +244,20 @@ function auditDetail(row: AuditRow): string {
       <div class="tb-group tb-search">
         <input v-model="q" class="input" placeholder="搜索账号 / 套餐 / 订阅 ID" />
       </div>
-      <select v-model="status" class="select tb-select" @change="search">
-        <option value="">全部状态</option>
-        <option value="active">有效</option>
-        <option value="trialing">试用中</option>
-        <option value="past_due">已逾期</option>
-        <option value="canceled">已取消</option>
-        <option value="expired">已过期</option>
-      </select>
+      <UiSelect
+        v-model="status"
+        class="tb-select"
+        variant="toolbar"
+        placeholder="全部状态"
+        :options="[
+          { value: 'active', label: '有效' },
+          { value: 'trialing', label: '试用中' },
+          { value: 'past_due', label: '已逾期' },
+          { value: 'canceled', label: '已取消' },
+          { value: 'expired', label: '已过期' },
+        ]"
+        @change="search"
+      />
       <button class="btn sm" type="submit" :disabled="loading">查询</button>
       <div class="spacer"></div>
       <span class="muted" style="font-size: 12px">共 {{ total === null ? '—' : formatNumber(total) }} 条订阅</span>
@@ -275,24 +292,21 @@ function auditDetail(row: AuditRow): string {
             <tr v-for="row in rows" :key="row.id">
               <td class="mono">#{{ row.id }}</td>
               <td>
-                <div>{{ accountLabel(row) }}</div>
-                <div class="muted mono" style="font-size: 11.5px">账号 #{{ accountIdOf(row) ?? '—' }}</div>
+                <div class="truncate" :title="`${accountLabel(row)} · 账号 #${accountIdOf(row) ?? '—'}`">
+                  {{ accountLabel(row) }} · 账号 #{{ accountIdOf(row) ?? '—' }}
+                </div>
               </td>
               <td>{{ planLabel(row) }}</td>
               <td><StatusBadge :value="row.status" dot /></td>
-              <td class="muted">
-                {{ formatTime(row.current_start_at) }}<br />
-                <span style="font-size: 11.5px">至 {{ formatTime(row.current_end_at) }}</span>
+              <td class="muted period-cell">
+                {{ formatTime(row.current_start_at) }} 至 {{ formatTime(row.current_end_at) }}
               </td>
               <td class="num">{{ row.days_left ?? '—' }}</td>
               <td class="num">{{ row.seats ?? '—' }}</td>
               <td class="muted">{{ row.provider || '—' }}</td>
               <td>
-                <div class="actions">
-                  <button v-if="canAdjust" class="btn ghost sm" @click="openModal(row, 'subscription')">调整订阅</button>
-                  <button v-if="canQuota" class="btn ghost sm" @click="openModal(row, 'quota')">额度调整</button>
-                  <span v-if="!canAdjust && !canQuota" class="muted" style="font-size: 12px">只读</span>
-                </div>
+                <RowActions v-if="canAdjust || canQuota" :actions="subscriptionActions(row)" />
+                <span v-else class="muted">只读</span>
               </td>
             </tr>
           </tbody>
@@ -305,23 +319,28 @@ function auditDetail(row: AuditRow): string {
   <Modal v-if="modalOpen" :title="modalTab === 'subscription' ? '调整订阅与权益' : '手工调整额度'"
     :subtitle="targetRow ? `#${targetRow.id} · ${accountLabel(targetRow)} · 账号 #${targetAccountId ?? '—'}` : ''"
     @close="modalOpen = false">
-    <div class="tabs" style="margin-bottom: 16px">
-      <button :class="{ active: modalTab === 'subscription' }" @click="modalTab = 'subscription'">套餐 / 到期时间</button>
-      <button :class="{ active: modalTab === 'quota' }" @click="modalTab = 'quota'">额度调整</button>
-    </div>
+    <UiSegmented
+      v-model="modalTab"
+      size="md"
+      :options="[
+        { value: 'subscription', label: '套餐 / 到期时间' },
+        { value: 'quota', label: '额度调整' },
+      ]"
+    />
 
-    <form v-if="modalTab === 'subscription'" class="form-grid" @submit.prevent="submitSubscription">
+    <form v-if="modalTab === 'subscription'" id="sub-adjust-form" class="form-grid" @submit.prevent="submitSubscription">
       <div class="field">
         <label>套餐</label>
-        <select v-model="planCode" class="select">
-          <option value="">保持不变</option>
-          <option v-for="plan in plans" :key="plan.code" :value="plan.code">{{ plan.name || plan.code }}</option>
-        </select>
+        <UiSelect
+          v-model="planCode"
+          placeholder="保持不变"
+          :options="plans.map(plan => ({ value: plan.code, label: plan.name || plan.code }))"
+        />
         <span class="hint">候选来自 GET /v1/plans；也可保持不变只调整到期时间。</span>
       </div>
       <div class="field">
         <label>到期时间</label>
-        <input v-model="endAt" class="input" type="date" />
+        <UiDate v-model="endAt" placeholder="选择到期日期" />
         <span class="hint">提交为带时区的 ISO 8601（+08:00）。</span>
       </div>
       <div class="field span-2">
@@ -329,19 +348,16 @@ function auditDetail(row: AuditRow): string {
         <textarea v-model="adjustNote" class="textarea" placeholder="例如：客服补偿 7 天有效期 / 升级到专业版"></textarea>
         <span class="hint">原因会写入审计日志，提交成功后在本弹窗下方展示审计记录。</span>
       </div>
-      <div v-if="actionError" class="notice error span-2" style="margin: 0">{{ actionError }}</div>
-      <div class="span-2" style="display: flex; justify-content: flex-end; gap: 8px">
-        <button class="btn ghost sm" type="button" @click="modalOpen = false">关闭</button>
-        <button class="btn" type="submit" :disabled="submitting">{{ submitting ? '提交中…' : '提交调整' }}</button>
-      </div>
+      <div v-if="actionError" class="notice error span-2">{{ actionError }}</div>
     </form>
 
-    <form v-else class="form-grid" @submit.prevent="submitQuota">
+    <form v-else id="quota-adjust-form" class="form-grid" @submit.prevent="submitQuota">
       <div class="field">
         <label>额度指标<span class="required">*</span></label>
-        <select v-model="metric" class="select">
-          <option v-for="item in METRICS" :key="item.key" :value="item.key">{{ item.label }}（{{ item.key }}）</option>
-        </select>
+        <UiSelect
+          v-model="metric"
+          :options="METRICS.map(item => ({ value: item.key, label: `${item.label}（${item.key}）` }))"
+        />
       </div>
       <div class="field">
         <label>{{ metric === 'custom' ? '自定义指标键' : '调整数量' }}<span class="required">*</span></label>
@@ -357,11 +373,7 @@ function auditDetail(row: AuditRow): string {
         <label>调整原因<span class="required">*</span></label>
         <textarea v-model="quotaReason" class="textarea" placeholder="例如：补偿误扣的 20 章节额度"></textarea>
       </div>
-      <div v-if="actionError" class="notice error span-2" style="margin: 0">{{ actionError }}</div>
-      <div class="span-2" style="display: flex; justify-content: flex-end; gap: 8px">
-        <button class="btn ghost sm" type="button" @click="modalOpen = false">关闭</button>
-        <button class="btn" type="submit" :disabled="submitting">{{ submitting ? '提交中…' : '提交额度调整' }}</button>
-      </div>
+      <div v-if="actionError" class="notice error span-2">{{ actionError }}</div>
     </form>
 
     <div class="section-sub">最近审计记录</div>
@@ -369,10 +381,10 @@ function auditDetail(row: AuditRow): string {
     <StateBlock v-else-if="auditError" kind="error" title="审计记录加载失败" :message="auditError" />
     <div v-else-if="auditRows.length" class="table-wrap">
       <table class="data-table">
-        <thead><tr><th style="width: 132px">时间</th><th>操作</th><th>对象</th><th>明细</th></tr></thead>
+        <thead><tr><th style="width: 150px">时间</th><th>操作</th><th>对象</th><th>明细</th></tr></thead>
         <tbody>
           <tr v-for="item in auditRows" :key="item.id">
-            <td class="muted">{{ formatTime(item.created_at) }}</td>
+            <td class="muted cell-time">{{ formatTime(item.created_at) }}</td>
             <td class="mono">{{ item.action }}</td>
             <td class="mono">
               {{ item.target_type || '—' }}<template v-if="item.target_id"> #{{ item.target_id }}</template>
@@ -383,5 +395,20 @@ function auditDetail(row: AuditRow): string {
       </table>
     </div>
     <StateBlock v-else kind="empty" title="暂无审计记录" message="提交调整后，这里会展示该账号最近的额度 / 订阅审计记录。" />
+
+    <template #footer>
+      <button class="btn ghost" type="button" @click="modalOpen = false">关闭</button>
+      <button
+        class="btn"
+        type="submit"
+        :form="modalTab === 'subscription' ? 'sub-adjust-form' : 'quota-adjust-form'"
+        :disabled="submitting"
+      >{{ submitting ? '提交中…' : (modalTab === 'subscription' ? '提交调整' : '提交额度调整') }}</button>
+    </template>
   </Modal>
 </template>
+
+<style scoped>
+/* 当前周期：起止时间同行展示，列宽足够时不折行 */
+.period-cell { white-space: nowrap; }
+</style>

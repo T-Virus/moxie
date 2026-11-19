@@ -11,6 +11,9 @@ import NotReadyBanner from '../components/NotReadyBanner.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import UiSegmented from '../components/UiSegmented.vue'
+import UiSelect from '../components/UiSelect.vue'
+import UiDate from '../components/UiDate.vue'
 
 const canRun = computed(() => can(getRole(), 'reconcile:write'))
 
@@ -172,16 +175,20 @@ onMounted(query)
   </div>
 
   <div class="card">
-    <form class="toolbar" style="padding-bottom: 0; border-bottom: none; margin-bottom: 0" @submit.prevent="query">
+    <form class="toolbar" @submit.prevent="query">
       <div class="tb-group">
-        <select v-model="provider" class="select tb-select">
-          <option value="wechat">微信支付</option>
-          <option value="alipay">支付宝</option>
-          <option value="stripe">Stripe</option>
-        </select>
+        <UiSelect
+          v-model="provider"
+          variant="toolbar"
+          :options="[
+            { value: 'wechat', label: '微信支付' },
+            { value: 'alipay', label: '支付宝' },
+            { value: 'stripe', label: 'Stripe' },
+          ]"
+        />
       </div>
-      <div class="tb-group">
-        <input v-model="bizDate" class="input" type="date" style="width: 170px" />
+      <div class="tb-group" style="width: 170px">
+        <UiDate v-model="bizDate" placeholder="业务日期" />
       </div>
       <button class="btn sm" type="submit" :disabled="loading">{{ loading ? '查询中…' : '查询报告' }}</button>
       <button v-if="canRun" class="btn ghost sm" type="button" :disabled="running" @click="run">
@@ -222,7 +229,7 @@ onMounted(query)
         <StatusBadge v-if="report.status" :value="report.status" />
         <span v-if="report.channel_source" class="badge muted">来源 {{ report.channel_source }}</span>
         <span v-if="report.id" class="badge muted">报告 #{{ report.id }}</span>
-        <span class="muted mono" style="font-size: 11.5px">查询于 {{ formatTime(new Date().toISOString()) }}</span>
+        <span class="muted mono small">查询于 {{ formatTime(new Date().toISOString()) }}</span>
       </div>
 
       <div v-if="summaryEntries.length" class="report-summary">
@@ -236,18 +243,16 @@ onMounted(query)
       <div class="card-head">
         <div class="card-title">差异分类</div>
         <div class="spacer"></div>
-        <div class="tabs">
-          <button :class="{ active: filterType === 'all' }" @click="filterType = 'all'">
-            全部<span class="count">{{ items.length }}</span>
-          </button>
-          <button v-for="group in typeGroups" :key="group.type" :class="{ active: filterType === group.type }"
-            @click="filterType = group.type">
-            {{ group.label }}<span class="count">{{ group.count }}</span>
-          </button>
-        </div>
+        <UiSegmented
+          v-model="filterType"
+          :options="[
+            { value: 'all', label: '全部', count: items.length },
+            ...typeGroups.map(group => ({ value: group.type, label: group.label, count: group.count })),
+          ]"
+        />
       </div>
 
-      <div v-if="!filteredItems.length" class="state" style="padding: 22px">
+      <div v-if="!filteredItems.length" class="state">
         <div class="state-title">{{ items.length ? '该分类下无记录' : '无差异记录' }}</div>
         <div class="state-msg">{{ items.length ? '切换到「全部」查看其他差异。' : '本地订单与渠道账单一致。' }}</div>
       </div>

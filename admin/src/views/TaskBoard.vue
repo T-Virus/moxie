@@ -4,15 +4,19 @@ import { api, errorMessage, normalizeList, streamTaskEvents, streamTasksFeed } f
 import { can } from '../roles'
 import { getRole } from '../session'
 import { pushToast } from '../toast'
+import { confirm } from '../dialog'
 import type { AdminFeedEvent, RunEvent, TaskDashboard, TaskDetail, TaskRow, TaskStage } from '../types'
 import { formatNumber, formatTime } from '../ui'
 import { useVirtualRows } from '../utils/useVirtualRows'
 import Icon from '../components/Icon.vue'
 import PageHeader from '../components/PageHeader.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import Pager from '../components/Pager.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import Modal from '../components/Modal.vue'
+import UiSegmented from '../components/UiSegmented.vue'
+import UiSelect from '../components/UiSelect.vue'
 
 const role = getRole()
 const canWrite = computed(() => can(role, 'tasks:write'))
@@ -218,9 +222,9 @@ const detailMeta = computed<[string, unknown][]>(() => {
     ['失败原因', error?.message || d.error_message],
     ['尝试次数', d.attempts],
     ['下次重试时间', formatRetryTime(d.next_retry_at) || undefined],
-    ['创建时间', d.created_at],
-    ['开始时间', d.started_at],
-    ['结束时间', d.finished_at],
+    ['创建时间', formatTime(d.created_at as string | null)],
+    ['开始时间', formatTime(d.started_at as string | null)],
+    ['结束时间', formatTime(d.finished_at as string | null)],
   ].filter(([, value]) => value !== undefined && value !== null && value !== '') as [
     string,
     unknown,
@@ -397,15 +401,20 @@ const CONTROL_LABEL: Record<ControlAction, string> = {
 
 async function controlTask(task: TaskRow, action: ControlAction) {
   if (action === 'force_cancel') {
-    const ok = window.confirm(
-      `确认强制终止任务 ${task.id}？\n该操作会让任务立即落 canceled 终态并释放预占额度，正在执行的 worker 结果将被丢弃。`,
-    )
+    const ok = await confirm({
+      title: '强制终止任务',
+      message: `确认强制终止任务 ${task.id}？该操作会让任务立即落 canceled 终态并释放预占额度，正在执行的 worker 结果将被丢弃。`,
+      danger: true,
+      confirmText: '强制终止',
+    })
     if (!ok) return
   }
   if (action === 'requeue') {
-    const ok = window.confirm(
-      `确认将任务 ${task.id} 重新排队？\n仅在该任务确认卡死时使用，重复投递可能造成同一任务被并发执行。`,
-    )
+    const ok = await confirm({
+      title: '重新排队',
+      message: `确认将任务 ${task.id} 重新排队？仅在该任务确认卡死时使用，重复投递可能造成同一任务被并发执行。`,
+      confirmText: '重新排队',
+    })
     if (!ok) return
   }
   controllingId.value = String(task.id)
@@ -467,6 +476,25 @@ function syncFeed(): void {
 
 watch(autoRefresh, syncFeed)
 
+function taskActions(task: TaskRow): RowAction[] {
+  const actions: RowAction[] = [{ label: '日志', run: () => openDetail(task) }]
+  if (canWrite.value) {
+    if (task.status === 'failed') {
+      actions.push({ label: retryingId.value === String(task.id) ? '提交中…' : '重试', disabled: retryingId.value === String(task.id), run: () => retryTask(task) })
+    }
+    if (task.status === 'paused' && task.source === 'agent_run') {
+      actions.push({ label: '继续', disabled: controllingId.value === String(task.id), run: () => controlTask(task, 'resume') })
+    }
+    if (task.status === 'running' && task.source === 'agent_run') {
+      actions.push({ label: '暂停', disabled: controllingId.value === String(task.id), run: () => controlTask(task, 'pause') })
+    }
+    if (['queued', 'running', 'paused'].includes(task.status)) {
+      actions.push({ label: '终止', tone: 'danger', disabled: controllingId.value === String(task.id), run: () => controlTask(task, 'force_cancel') })
+    }
+  }
+  return actions
+}
+
 onMounted(() => {
   void refreshAll(false)
   syncFeed()
@@ -520,28 +548,30 @@ onUnmounted(() => {
     <div class="card-head">
       <div class="card-title">任务记录<span class="sub">{{ total === null ? '' : `${formatNumber(total)} 条` }}</span></div>
       <div class="spacer"></div>
-      <span class="muted" style="font-size: 11.5px">
+      <span class="muted small">
         看板生成时间 {{ formatTime(dashboard?.generated_at) }}
       </span>
     </div>
 
     <div class="filter-row">
-      <button
-        v-for="item in FILTERS"
-        :key="item.key"
-        type="button"
-        class="filter-chip"
-        :class="{ on: statusFilter === item.key }"
-        @click="setStatus(item.key)"
-      >
-        {{ item.label }}
-      </button>
+      <UiSegmented
+        :model-value="statusFilter"
+        variant="chip"
+        :options="FILTERS.map(item => ({ value: item.key, label: item.label }))"
+        @change="setStatus(String($event))"
+      />
       <span class="spacer"></span>
-      <select v-model="sourceFilter" class="input mini" @change="submitSearch">
-        <option value="all">全部来源</option>
-        <option value="agent_run">写作运行</option>
-        <option value="task">拆解任务</option>
-      </select>
+      <UiSelect
+        v-model="sourceFilter"
+        size="sm"
+        variant="toolbar"
+        :options="[
+          { value: 'all', label: '全部来源' },
+          { value: 'agent_run', label: '写作运行' },
+          { value: 'task', label: '拆解任务' },
+        ]"
+        @change="submitSearch"
+      />
       <input
         v-model="keyword"
         class="input mini"
@@ -590,42 +620,10 @@ onUnmounted(() => {
                 <span v-if="task.stalled" class="badge danger" style="margin-left: 4px; font-size: 11px">疑似卡死</span>
               </td>
               <td class="num">{{ task.progress ?? 0 }}%</td>
-              <td class="muted">{{ formatTime(task.created_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(task.created_at) }}</td>
               <td class="num muted">{{ durationText(task) }}</td>
-              <td class="muted">{{ formatTime(task.last_activity_at || task.started_at) }}</td>
-              <td>
-                <div class="actions">
-                  <button class="btn ghost sm" @click.stop="openDetail(task)">日志</button>
-                  <template v-if="canWrite">
-                    <button
-                      v-if="task.status === 'failed'"
-                      class="btn ghost sm"
-                      :disabled="retryingId === String(task.id)"
-                      @click.stop="retryTask(task)"
-                    >
-                      {{ retryingId === String(task.id) ? '提交中…' : '重试' }}
-                    </button>
-                    <button
-                      v-if="task.status === 'paused' && task.source === 'agent_run'"
-                      class="btn ghost sm"
-                      :disabled="controllingId === String(task.id)"
-                      @click.stop="controlTask(task, 'resume')"
-                    >继续</button>
-                    <button
-                      v-if="task.status === 'running' && task.source === 'agent_run'"
-                      class="btn ghost sm"
-                      :disabled="controllingId === String(task.id)"
-                      @click.stop="controlTask(task, 'pause')"
-                    >暂停</button>
-                    <button
-                      v-if="['queued', 'running', 'paused'].includes(task.status)"
-                      class="btn ghost sm"
-                      :disabled="controllingId === String(task.id)"
-                      @click.stop="controlTask(task, 'force_cancel')"
-                    >终止</button>
-                  </template>
-                </div>
-              </td>
+              <td class="muted cell-time">{{ formatTime(task.last_activity_at || task.started_at) }}</td>
+              <td @click.stop><RowActions :actions="taskActions(task)" /></td>
             </tr>
           </tbody>
         </table>
@@ -786,29 +784,8 @@ onUnmounted(() => {
 .filter-row .spacer {
   flex: 1;
 }
-.filter-chip {
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill, 999px);
-  background: #fff;
-  color: var(--text-2);
-  font-size: 12px;
-  cursor: pointer;
-}
-.filter-chip:hover {
-  border-color: var(--brand, #0d9488);
-  color: var(--brand, #0d9488);
-}
-.filter-chip.on {
-  background: var(--brand, #0d9488);
-  border-color: var(--brand, #0d9488);
-  color: #fff;
-}
 .input.mini {
   width: 150px;
-  height: 28px;
-  font-size: 12px;
 }
 .row-click {
   cursor: pointer;
@@ -818,7 +795,6 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px 18px;
-  margin-bottom: 16px;
 }
 .detail-meta__item {
   display: flex;
@@ -826,18 +802,17 @@ onUnmounted(() => {
   gap: 2px;
 }
 .detail-meta__label {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--color-text-3, #8a94a6);
 }
 .detail-meta__value {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   word-break: break-word;
 }
 
 .event-title {
-  margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
 }
 .event-title .sub {
@@ -851,7 +826,6 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 16px;
 }
 .stage-chip {
   display: inline-flex;
@@ -866,7 +840,7 @@ onUnmounted(() => {
 }
 .stage-chip em {
   font-style: normal;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-3);
 }
 .stage-dot {

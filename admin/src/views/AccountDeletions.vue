@@ -6,11 +6,15 @@ import { getRole } from '../session'
 import { pushToast } from '../toast'
 import type { AccountDeletionRequestView } from '../types'
 import { formatTime } from '../ui'
+import { confirm } from '../dialog'
 import Icon from '../components/Icon.vue'
 import NotReadyBanner from '../components/NotReadyBanner.vue'
 import PageHeader from '../components/PageHeader.vue'
+import Pager from '../components/Pager.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import UiSelect from '../components/UiSelect.vue'
 
 const role = getRole()
 const canRead = computed(() => can(role, 'users:read'))
@@ -47,7 +51,7 @@ async function load(): Promise<void> {
 }
 
 async function cancel(row: AccountDeletionRequestView): Promise<void> {
-  if (!window.confirm(`确认撤销 #${row.id} 的注销申请？账号将恢复登录。`)) return
+  if (!await confirm({ title: '撤销注销申请', message: `确认撤销 #${row.id} 的注销申请？账号将恢复登录。`, confirmText: '确认撤销' })) return
   try {
     await api.cancelAccountDeletion(row.id)
     pushToast('已撤销注销申请', 'info')
@@ -58,7 +62,7 @@ async function cancel(row: AccountDeletionRequestView): Promise<void> {
 }
 
 async function purge(row: AccountDeletionRequestView): Promise<void> {
-  if (!window.confirm(`确认立即清除账号 #${row.account_id}？数据不可恢复。`)) return
+  if (!await confirm({ title: '立即清除账号', message: `确认立即清除账号 #${row.account_id}？该操作不可恢复，账号全部数据将被永久删除。`, danger: true, confirmText: '立即清除' })) return
   try {
     const result = await api.purgeAccountDeletion(row.id)
     if (result.deleted) pushToast('账号数据已清除', 'info')
@@ -68,15 +72,23 @@ async function purge(row: AccountDeletionRequestView): Promise<void> {
   }
 }
 
-function changePage(delta: number): void {
-  const next = Math.min(pageCount.value, Math.max(1, page.value + delta))
-  if (next !== page.value) {
-    page.value = next
+function setPage(next: number): void {
+  const target = Math.min(pageCount.value, Math.max(1, next))
+  if (target !== page.value) {
+    page.value = target
     void load()
   }
 }
 
 onMounted(() => void load())
+
+function deletionActions(row: AccountDeletionRequestView): RowAction[] {
+  if (row.status !== 'pending' || !canWrite.value) return []
+  return [
+    { label: '撤销', run: () => cancel(row) },
+    { label: '立即清除', tone: 'danger', run: () => purge(row) },
+  ]
+}
 </script>
 
 <template>
@@ -94,15 +106,21 @@ onMounted(() => void load())
     <div class="card-head">
       <div class="card-title">申请列表<span class="sub">共 {{ total }} 条</span></div>
       <div class="spacer"></div>
-      <select v-model="status" class="input" style="width: 140px" @change="page = 1; load()">
-        <option value="pending">待处理</option>
-        <option value="cancelled">已撤销</option>
-        <option value="purged">已清除</option>
-        <option value="">全部</option>
-      </select>
+      <UiSelect
+        v-model="status"
+        size="sm"
+        variant="toolbar"
+        placeholder="全部"
+        :options="[
+          { value: 'pending', label: '待处理' },
+          { value: 'cancelled', label: '已撤销' },
+          { value: 'purged', label: '已清除' },
+        ]"
+        @change="page = 1; load()"
+      />
     </div>
 
-    <div v-if="!items.length" class="card">
+    <div v-if="!items.length" class="state-wrap">
       <StateBlock kind="empty" title="暂无申请" message="当前筛选条件下没有注销申请。" />
     </div>
     <div v-else class="table-wrap">
@@ -114,16 +132,13 @@ onMounted(() => void load())
           <tr v-for="row in items" :key="row.id">
             <td class="mono">#{{ row.id }}</td>
             <td class="mono">#{{ row.account_id }}</td>
-            <td><StatusBadge :status="row.status" /></td>
-            <td class="muted">{{ row.reason || '—' }}</td>
-            <td>{{ formatTime(row.requested_at) }}</td>
-            <td>{{ formatTime(row.purge_at) }}</td>
-            <td>{{ formatTime(row.cancelled_at) }}</td>
+            <td><StatusBadge :value="row.status" dot /></td>
+            <td class="muted"><div class="truncate" :title="row.reason || ''">{{ row.reason || '—' }}</div></td>
+            <td class="cell-time">{{ formatTime(row.requested_at) }}</td>
+            <td class="cell-time">{{ formatTime(row.purge_at) }}</td>
+            <td class="cell-time">{{ formatTime(row.cancelled_at) }}</td>
             <td>
-              <template v-if="row.status === 'pending' && canWrite">
-                <button class="btn ghost sm" @click="cancel(row)">撤销</button>
-                <button class="btn danger sm" style="margin-left: 6px" @click="purge(row)">立即清除</button>
-              </template>
+              <RowActions v-if="deletionActions(row).length" :actions="deletionActions(row)" />
               <span v-else class="muted">—</span>
             </td>
           </tr>
@@ -131,10 +146,6 @@ onMounted(() => void load())
       </table>
     </div>
 
-    <div class="pager">
-      <button class="btn ghost sm" :disabled="page <= 1" @click="changePage(-1)">上一页</button>
-      <span class="muted mono">{{ page }} / {{ pageCount }}</span>
-      <button class="btn ghost sm" :disabled="page >= pageCount" @click="changePage(1)">下一页</button>
-    </div>
+    <Pager :page="page" :page-size="pageSize" :total="total" :loading="loading" @update:page="setPage" />
   </div>
 </template>

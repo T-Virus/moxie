@@ -4,10 +4,14 @@ import { api, errorMessage } from '../api'
 import { can } from '../roles'
 import { getRole } from '../session'
 import { pushToast } from '../toast'
+import { confirm } from '../dialog'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
+import Pager from '../components/Pager.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import StateBlock from '../components/StateBlock.vue'
+import UiSelect from '../components/UiSelect.vue'
 
 const role = getRole()
 const canWrite = computed(() => can(role, 'presets:write'))
@@ -88,8 +92,7 @@ function changeScope() {
   load()
 }
 
-function goPage(delta: number) {
-  const next = page.value + delta
+function setPage(next: number) {
   if (next < 1 || next > totalPages.value) return
   page.value = next
   load()
@@ -169,7 +172,7 @@ async function save() {
 }
 
 async function remove(row: any) {
-  if (!confirm(`确认删除「${row.value}」（${typeLabel(row.type)}）？删除后前端下拉将不再出现该选项。`)) return
+  if (!await confirm({ title: '删除预设值', message: `确认删除「${row.value}」（${typeLabel(row.type)}）？删除后前端下拉将不再出现该选项。`, danger: true, confirmText: '确认删除' })) return
   try {
     await api.deletePreset(row.id)
     pushToast('预设值已删除')
@@ -181,7 +184,7 @@ async function remove(row: any) {
 
 const syncing = ref(false)
 async function syncSeeds() {
-  if (!confirm('从程序内置清单补齐缺失的预设值？只新增缺失项，不会覆盖或删除已有数据。')) return
+  if (!await confirm({ title: '同步内置预设', message: '从程序内置清单补齐缺失的预设值？只新增缺失项，不会覆盖或删除已有数据。', confirmText: '开始同步' })) return
   syncing.value = true
   try {
     const result = await api.syncPresetSeeds()
@@ -192,6 +195,15 @@ async function syncSeeds() {
   } finally {
     syncing.value = false
   }
+}
+
+function presetActions(row: any): RowAction[] {
+  const actions: RowAction[] = []
+  if (canWrite.value) {
+    actions.push({ label: '编辑', run: () => openEdit(row) })
+    actions.push({ label: '删除', tone: 'danger', run: () => remove(row) })
+  }
+  return actions
 }
 </script>
 
@@ -204,30 +216,36 @@ async function syncSeeds() {
   </PageHeader>
 
   <div class="card">
-    <div class="toolbar">
-      <select v-model="scope" class="select" @change="changeScope">
-        <option value="all">全部数据</option>
-        <option value="system">仅系统预设</option>
-        <option value="custom">仅用户自定义</option>
-      </select>
-      <select v-model="filterType" class="select" @change="applyFilter">
-        <option value="">全部类型</option>
-        <option v-for="t in types" :key="t" :value="t">{{ typeLabel(t) }}（{{ t }}）</option>
-      </select>
-      <input
-        v-model="keyword"
-        class="input"
-        type="search"
-        placeholder="搜索预设值 / 标签"
-        @keyup.enter="applyFilter"
+    <form class="toolbar" @submit.prevent="applyFilter">
+      <UiSelect
+        v-model="scope"
+        class="tb-select"
+        variant="toolbar"
+        :options="[
+          { value: 'all', label: '全部数据' },
+          { value: 'system', label: '仅系统预设' },
+          { value: 'custom', label: '仅用户自定义' },
+        ]"
+        @change="changeScope"
       />
-      <button class="btn ghost sm" @click="applyFilter">筛选</button>
+      <UiSelect
+        v-model="filterType"
+        class="tb-select"
+        variant="toolbar"
+        placeholder="全部类型"
+        :options="types.map(t => ({ value: t, label: `${typeLabel(t)}（${t}）` }))"
+        @change="applyFilter"
+      />
+      <div class="tb-group tb-search">
+        <input v-model="keyword" class="input" type="search" placeholder="搜索预设值 / 标签" />
+      </div>
+      <button class="btn sm" type="submit">筛选</button>
       <span class="spacer" />
       <button v-if="canWrite" class="btn ghost sm" :disabled="syncing" @click="syncSeeds">
         {{ syncing ? '同步中…' : '同步内置预设' }}
       </button>
       <button v-if="canWrite" class="btn sm" @click="openCreate">新增预设值</button>
-    </div>
+    </form>
 
     <div v-if="loading && !rows.length" class="state-loading">
       <StateBlock kind="loading" title="正在加载预设值…" />
@@ -255,13 +273,12 @@ async function syncSeeds() {
           <tbody>
             <tr v-for="row in rows" :key="row.id">
               <td>
-                <div>{{ typeLabel(row.type) }}</div>
-                <div class="muted mono" style="font-size: 11.5px">{{ row.type }}</div>
+                <div class="truncate" :title="`${typeLabel(row.type)} · ${row.type}`">{{ typeLabel(row.type) }}</div>
               </td>
-              <td><span class="mono">{{ row.value }}</span></td>
+              <td><div class="truncate" :title="row.value">{{ row.value }}</div></td>
               <td>{{ row.label || '—' }}</td>
               <td class="muted">{{ row.audience }}</td>
-              <td class="muted">{{ row.sort }}</td>
+              <td class="num muted">{{ row.sort }}</td>
               <td>
                 <span v-if="row.custom" class="badge purple">
                   用户自定义 · #{{ row.account_id }}
@@ -270,22 +287,12 @@ async function syncSeeds() {
                   {{ row.builtin ? '内置' : '后台新增' }}
                 </span>
               </td>
-              <td>
-                <div class="actions">
-                  <button v-if="canWrite" class="btn ghost sm" @click="openEdit(row)">编辑</button>
-                  <button v-if="canWrite" class="btn danger-ghost sm" @click="remove(row)">删除</button>
-                </div>
-              </td>
+              <td><RowActions v-if="canWrite" :actions="presetActions(row)" /></td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div class="pager">
-        <span class="muted">共 {{ total }} 项 · 第 {{ page }} / {{ totalPages }} 页</span>
-        <span class="spacer" />
-        <button class="btn ghost sm" :disabled="page <= 1" @click="goPage(-1)">上一页</button>
-        <button class="btn ghost sm" :disabled="page >= totalPages" @click="goPage(1)">下一页</button>
-      </div>
+      <Pager :page="page" :page-size="pageSize" :total="total" :loading="loading" @update:page="setPage" />
       <p class="muted" style="font-size: 12px; margin: 10px 2px 0">
         内置项由程序清单首次初始化；删除或修改后不会被重启覆盖。升级后如需补新预设，点「同步内置预设」即可（只补缺失，不覆盖现有数据）。
       </p>
@@ -299,33 +306,35 @@ async function syncSeeds() {
     size="narrow"
     @close="editOpen = false"
   >
-    <div class="field">
-      <label>预设类型<span class="required">*</span></label>
-      <input v-model="form.type" class="input mono" list="preset-types" placeholder="如 info_theme、character_race" />
-      <datalist id="preset-types">
-        <option v-for="t in types" :key="t" :value="t">{{ typeLabel(t) }}</option>
-      </datalist>
-      <span class="hint">选择已有类型，或输入新的小写下划线标识；新类型需前端同步接入后才会展示。</span>
+    <div class="form-grid single-col">
+      <div class="field">
+        <label>预设类型<span class="required">*</span></label>
+        <input v-model="form.type" class="input mono" list="preset-types" placeholder="如 info_theme、character_race" />
+        <datalist id="preset-types">
+          <option v-for="t in types" :key="t" :value="t">{{ typeLabel(t) }}</option>
+        </datalist>
+        <span class="hint">选择已有类型，或输入新的小写下划线标识；新类型需前端同步接入后才会展示。</span>
+      </div>
+      <div class="field">
+        <label>预设值<span class="required">*</span></label>
+        <input v-model="form.value" class="input" placeholder="下拉中实际显示与保存的值" />
+      </div>
+      <div class="field">
+        <label>显示标签</label>
+        <input v-model="form.label" class="input" placeholder="留空则与预设值一致" />
+      </div>
+      <div class="field">
+        <label>受众</label>
+        <input v-model="form.audience" class="input mono" placeholder="all / male,female" />
+        <span class="hint">仅题材用于按男频/女频过滤，其它类型填 all 即可；多个值用英文逗号分隔。</span>
+      </div>
+      <div class="field">
+        <label>排序</label>
+        <input v-model.number="form.sort" class="input" type="number" />
+        <span class="hint">数值越小越靠前。</span>
+      </div>
+      <div v-if="saveError" class="notice error">{{ saveError }}</div>
     </div>
-    <div class="field">
-      <label>预设值<span class="required">*</span></label>
-      <input v-model="form.value" class="input" placeholder="下拉中实际显示与保存的值" />
-    </div>
-    <div class="field">
-      <label>显示标签</label>
-      <input v-model="form.label" class="input" placeholder="留空则与预设值一致" />
-    </div>
-    <div class="field">
-      <label>受众</label>
-      <input v-model="form.audience" class="input mono" placeholder="all / male,female" />
-      <span class="hint">仅题材用于按男频/女频过滤，其它类型填 all 即可；多个值用英文逗号分隔。</span>
-    </div>
-    <div class="field">
-      <label>排序</label>
-      <input v-model.number="form.sort" class="input" type="number" />
-      <span class="hint">数值越小越靠前。</span>
-    </div>
-    <div v-if="saveError" class="notice error" style="margin: 8px 0 0">{{ saveError }}</div>
     <template #footer>
       <button class="btn ghost sm" :disabled="saving" @click="editOpen = false">取消</button>
       <button class="btn" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
@@ -335,13 +344,4 @@ async function syncSeeds() {
 
 <style scoped>
 .state-loading { padding: 10px 0; }
-.toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.toolbar .select { width: 210px; }
-.toolbar .input { width: 220px; }
-.spacer { flex: 1; }
-.pager { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; }
-.field { margin-bottom: 14px; }
-.field > label { display: block; font-size: 12.5px; margin-bottom: 6px; color: var(--text-2); }
-.required { color: var(--red); }
-.hint { display: block; font-size: 11.5px; color: var(--text-3); margin-top: 4px; }
 </style>

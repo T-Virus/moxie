@@ -10,9 +10,11 @@ import { useVirtualRows } from '../utils/useVirtualRows'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
+import RowActions, { type RowAction } from '../components/RowActions.vue'
 import Pager from '../components/Pager.vue'
 import StateBlock from '../components/StateBlock.vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import UiSelect from '../components/UiSelect.vue'
 
 // 两个长列表单页各取 200 条，定高虚拟滚动；Pager 负责跨页导航。
 const ROW_HEIGHT = 48
@@ -228,6 +230,19 @@ onMounted(() => {
   void loadAlerts()
   void loadNotifications()
 })
+
+function notifActions(row: NotificationRow): RowAction[] {
+  const actions: RowAction[] = [{ label: '详情', run: () => openDetail(row) }]
+  if (row.channel === 'push') actions.push({ label: '回执', run: () => openReceipts(row) })
+  if (canRetry.value && ['failed', 'skipped'].includes(row.status)) {
+    actions.push({
+      label: retryingId.value === row.id ? '提交中…' : '重试',
+      disabled: retryingId.value === row.id,
+      run: () => retryNotification(row),
+    })
+  }
+  return actions
+}
 </script>
 
 <template>
@@ -269,22 +284,23 @@ onMounted(() => {
       <div class="table-wrap vtable" :style="{ maxHeight: `${VIEWPORT_HEIGHT + 40}px` }" @scroll.passive="alertVirt.onScroll">
         <table class="data-table vtable">
           <thead>
-            <tr><th style="width: 96px">级别</th><th>账号</th><th>指标</th><th class="num">用量</th><th class="num">阈值</th><th>说明</th><th style="width: 96px">状态</th><th style="width: 132px">触发时间</th></tr>
+            <tr><th style="width: 96px">级别</th><th>账号</th><th>指标</th><th class="num">用量</th><th class="num">阈值</th><th>说明</th><th style="width: 96px">状态</th><th style="width: 150px">触发时间</th></tr>
           </thead>
           <tbody>
             <tr v-if="alertVirt.range.value.paddingTop" class="vtable-spacer" :style="{ height: `${alertVirt.range.value.paddingTop}px` }"><td colspan="8" /></tr>
             <tr v-for="(item, i) in alertVirt.visibleRows.value" :key="item.id ?? item.metric ?? `row-${alertVirt.range.value.start + i}`" class="vtable-row vtable-row--tall">
               <td><StatusBadge :value="item.level || 'info'" /></td>
               <td>
-                <div>{{ accountLabel(item) }}</div>
-                <div v-if="item.account_id" class="muted mono" style="font-size: 11.5px">账号 #{{ item.account_id }}</div>
+                <div class="truncate" :title="`${accountLabel(item)}${item.account_id ? ` · 账号 #${item.account_id}` : ''}`">
+                  {{ accountLabel(item) }}<template v-if="item.account_id"> · 账号 #{{ item.account_id }}</template>
+                </div>
               </td>
               <td class="mono">{{ item.metric || '—' }}</td>
               <td class="num">{{ formatNumber(item.quantity) }}</td>
               <td class="num">{{ formatNumber(item.threshold) }}</td>
               <td class="truncate" :title="item.message || ''">{{ item.message || '—' }}</td>
               <td><StatusBadge :value="item.status || 'pending'" /></td>
-              <td class="muted">{{ formatTime(item.created_at) }}</td>
+              <td class="muted cell-time">{{ formatTime(item.created_at) }}</td>
             </tr>
             <tr v-if="alertVirt.range.value.paddingBottom" class="vtable-spacer" :style="{ height: `${alertVirt.range.value.paddingBottom}px` }"><td colspan="8" /></tr>
           </tbody>
@@ -298,13 +314,19 @@ onMounted(() => {
     <div class="card-head">
       <div class="card-title">通知发送记录<span class="sub">{{ notifTotal === null ? '' : `${formatNumber(notifTotal)} 条` }}</span></div>
       <div class="spacer"></div>
-      <select v-model="notifStatus" class="select tb-select" style="height: 32px" @change="changeNotifStatus">
-        <option value="">全部状态</option>
-        <option value="queued">待发送</option>
-        <option value="sent">已发送</option>
-        <option value="failed">失败</option>
-        <option value="skipped">已跳过</option>
-      </select>
+      <UiSelect
+        v-model="notifStatus"
+        size="sm"
+        variant="toolbar"
+        placeholder="全部状态"
+        :options="[
+          { value: 'queued', label: '待发送' },
+          { value: 'sent', label: '已发送' },
+          { value: 'failed', label: '失败' },
+          { value: 'skipped', label: '已跳过' },
+        ]"
+        @change="changeNotifStatus"
+      />
       <button class="btn ghost sm" :disabled="notifLoading" @click="loadNotifications">
         <Icon name="refresh" :size="14" />刷新
       </button>
@@ -331,7 +353,7 @@ onMounted(() => {
               <th style="width: 96px">送达</th>
               <th style="width: 100px">下次重试</th>
               <th>最后错误</th>
-              <th style="width: 132px">创建时间</th>
+              <th style="width: 150px">创建时间</th>
               <th style="width: 130px">操作</th>
             </tr>
           </thead>
@@ -342,23 +364,22 @@ onMounted(() => {
               <td>{{ row.channel || '—' }}</td>
               <td>{{ row.recipient || '—' }}</td>
               <td>
-                <div>{{ row.subject || row.template || '—' }}</div>
-                <div v-if="row.template && row.subject" class="muted" style="font-size: 11.5px">{{ row.template }}</div>
+                <div class="subject-line">
+                  <span class="subject-name" :title="row.subject || row.template || ''">
+                    {{ row.subject || row.template || '—' }}
+                  </span>
+                  <span v-if="row.subject && row.template" class="muted small subject-tpl" :title="row.template">
+                    {{ row.template }}
+                  </span>
+                </div>
               </td>
               <td><StatusBadge :value="row.status" dot /></td>
               <td class="num">{{ row.attempts ?? '—' }}/{{ row.max_attempts ?? '—' }}</td>
               <td class="mono" style="font-size: 12px">{{ deliveryHint(row) }}</td>
               <td class="mono" style="font-size: 12px" :title="row.next_retry_at || ''">{{ retryHint(row.next_retry_at) }}</td>
               <td class="truncate" :title="row.last_error || ''">{{ row.last_error || '—' }}</td>
-              <td class="muted">{{ formatTime(row.created_at) }}</td>
-              <td>
-                <button class="btn ghost sm" @click="openDetail(row)">详情</button>
-                <button v-if="row.channel === 'push'" class="btn ghost sm" @click="openReceipts(row)">回执</button>
-                <button v-if="canRetry && ['failed', 'skipped'].includes(row.status)" class="btn ghost sm"
-                  :disabled="retryingId === row.id" @click="retryNotification(row)">
-                  {{ retryingId === row.id ? '提交中…' : '重试' }}
-                </button>
-              </td>
+              <td class="muted cell-time">{{ formatTime(row.created_at) }}</td>
+              <td><RowActions :actions="notifActions(row)" /></td>
             </tr>
             <tr v-if="notifVirt.range.value.paddingBottom" class="vtable-spacer" :style="{ height: `${notifVirt.range.value.paddingBottom}px` }"><td colspan="11" /></tr>
           </tbody>
@@ -384,7 +405,7 @@ onMounted(() => {
         <div><dt>下次重试</dt><dd class="mono">{{ retryHint(detailRow.next_retry_at) }}</dd></div>
         <div><dt>Provider ID</dt><dd class="mono">{{ detailRow.provider_message_id || '—' }}</dd></div>
       </dl>
-      <div v-if="detailRow.last_error" class="notice error" style="margin: 12px 0">
+      <div v-if="detailRow.last_error" class="notice error">
         <div class="notice-body"><div class="notice-title">最后错误</div><div class="mono">{{ detailRow.last_error }}</div></div>
       </div>
 
@@ -402,7 +423,7 @@ onMounted(() => {
           </tr>
         </tbody>
       </table>
-      <div v-if="detailRow.meta.reason" class="muted" style="margin-top: 10px; font-size: 12px">
+      <div v-if="detailRow.meta.reason" class="muted small">
         原因：{{ detailRow.meta.reason }}
       </div>
     </template>
@@ -411,27 +432,27 @@ onMounted(() => {
   <!-- 批量发送 -->
   <Modal v-if="batchOpen" title="批量发送通知" subtitle="共享内容，逐账号独立投递"
     size="wide" @close="batchOpen = false">
-    <div style="display: flex; flex-direction: column; gap: 14px">
-      <label class="field">
-        <span>账号 ID（逗号或空格分隔，最多 200 个）</span>
-        <textarea v-model="batchAccounts" rows="2" placeholder="例如：12, 34, 56"
-          style="width: 100%; font-family: monospace"></textarea>
-      </label>
-      <label class="field">
-        <span>标题</span>
-        <input v-model="batchTitle" type="text" maxlength="120" placeholder="通知标题" style="width: 100%" />
-      </label>
-      <label class="field">
-        <span>正文</span>
-        <textarea v-model="batchBody" rows="3" maxlength="2000" placeholder="通知正文" style="width: 100%"></textarea>
-      </label>
+    <form id="batch-notify-form" class="form-grid single-col" @submit.prevent="submitBatch">
       <div class="field">
-        <span>渠道</span>
-        <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 2px">
-          <label v-for="ch in BATCH_CHANNELS" :key="ch.value" style="display: inline-flex; align-items: center; gap: 4px; font-size: 13px">
+        <label>账号 ID<span class="required">*</span></label>
+        <textarea v-model="batchAccounts" rows="2" class="textarea mono" placeholder="逗号或空格分隔，最多 200 个，例如：12, 34, 56"></textarea>
+        <span class="hint">填写一个或多个有效账号 ID，用逗号或空格分隔。</span>
+      </div>
+      <div class="field">
+        <label>标题</label>
+        <input v-model="batchTitle" class="input" type="text" maxlength="120" placeholder="通知标题" />
+      </div>
+      <div class="field">
+        <label>正文</label>
+        <textarea v-model="batchBody" rows="3" maxlength="2000" class="textarea" placeholder="通知正文"></textarea>
+      </div>
+      <div class="field">
+        <label>发送渠道</label>
+        <div class="check-row">
+          <label v-for="ch in BATCH_CHANNELS" :key="ch.value" class="check-item">
             <input type="checkbox" :checked="batchChannels.includes(ch.value)"
               @change="toggleBatchChannel(ch.value)" />
-            {{ ch.label }}
+            <span>{{ ch.label }}</span>
           </label>
         </div>
       </div>
@@ -442,17 +463,18 @@ onMounted(() => {
         <div class="notice-body">
           <div class="notice-title">发送结果 · 批次 {{ batchResult.batch_id }}</div>
           <div>成功 {{ batchResult.sent }} / 总数 {{ batchResult.total }}，跳过 {{ batchResult.skipped }}</div>
-          <div v-for="r in batchResult.results" :key="r.account_id" style="font-size: 12px; margin-top: 4px">
+          <div v-for="r in batchResult.results" :key="r.account_id" class="result-line">
             账号 #{{ r.account_id }}：{{ r.status }}<span v-if="r.detail"> · {{ r.detail }}</span>
           </div>
         </div>
       </div>
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px">
-        <button class="btn ghost" @click="batchOpen = false">关闭</button>
-        <button class="btn primary" :disabled="batchSubmitting || !batchChannels.length"
-          @click="submitBatch">{{ batchSubmitting ? '发送中…' : '确认发送' }}</button>
-      </div>
-    </div>
+    </form>
+    <template #footer>
+      <button class="btn ghost" type="button" @click="batchOpen = false">关闭</button>
+      <button class="btn" type="submit" form="batch-notify-form" :disabled="batchSubmitting || !batchChannels.length">
+        {{ batchSubmitting ? '发送中…' : '确认发送' }}
+      </button>
+    </template>
   </Modal>
 
   <!-- 结构化回执历史 -->
@@ -470,7 +492,7 @@ onMounted(() => {
         <div><dt>建议退避</dt><dd class="mono">{{ receiptRow.retry_after_seconds != null ? `${receiptRow.retry_after_seconds}s` : '—' }}</dd></div>
         <div><dt>下次重试</dt><dd class="mono">{{ retryHint(receiptRow.next_retry_at) }}</dd></div>
       </dl>
-      <div v-if="receiptRow.reason" class="notice info" style="margin: 12px 0">
+      <div v-if="receiptRow.reason" class="notice info">
         <div class="notice-body"><div class="notice-title">处理说明</div><div>{{ receiptRow.reason }}</div></div>
       </div>
       <h4 class="detail-section">逐订阅回执（{{ receiptRow.receipts.length }}）</h4>
@@ -490,3 +512,10 @@ onMounted(() => {
     </template>
   </Modal>
 </template>
+
+<style scoped>
+/* 主题与模板同排展示（虚拟滚动按固定行高计算，单元格内不能换行） */
+.subject-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.subject-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subject-tpl { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
