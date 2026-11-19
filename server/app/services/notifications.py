@@ -518,8 +518,9 @@ def send_verification_email(
     body: str,
     settings: Settings | None,
     dedupe_key: str,
+    category: str = "email_verification",
 ) -> NotificationDelivery | None:
-    """发送邮箱验证码/验证邮件：绕过全局 email 开关，只要配置了 SMTP 就尽量投递。
+    """发送凭据类邮件（邮箱验证/密码重置）：绕过全局 email 开关，配置了 SMTP 就尽量投递。
 
     返回 delivery；调用方据 delivery.status == "sent" 判断是否真正发出（未配置 SMTP
     时为 skipped，便于上层在开发环境把验证链接直接返回给前端）。
@@ -530,7 +531,7 @@ def send_verification_email(
     delivery = NotificationDelivery(
         account_id=account.id,
         channel="email",
-        category="email_verification",
+        category=category,
         recipient=account.email,
         subject=subject[:200],
         body=body,

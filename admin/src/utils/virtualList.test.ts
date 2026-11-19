@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeVirtualRange, isIndexVisible } from './virtualList'
+import { computeVirtualRange } from './virtualList'
 
 describe('computeVirtualRange', () => {
   it('空列表返回全 0', () => {
@@ -37,14 +37,5 @@ describe('computeVirtualRange', () => {
     expect(r.start).toBe(0)
     expect(r.end).toBe(5)
     expect(r.paddingBottom).toBe(0)
-  })
-})
-
-describe('isIndexVisible', () => {
-  it('判断目标行是否在可见区间', () => {
-    const range = computeVirtualRange(100, 30, 300, 300, 2)
-    expect(isIndexVisible(range.start, range)).toBe(true)
-    expect(isIndexVisible(range.start - 1, range)).toBe(false)
-    expect(isIndexVisible(range.end, range)).toBe(false)
   })
 })

@@ -343,6 +343,10 @@ def resolve_step_model(
     存储配置 / 环境变量。
     """
     byok_key = api_key or ""
+    # BYOK 可同时覆盖 model / base_url：ByokConfig 是 str 子类，属性缺省为空。
+    # 未带 model/base_url 时（旧客户端只传裸 key）行为与原来完全一致。
+    byok_model = getattr(byok_key, "model", "")
+    byok_base_url = getattr(byok_key, "base_url", "")
     row: ModelProviderConfig | None = None
     if session is not None:
         found = _get_row(session, step_key)
@@ -355,21 +359,21 @@ def resolve_step_model(
     if row is not None and row.enabled:
         return StepModel(
             step_key=row.step_key,
-            model=row.model or settings.llm_model,
-            base_url=row.base_url or settings.llm_base_url,
+            model=byok_model or row.model or settings.llm_model,
+            base_url=byok_base_url or row.base_url or settings.llm_base_url,
             api_key=byok_key or decrypt_key(row.api_key, settings) or settings.llm_api_key,
             provider=row.provider,
             enabled=True,
-            source="step" if row.step_key == step_key else "default",
+            source="byok" if (byok_model or byok_base_url) else ("step" if row.step_key == step_key else "default"),
         )
     return StepModel(
         step_key=step_key,
-        model=settings.llm_model,
-        base_url=settings.llm_base_url,
+        model=byok_model or settings.llm_model,
+        base_url=byok_base_url or settings.llm_base_url,
         api_key=byok_key or settings.llm_api_key,
         provider="env",
         enabled=True,
-        source="env",
+        source="byok" if (byok_model or byok_base_url) else "env",
     )
 
 

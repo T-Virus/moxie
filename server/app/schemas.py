@@ -69,6 +69,9 @@ class LoginRequest(AppModel):
     email: str | None = None
     phone: str | None = None
     password: str = Field(min_length=8, max_length=128)
+    # 登录来源：client=用户端（仅普通用户），admin=管理端（仅 admin/support）。
+    # 两端账号隔离，避免管理员登录用户端、普通用户登录管理后台。默认 client 兼容老客户端。
+    source: Literal["client", "admin"] = "client"
 
 
 class RefreshRequest(AppModel):
@@ -81,6 +84,27 @@ class VerifyEmailRequest(AppModel):
 
 class ResendVerificationRequest(AppModel):
     email: str = Field(min_length=3, max_length=255)
+
+
+class ForgotPasswordRequest(AppModel):
+    """忘记密码：仅支持邮箱（手机号账号请联系客服）。
+
+    channel=admin 时重置链接指向管理端（含 /admin 前缀的 hash 路由），
+    默认 web 指向用户端；两端互不串线。
+    """
+
+    email: str = Field(min_length=3, max_length=255)
+    channel: Literal["web", "admin"] = "web"
+
+
+class ResetPasswordRequest(AppModel):
+    token: str = Field(min_length=16, max_length=512)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class ChangePasswordRequest(AppModel):
+    old_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class DeviceCreateRequest(AppModel):
@@ -282,6 +306,15 @@ class AdminRefundRequest(AppModel):
     idempotency_key: str | None = Field(default=None, max_length=200)
     # 按已用量/剩余时长自动折算退款金额（优先于 amount_cents）
     prorate: bool = False
+
+
+class UserRefundRequest(AppModel):
+    """用户自助申请退款：只提交申请（pending），由管理端审核后真正退款。"""
+
+    reason: str = Field(min_length=2, max_length=200)
+    # 缺省按服务端折算金额申请；指定时不得超过可退金额
+    amount_cents: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, max_length=200)
 
 
 class AdminRefundDecisionRequest(AppModel):
@@ -1463,6 +1496,29 @@ class PushReceiptHistoryResponse(_Base):
 
 
 # —— 运维：数据库备份 / 恢复 ——
+class BackupConfigView(_Base):
+    """后台可热改的定时备份策略（DB 覆盖优先于环境变量）。"""
+
+    schedule_enabled: bool
+    interval_minutes: int
+    email_enabled: bool
+    notify_emails: str
+    retention_count: int
+    source: str
+    updated_at: str | None
+    updated_by: int | None
+
+
+class BackupConfigUpdate(AppModel):
+    """后台修改定时备份策略；邮箱/间隔/份数范围在服务层二次校验。"""
+
+    schedule_enabled: bool
+    interval_minutes: int = Field(ge=1, le=10080)
+    email_enabled: bool
+    notify_emails: str = Field(default="", max_length=1024)
+    retention_count: int = Field(ge=1, le=90)
+
+
 class BackupNotifyView(_Base):
     enabled: bool = False
     status: str

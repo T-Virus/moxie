@@ -112,6 +112,7 @@ services:
       - ../dist:/app/dist:ro
       - ../mobile/dist:/app/mobile/dist:ro
       - artifactdata:/var/lib/moxie/artifacts
+      - backupdata:/app/backups
     depends_on:
       postgres:
         condition: service_healthy
@@ -190,6 +191,7 @@ services:
     volumes:
       - ../src:/src:ro
       - artifactdata:/var/lib/moxie/artifacts
+      - backupdata:/app/backups
     depends_on:
       postgres:
         condition: service_healthy
@@ -207,3 +209,4 @@ volumes:
   redisdata:
   miniodata:
   artifactdata:
+  backupdata:

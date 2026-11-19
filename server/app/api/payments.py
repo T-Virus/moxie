@@ -30,6 +30,7 @@ from ..schemas import (
     FourLedgerReconcileResponse,
     ReconcileRequest,
     RefundListResponse,
+    UserRefundRequest,
 )
 from ..payments import get_provider
 from ..services import four_ledger as fourledgersvc
@@ -104,7 +105,7 @@ def portal(
     return data
 
 
-# ---- 用户：退款记录 / 发票 -------------------------------------------------
+# ---- 用户：退款记录 / 自助申请 / 发票 --------------------------------------
 @router.get("/refunds", response_model=RefundListResponse)
 def list_refunds(
     auth: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
@@ -114,6 +115,88 @@ def list_refunds(
     ).all()
     items = [_refund_view(r) for r in rows]
     return {"items": items, "refunds": items}
+
+
+def _own_order(db: Session, order_id: int, account_id: int) -> Order:
+    order = db.scalar(
+        select(Order).where(Order.id == order_id, Order.account_id == account_id)
+    )
+    if order is None:
+        raise ApiError(404, "order_not_found", "订单不存在")
+    return order
+
+
+@router.get("/orders/{order_id}/refund-quote")
+def refund_quote(
+    order_id: int,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """用户查看自己订单按已用量折算的可退金额（仅建议值，最终由管理端确认）。"""
+    from ..services import refunds as refundsvc
+
+    order = _own_order(db, order_id, auth.account.id)
+    return {"quote": refundsvc.quote(db, order)}
+
+
+@router.post("/orders/{order_id}/refund-request", status_code=201)
+def request_refund(
+    order_id: int,
+    payload: UserRefundRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """用户自助申请退款：只创建 pending 记录，不调用支付渠道；管理端审核后真正退款。"""
+    from ..services import refunds as refundsvc
+
+    order = _own_order(db, order_id, auth.account.id)
+    quote = refundsvc.quote(db, order)
+    refundable = int(quote["refundable_cents"])
+    if refundable <= 0:
+        raise ApiError(409, "nothing_refundable", "按已用量折算后无可退金额")
+
+    amount = payload.amount_cents if payload.amount_cents is not None else refundable
+    if amount <= 0 or amount > refundable:
+        raise ApiError(422, "refund_amount_exceeded", f"退款金额须在 1 ~ {refundable} 分之间")
+
+    # 同一订单存在未处理完成的申请时不允许重复提交（succeeded/failed 为终态）
+    pending = db.scalar(
+        select(Refund).where(
+            Refund.order_id == order.id,
+            Refund.status.in_(("pending", "processing")),
+        )
+    )
+    if pending is not None:
+        raise ApiError(409, "refund_already_pending", "该订单已有待审核的退款申请")
+
+    key = payload.idempotency_key or f"user-refund:{order.id}:{auth.account.id}:{amount}"
+    existing = db.scalar(
+        select(Refund).where(
+            Refund.account_id == auth.account.id, Refund.idempotency_key == key
+        )
+    )
+    if existing is not None:
+        return {"refund": _refund_view(existing), "quote": quote, "duplicate": True}
+
+    refund = Refund(
+        order_id=order.id,
+        account_id=auth.account.id,
+        amount_cents=amount,
+        currency=order.currency,
+        status="pending",
+        provider=order.provider,
+        reason=payload.reason[:200],
+        idempotency_key=key,
+        meta={"source": "user_request", "quote": quote},
+    )
+    db.add(refund)
+    write_audit(db, actor_id=auth.account.id, action="order.refund.request", request=request,
+                target_type="refund", target_id=order.id,
+                meta={"order_id": order.id, "amount_cents": amount})
+    db.commit()
+    db.refresh(refund)
+    return {"refund": _refund_view(refund), "quote": quote, "duplicate": False}
 
 
 @router.get("/invoices", response_model=InvoiceListResponse)

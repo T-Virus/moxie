@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { apiBaseLabel } from '../api'
-import { logout, notifyLoginNotice } from '../auth'
+import { apiBaseLabel, errorMessage } from '../api'
+import { changePassword, logout, notifyLoginNotice } from '../auth'
 import { ROLE_LABEL, hiddenNavLabels, visibleNav } from '../roles'
 import { getAccount, getRole } from '../session'
+import { pushToast } from '../toast'
 import Icon from './Icon.vue'
+import Modal from './Modal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,6 +29,48 @@ const title = computed(() => (route.meta.title as string) || '管理后台')
 const accountText = computed(() => account.value?.email || account.value?.phone || `#${account.value?.id ?? '—'}`)
 const avatarText = computed(() => (accountText.value || 'A').slice(0, 1).toUpperCase())
 const roleLabel = computed(() => ROLE_LABEL[role.value || ''] || role.value || '未知角色')
+
+const pwdOpen = ref(false)
+const pwdSubmitting = ref(false)
+const pwdError = ref('')
+const pwdForm = ref({ current: '', next: '', confirm: '' })
+
+function openPassword() {
+  pwdForm.value = { current: '', next: '', confirm: '' }
+  pwdError.value = ''
+  pwdOpen.value = true
+}
+
+async function submitPassword() {
+  const form = pwdForm.value
+  pwdError.value = ''
+  if (!form.current) {
+    pwdError.value = '请输入当前密码'
+    return
+  }
+  if (form.next.length < 8) {
+    pwdError.value = '新密码至少 8 位'
+    return
+  }
+  if (form.next !== form.confirm) {
+    pwdError.value = '两次输入的新密码不一致'
+    return
+  }
+  if (form.next === form.current) {
+    pwdError.value = '新密码不能与当前密码相同'
+    return
+  }
+  pwdSubmitting.value = true
+  try {
+    const message = await changePassword(form.current, form.next)
+    pwdOpen.value = false
+    pushToast(message)
+  } catch (e) {
+    pwdError.value = errorMessage(e)
+  } finally {
+    pwdSubmitting.value = false
+  }
+}
 
 async function doLogout() {
   await logout()
@@ -74,6 +118,9 @@ async function doLogout() {
             <div class="user-meta">{{ roleLabel }} · ID {{ account?.id ?? '—' }}</div>
           </div>
         </div>
+        <button class="logout-btn" type="button" @click="openPassword">
+          <Icon name="unlock" :size="14" style="vertical-align: -2px; margin-right: 4px" />修改密码
+        </button>
         <button class="logout-btn" type="button" @click="doLogout">
           <Icon name="logout" :size="14" style="vertical-align: -2px; margin-right: 4px" />退出登录
         </button>
@@ -98,5 +145,30 @@ async function doLogout() {
         </div>
       </main>
     </div>
+
+    <Modal v-if="pwdOpen" title="修改密码" subtitle="修改后其它设备需要重新登录，当前浏览器保持登录" size="narrow"
+      @close="pwdOpen = false">
+      <div class="field">
+        <label>当前密码<span class="required">*</span></label>
+        <input v-model="pwdForm.current" class="input" type="password" autocomplete="current-password" />
+      </div>
+      <div class="field">
+        <label>新密码<span class="required">*</span></label>
+        <input v-model="pwdForm.next" class="input" type="password" autocomplete="new-password"
+          placeholder="至少 8 位" />
+      </div>
+      <div class="field">
+        <label>确认新密码<span class="required">*</span></label>
+        <input v-model="pwdForm.confirm" class="input" type="password" autocomplete="new-password"
+          placeholder="再输入一次" @keyup.enter="submitPassword" />
+      </div>
+      <div v-if="pwdError" class="notice error" style="margin: 0">{{ pwdError }}</div>
+      <template #footer>
+        <button class="btn ghost sm" :disabled="pwdSubmitting" @click="pwdOpen = false">取消</button>
+        <button class="btn" :disabled="pwdSubmitting" @click="submitPassword">
+          {{ pwdSubmitting ? '保存中…' : '保存' }}
+        </button>
+      </template>
+    </Modal>
   </div>
 </template>

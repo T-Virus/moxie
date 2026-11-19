@@ -864,6 +864,49 @@ export interface PaymentProviderOption {
   test_only: boolean
 }
 
+/** 用户侧订单（GET /orders） */
+export interface UserOrder {
+  id: number
+  subscription_id: number | null
+  amount_cents: number
+  currency: string
+  status: string
+  provider: string
+  kind: string
+  cycle: string
+  refunded_cents: number
+  meta: Record<string, unknown>
+  paid_at: string | null
+  created_at: string | null
+}
+
+/** 用户侧退款记录（GET /refunds） */
+export interface UserRefund {
+  id: number
+  order_id: number
+  amount_cents: number
+  currency: string
+  status: string
+  provider: string
+  provider_refund_id: string | null
+  reason: string | null
+  requested_at: string
+  succeeded_at: string | null
+}
+
+/** 退款折算报价（GET /orders/{id}/refund-quote） */
+export interface RefundQuote {
+  order_id: number
+  kind: string
+  amount_cents: number
+  refunded_cents: number
+  refundable_cents: number
+  ratio: number
+  method: string
+  used_ratio: number | null
+  time_ratio: number | null
+}
+
 export interface QuotaMetric {
   metric: string
   unit: string

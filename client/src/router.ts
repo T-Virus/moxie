@@ -9,6 +9,17 @@ const router = createRouter({
     { path: '/', name: 'home', component: Home },
     { path: '/login', name: 'login', component: () => import('@/views/Auth.vue') },
     { path: '/verify-email', name: 'verify-email', component: () => import('@/views/VerifyEmail.vue') },
+    // 重置密码全链路公开访问：邮件链接携带 token，无需登录
+    {
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('@/views/ForgotPassword.vue'),
+    },
+    {
+      path: '/reset-password',
+      name: 'reset-password',
+      component: () => import('@/views/ResetPassword.vue'),
+    },
     // /plans 自身有未登录访客态（登录/注册引导），保持公开，不用守卫拦截。
     { path: '/plans', name: 'plans', component: () => import('@/views/Plans.vue') },
     { path: '/runs', name: 'runs', component: () => import('@/views/Runs.vue'), meta: { requiresAuth: true } },
@@ -21,6 +32,12 @@ const router = createRouter({
     },
     { path: '/tools', name: 'tools', component: () => import('@/views/Tools.vue'), meta: { requiresAuth: true } },
     { path: '/skills', name: 'skills', component: () => import('@/views/Skills.vue'), meta: { requiresAuth: true } },
+    {
+      path: '/account',
+      name: 'account-settings',
+      component: () => import('@/views/AccountSettings.vue'),
+      meta: { requiresAuth: true },
+    },
     { path: '/legal', name: 'legal', component: () => import('@/views/Legal.vue') },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFound.vue') },
   ],

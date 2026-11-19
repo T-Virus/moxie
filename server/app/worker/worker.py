@@ -27,16 +27,21 @@ from . import enqueue_agent_run, enqueue_task
 logger = logging.getLogger("moxie.worker")
 
 
-def _fetch_byok(settings: Settings, task_id: str, prefix: str = "task") -> str | None:
-    """BYOK 只存在 Redis（TTL 1h），不落库、不写日志。"""
+def _fetch_byok(settings: Settings, task_id: str, prefix: str = "task"):
+    """读取 BYOK（TTL 1h，不落库不写日志），返回 ByokConfig 或 None。
+
+    ByokConfig 是 str 子类，值即 api_key，附带用户自选 model/base_url；
+    兼容旧版裸 key 记录。
+    """
     from ..redis_client import try_redis
+    from ..services.byok import ByokConfig
 
     client = try_redis(settings)
     if client is None:
         return None
     try:
         value = client.get(f"{prefix}:byok:{task_id}")
-        return value.decode("utf-8") if value else None
+        return ByokConfig.from_stored(value) if value else None
     except Exception as exc:  # noqa: BLE001
         logger.debug("读取 BYOK 临时 Key 失败，使用平台 Key：%s", type(exc).__name__)
         return None

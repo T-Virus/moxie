@@ -23,6 +23,18 @@ logger = logging.getLogger("moxie.runtime_config")
 TELEMETRY_KEY = "telemetry"
 _TELEMETRY_TTL = 60.0
 _TELEMETRY_CACHE: tuple[float, dict] | None = None
+
+BACKUP_KEY = "backup"
+_BACKUP_TTL = 60.0
+_BACKUP_CACHE: tuple[float, dict] | None = None
+# 备份间隔：5 分钟 ~ 7 天（分钟）；保留份数：1 ~ 90
+_BACKUP_INTERVAL_MIN = 5
+_BACKUP_INTERVAL_MAX = 10080
+_BACKUP_RETENTION_MIN = 1
+_BACKUP_RETENTION_MAX = 90
+# 通知邮箱：单个地址长度与总数上限，防止后台写入超长串撑爆邮件头
+_BACKUP_EMAIL_MAX = 254
+_BACKUP_EMAIL_COUNT_MAX = 20
 # 去重 zset 容量上限的合法范围（防止畸形值让单 key 无限膨胀或退化成全量放行）
 _DEDUPE_MAX_ENTRIES_MIN = 1
 _DEDUPE_MAX_ENTRIES_MAX = 1024
@@ -208,4 +220,132 @@ def set_telemetry_config(
     row.updated_by = admin_id
     db.commit()
     invalidate_telemetry_cache()
+    return dict(cfg)
+
+
+# —— 数据库备份的运营期热改配置 ——
+
+
+def backup_defaults(settings: Settings) -> dict:
+    """环境变量中的备份默认值（同时约束后台可配置的合法范围）。"""
+    return {
+        "schedule_enabled": bool(settings.backup_schedule_enabled),
+        "interval_minutes": min(
+            _BACKUP_INTERVAL_MAX, max(_BACKUP_INTERVAL_MIN, settings.backup_interval_minutes)
+        ),
+        "email_enabled": bool(settings.backup_email_enabled),
+        "notify_emails": (settings.backup_notify_emails or "").strip(),
+        "retention_count": min(
+            _BACKUP_RETENTION_MAX, max(_BACKUP_RETENTION_MIN, settings.backup_retention_count)
+        ),
+    }
+
+
+def _sanitize_emails(value: object) -> str:
+    """通知邮箱白名单：只保留合规地址，数量与长度都设上限。"""
+    if not isinstance(value, str):
+        return ""
+    kept: list[str] = []
+    for raw in value.split(","):
+        addr = raw.strip()
+        if not addr or len(addr) > _BACKUP_EMAIL_MAX:
+            continue
+        if addr.count("@") != 1 or addr.startswith("@") or addr.endswith("@"):
+            continue
+        if addr in kept:
+            continue
+        kept.append(addr)
+        if len(kept) >= _BACKUP_EMAIL_COUNT_MAX:
+            break
+    return ",".join(kept)
+
+
+def _sanitize_backup(value: object, defaults: dict) -> dict:
+    """库里是 admin 写入，仍按范围二次校验，防手工改库注入畸形值。"""
+    result = dict(defaults)
+    if not isinstance(value, dict):
+        return result
+    enabled = value.get("schedule_enabled")
+    if isinstance(enabled, bool):
+        result["schedule_enabled"] = enabled
+    interval = value.get("interval_minutes")
+    if isinstance(interval, int) and not isinstance(interval, bool):
+        result["interval_minutes"] = min(
+            _BACKUP_INTERVAL_MAX, max(_BACKUP_INTERVAL_MIN, interval)
+        )
+    email_enabled = value.get("email_enabled")
+    if isinstance(email_enabled, bool):
+        result["email_enabled"] = email_enabled
+    if "notify_emails" in value:
+        result["notify_emails"] = _sanitize_emails(value.get("notify_emails"))
+    retention = value.get("retention_count")
+    if isinstance(retention, int) and not isinstance(retention, bool):
+        result["retention_count"] = min(
+            _BACKUP_RETENTION_MAX, max(_BACKUP_RETENTION_MIN, retention)
+        )
+    return result
+
+
+def invalidate_backup_cache() -> None:
+    global _BACKUP_CACHE
+    _BACKUP_CACHE = None
+
+
+def get_backup_config(db: Session, settings: Settings, *, now: float | None = None) -> dict:
+    """读取当前生效的定时备份配置；缓存命中不查库，DB 异常降级环境变量默认值。"""
+    global _BACKUP_CACHE
+    now = time.monotonic() if now is None else now
+    defaults = backup_defaults(settings)
+    if _BACKUP_CACHE is not None and now - _BACKUP_CACHE[0] < _BACKUP_TTL:
+        return dict(_BACKUP_CACHE[1])
+    try:
+        row = db.get(OperationalSetting, BACKUP_KEY)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("读取备份配置失败，使用默认值：%s", type(exc).__name__)
+        return {**defaults, "source": "environment", "updated_at": None, "updated_by": None}
+    if row is None:
+        # 后台未配置过：实时反映环境变量（settings 可能在启动/测试中调整），不写缓存。
+        return {**defaults, "source": "environment", "updated_at": None, "updated_by": None}
+    cfg = _sanitize_backup(row.value, defaults)
+    cfg.update(
+        source="database",
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        updated_by=row.updated_by,
+    )
+    _BACKUP_CACHE = (now, cfg)
+    return dict(cfg)
+
+
+def set_backup_config(
+    db: Session,
+    settings: Settings,
+    admin_id: int,
+    *,
+    schedule_enabled: bool,
+    interval_minutes: int,
+    email_enabled: bool,
+    notify_emails: str,
+    retention_count: int,
+) -> dict:
+    """写入并立即对本进程生效；返回最终落库值。"""
+    cfg = _sanitize_backup(
+        {
+            "schedule_enabled": schedule_enabled,
+            "interval_minutes": interval_minutes,
+            "email_enabled": email_enabled,
+            "notify_emails": notify_emails,
+            "retention_count": retention_count,
+        },
+        backup_defaults(settings),
+    )
+    row = db.get(OperationalSetting, BACKUP_KEY)
+    if row is None:
+        row = OperationalSetting(key=BACKUP_KEY, value=cfg)
+        db.add(row)
+    else:
+        row.value = cfg
+    row.updated_at = utcnow()
+    row.updated_by = admin_id
+    db.commit()
+    invalidate_backup_cache()
     return dict(cfg)

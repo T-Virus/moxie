@@ -6,7 +6,7 @@ import { getRole } from '../session'
 import { pushToast } from '../toast'
 import type { AdminFeedEvent, RunEvent, TaskDashboard, TaskDetail, TaskRow, TaskStage } from '../types'
 import { formatNumber, formatTime } from '../ui'
-import { computeVirtualRange } from '../utils/virtualList'
+import { useVirtualRows } from '../utils/useVirtualRows'
 import Icon from '../components/Icon.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pager from '../components/Pager.vue'
@@ -199,15 +199,12 @@ const events = computed<RunEvent[]>(() => detail.value?.events || [])
    任务表本身已分页（20/页），无需重复虚拟化。 */
 const LOG_ROW_HEIGHT = 26
 const LOG_VIEWPORT_HEIGHT = 460
-const logScrollTop = ref(0)
-const logRange = computed(() =>
-  computeVirtualRange(events.value.length, LOG_ROW_HEIGHT, logScrollTop.value, LOG_VIEWPORT_HEIGHT, 8),
-)
-const visibleEvents = computed(() => events.value.slice(logRange.value.start, logRange.value.end))
-
-function onLogScroll(event: Event): void {
-  logScrollTop.value = (event.target as HTMLElement).scrollTop
-}
+const {
+  scrollTop: logScrollTop,
+  range: logRange,
+  visibleRows: visibleEvents,
+  onScroll: onLogScroll,
+} = useVirtualRows(events, LOG_ROW_HEIGHT, LOG_VIEWPORT_HEIGHT, 8)
 
 const detailMeta = computed<[string, unknown][]>(() => {
   const d = (detail.value?.detail || {}) as Record<string, unknown>

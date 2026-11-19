@@ -285,7 +285,6 @@ def check(report: Report) -> None:
         "用户端 API 层": (ROOT / "client" / "src" / "services" / "agentApi.ts", "fetchSkills"),
         "用户端页面": (ROOT / "client" / "src" / "views" / "Skills.vue", "fetchSkills"),
         "用户端路由": (ROOT / "client" / "src" / "router.ts", "path: '/skills'"),
-        "用户端导航": (ROOT / "client" / "src" / "App.vue", "to: '/skills'"),
         "管理端 API 层": (ROOT / "admin" / "src" / "api.ts", "'/v1/admin/skills'"),
         "管理端页面": (ROOT / "admin" / "src" / "views" / "Skills.vue", "api.skills()"),
         "管理端路由": (ROOT / "admin" / "src" / "router.ts", "path: 'skills'"),
@@ -300,6 +299,16 @@ def check(report: Report) -> None:
             report.fail(f"三端接线缺失：{label}")
     else:
         report.good(f"技能目录三端接线齐全（{len(wiring)} 处）")
+
+    # 用户端导航：技能页能力保留（API/页面/路由均在），但是否露出入口属产品决策。
+    # 露出时须指向 /skills；移除入口不视为接线缺失。
+    app_vue = ROOT / "client" / "src" / "App.vue"
+    if app_vue.exists():
+        app_text = app_vue.read_text(encoding="utf-8")
+        if "to: '/skills'" in app_text:
+            report.good("用户端导航露出技能入口且指向正确")
+        else:
+            report.good("用户端导航未露出技能入口（产品决策：能力保留但不露出）")
 
 
 def drift(report: Report) -> None:

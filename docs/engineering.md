@@ -4,7 +4,7 @@
 
 > 范围约定（2026-11-18）：后续工程化建设仅覆盖 `/server`、`/client`、`/admin` 三个在线项目。离线桌面端及其构建、E2E、打包链路按存量保留，不再新增能力或扩展门禁；i18n 与站点地图继续跳过。
 
-最近更新：2026-11-18（CI 最小权限/超时/覆盖率门禁/产物归档/失败通知，release SBOM/签名/来源证明，用户数据权利闭环，BYOK 会话入口、弱网退避、端到端 trace、告警与 SLO）。
+最近更新：2026-11-19（在线主链 E2E、P95/P99 与错误预算告警、环境配置治理、四账对账、注销申请可视化、租户限流与死信重放、体检报告产品化、法务与 SLA 交付包、用户自助退款申请入口、BYOK 自选模型/网关、账户设置六 tab（订阅额度/BYOK/安全/退款/导出/注销）与顶栏用户下拉、三模式 Agent 流程完成后自动出封面并在作品列表展示缩略图）。此前于 2026-11-18 完成 CI 最小权限/超时/覆盖率门禁/产物归档/失败通知、release SBOM/签名/来源证明、用户数据权利闭环、BYOK 会话入口、弱网退避、端到端 trace 与告警 SLO。
 
 ## 1. CI/CD（GitHub Actions）
 
@@ -17,7 +17,7 @@
 | `server-tests` | Python 3.12，SQLite + fakeredis，`pytest -m "not live"`，JUnit XML + coverage XML，覆盖率低于 70% 失败（本地实测 79.44%） | 失败输出 + `server-pytest-report` / `server-coverage` |
 | `migration-check` | 临时 SQLite `alembic upgrade head` + `alembic check`（迁移与模型零漂移） | 步骤日志 |
 | `web-apps` | Node 22，matrix=`client,admin`：`npm ci` → typecheck → lint → test → build，归档 `dist` | 按 app 区分步骤 + `<app>-dist` 制品 |
-| `online-e2e` | Playwright 在线主链：注册→订阅→创作运行→数据导出→注销申请→admin 立即清除；client/server/admin 三端联跑 | `online-e2e-report` 制品 |
+| `online-e2e` | Playwright 在线主链：注册→订阅→创作运行→顶栏用户下拉菜单→账户设置六 tab（订阅额度/BYOK/数据导出/退款申请/注销申请）→admin 立即清除；client/server/admin 三端联跑 | `online-e2e-report` 制品 |
 | `dependency-audit` | `pip-audit -r server/requirements.txt --strict` + 三端 `npm audit --omit=dev --audit-level=high` | 步骤日志 |
 | `e2e-desktop` | 存量 job：依赖 web-apps，构建 web/dist + Playwright Chromium 跑离线冒烟；后续不再新增用例或能力 | trace / 截图 / HTML 报告 |
 | `ci-failure-notice` | 任一必需 job 失败时写 Job Summary；配置 `CI_FAILURE_WEBHOOK` 后推送值班机器人 | GitHub Actions run 摘要 / 群消息 |
@@ -28,16 +28,26 @@
 
 Tag 形如 `v*` 触发：重新构建 client/admin 与 server 源码包 → 生成 SPDX SBOM → cosign keyless 签名 → 构建来源证明（provenance attestation）→ 发布 GitHub Release。预发布 tag（含 `-`）自动标记为 prerelease，发布说明取 `CHANGELOG.md` 并附带自动生成的 commit notes。
 
-本地等价的通过项（2026-11-18 最终回归实测）：
+在线 E2E 使用冷门端口 `18000` 作为后端（`MOXIE_E2E_SERVER_PORT` 可覆盖），避免开发机上 Docker/WSL 占用的 8000 冲突；client/admin 的 Vite 代理在 E2E 启动时同步指向该端口。
+
+本地等价的通过项（2026-11-19 第十七批回归实测）：
 
 ```
-server pytest（全量,-m "not live"）: 422 passed，coverage 79.44%
+server pytest（全量）: 449 collected / 3 skipped，全绿，coverage 达标
 alembic upgrade head + check: No new upgrade operations detected
-client: typecheck OK · lint 0 error / 1 warning · test 57 passed · build OK
-online-e2e: 1 passed（注册→订阅→运行→导出→注销→admin purge）
-admin:  typecheck OK · lint 0 error · test 18 passed · build OK
-scripts/check_skills.py --check: 硬校验 10 项通过，漂移 0
-workflow / monitoring YAML: 4 个文件 PyYAML 解析通过
+client: typecheck OK · lint 0 error / 1 warning · test 56 passed · build OK
+online-e2e: 1 passed（注册→订阅→运行→顶栏下拉菜单→账户设置六 tab 订阅额度/BYOK/导出/退款/注销→admin purge）
+admin:  typecheck OK · lint 0 error · test 17 passed · build OK
+scripts/check_skills.py: 硬校验 12 项通过，漂移 0
+workflow / monitoring YAML: PyYAML 解析通过
+```
+
+封面闭环补测（2026-11-19）：
+
+```
+server pytest（全量）: 468 collected / 3 skipped / 0 failed
+client: typecheck OK · lint 0 error / 1 warning · test 59 passed · build OK
+online-e2e: 1 passed（E2E 显式关闭自动出图，避免外部图片服务影响主链）
 ```
 
 说明：CI 本身未在 GitHub runner 上执行（本机无 runner）；workflow YAML 已用 PyYAML 解析校验。
@@ -148,7 +158,7 @@ cd web && npm audit --omit=dev --json > ../ops/reports/npm-audit-report.json
 - `pip-audit`：42 个依赖，**无已知漏洞**。
 - `npm audit --omit=dev`：prod 95 个依赖，**0 漏洞**（info/low/moderate/high/critical 均为 0）。
 
-- BYOK：在线端 Key 仅存 `sessionStorage`（键 `mx_byok_key`），关闭标签页即失效；不写 `localStorage`、不进 Vue store、不随任务参数落库。仅 `withByok` 的模型消费请求注入 `X-BYOK-Key`。
+- BYOK：在线端配置仅存 `sessionStorage`（兼容旧键 `mx_byok_key`，新结构 `{key, model, baseUrl}`），关闭标签页即失效；不写 `localStorage`、不进 Vue store、不随任务参数落库。仅 `withByok` 的模型消费请求注入 `X-BYOK-Key` / `X-BYOK-Model` / `X-BYOK-Base-URL`；服务端 Redis 临时缓存 JSON（TTL 1h），base_url 走 SSRF 校验，`resolve_step_model` 集中覆盖 model/base_url。
 - 弱网：client HTTP 层对网络错误与 502/503/504 自动重试，默认最多 2 次；指数退避（300ms 起、5s 上限）+ 25% 抖动，尊重 `Retry-After`，仅 GET/HEAD/OPTIONS 或带 `Idempotency-Key` 的请求重试。
 
 清单与待办见 [`docs/security-checklist.md`](security-checklist.md)。
@@ -173,6 +183,8 @@ ops/monitoring/                 Prometheus 抓取 + 告警规则 + SLO + Grafana
 ops/reports/                    依赖审计报告、压测 CSV
 docs/security-checklist.md      安全核对项与待办
 docs/环境配置治理.md            dev/staging/prod 配置基线、密钥清单与回滚约定
+docs/法务与SLA交付包-2026-11.md 用户协议 / 隐私 / AIGC / 授权链 / 退款发票 / 子处理者 / DPA / 试点 SLA
+docs/演进记录-2026-11-19-第十七批.md 本批八项能力与 UI 反馈调整的完整落地记录
 docs/engineering.md             本文档
 ```
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 import jwt
 from sqlalchemy import select
 
-from app.models import RefreshSession
+from app.models import Account, RefreshSession
 from app.security import token_hash
 
 
@@ -172,3 +172,51 @@ def test_refresh_rejects_sub_mismatching_session_owner(client, account):
     response = client.post("/v1/auth/refresh", json={"refresh_token": forged})
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "invalid_refresh"
+
+
+def test_login_portal_isolation(client, app, account):
+    """用户端与管理端账号硬隔离：普通用户不能登录 admin，管理账号不能登录 client。"""
+    login_url = "/v1/auth/login"
+    email = "tester@example.com"
+
+    # 普通用户账号：登录 admin 被拒，登录 client 放行
+    denied = client.post(login_url, json={"email": email, "password": "password123", "source": "admin"})
+    assert denied.status_code == 403, denied.text
+    assert denied.json()["error"]["code"] == "portal_forbidden"
+    assert client.post(login_url, json={"email": email, "password": "password123", "source": "client"}).status_code == 200
+
+    # 提升为 admin 后：登录 client 被拒，登录 admin 放行
+    with app.state.db.session() as session:
+        session.get(Account, account["account"]["id"]).role = "admin"
+        session.commit()
+    denied_client = client.post(login_url, json={"email": email, "password": "password123", "source": "client"})
+    assert denied_client.status_code == 403, denied_client.text
+    assert denied_client.json()["error"]["code"] == "portal_forbidden"
+    assert client.post(login_url, json={"email": email, "password": "password123", "source": "admin"}).status_code == 200
+
+    # 缺省 source 视为 client：管理员同样被拒（兼容老客户端的默认行为）
+    default_source = client.post(login_url, json={"email": email, "password": "password123"})
+    assert default_source.status_code == 403
+    assert default_source.json()["error"]["code"] == "portal_forbidden"
+
+
+def test_login_portal_isolation_support_role(client, app, account):
+    """客服（support）属管理端角色：可登录 admin，不能登录 client。"""
+    with app.state.db.session() as session:
+        session.get(Account, account["account"]["id"]).role = "support"
+        session.commit()
+    login_url = "/v1/auth/login"
+    body = {"email": "tester@example.com", "password": "password123"}
+    assert client.post(login_url, json={**body, "source": "admin"}).status_code == 200
+    assert client.post(login_url, json={**body, "source": "client"}).status_code == 403
+
+
+def test_login_portal_denial_does_not_issue_token(client, account):
+    """被隔离拒绝的登录不得签发任何 token（后端硬限制，非仅前端隐藏）。"""
+    resp = client.post(
+        "/v1/auth/login",
+        json={"email": "tester@example.com", "password": "password123", "source": "admin"},
+    )
+    assert resp.status_code == 403
+    assert "access_token" not in resp.json()
+    assert "refresh_token" not in resp.json()

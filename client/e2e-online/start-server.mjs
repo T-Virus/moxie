@@ -10,6 +10,7 @@ const serverDir = path.join(root, 'server')
 const tmp = mkdtempSync(path.join(tmpdir(), 'moxie-online-e2e-'))
 const dbPath = path.join(tmp, 'e2e.db').replace(/\\/g, '/')
 const artifactDir = path.join(tmp, 'artifacts')
+const port = process.env.MOXIE_E2E_SERVER_PORT || '18000'
 
 const env = {
   ...process.env,
@@ -28,6 +29,8 @@ const env = {
   PAYMENTS_MOCK_ENABLED: 'true',
   MOCK_PAYMENT_SECRET: 'online-e2e-mock-secret',
   MODEL_STUB: 'true',
+  // E2E 只验证主链交互，不触发真实出图/外部图片服务
+  AGENT_COVER_AUTO_GENERATE: 'false',
   TRUST_PROXY: 'false',
   BOOTSTRAP_ADMIN_EMAILS: '',
 }
@@ -38,7 +41,7 @@ writeFileSync(path.join(root, 'client', '.e2e-online-env.json'), JSON.stringify(
 const venvPython = path.join(serverDir, '.venv', 'Scripts', 'python.exe')
 const command = process.platform === 'win32' && existsSync(venvPython) ? venvPython : 'python'
 
-const child = spawn(command, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'], {
+const child = spawn(command, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', port], {
   cwd: serverDir,
   env,
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -62,7 +65,7 @@ child.on('exit', (code) => stop(code ?? 1))
 const deadline = Date.now() + 90_000
 while (Date.now() < deadline) {
   try {
-    const resp = await fetch('http://127.0.0.1:8000/healthz')
+    const resp = await fetch(`http://127.0.0.1:${port}/healthz`)
     if (resp.ok) {
       console.log('[e2e] online server ready')
       break

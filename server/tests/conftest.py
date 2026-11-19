@@ -50,6 +50,8 @@ def settings(tmp_path) -> Settings:
         outline_long_chapters=2000,
         outline_short_chapters=200,
         outline_chapter_batch=20,
+        # 单测不触发真实出图；自动封面链路用 monkeypatch 单独验证
+        agent_cover_auto_generate=False,
     )
 
 

@@ -103,18 +103,38 @@ async def chat_completions(
     if not allowed:
         raise ApiError(429, "rate_limited", "模型调用过于频繁，请稍后再试", headers={"Retry-After": str(retry_after)})
 
-    byok_key = (request.headers.get("x-byok-key") or "").strip()
+    from ..services.byok import byok_from_headers
+    from ..services.model_gateway import validate_upstream_base_url
+
+    byok = byok_from_headers(request.headers)
+    if byok is not None and byok.base_url:
+        # 用户自定义网关地址必须过 SSRF 校验（阻断内网 / 回环 / 云元数据）
+        byok.base_url = validate_upstream_base_url(
+            byok.base_url,
+            allow_private=settings.model_gateway_allow_private_networks,
+        )
+    byok_key = str(byok) if byok is not None else ""
 
     body = dict(payload)
     # 按工序解析：后台「模型配置」可对具体 step_key 指定模型/网关/Key；
-    # 请求体里的 model 优先，BYOK key 优先于后台配置的 Key。
+    # 优先级：BYOK 自带 model/base_url > 请求体 model > 后台配置 > 环境变量；
+    # BYOK key 优先于后台配置的 Key。
     step_key = str(body.get("step_key") or request.headers.get("x-step-key") or "").strip()
     body.pop("step_key", None)
     resolved = resolve_step_model(db, step_key, settings) if step_key else None
-    model = str(body.get("model") or (resolved.model if resolved else None) or settings.llm_model)
+    model = (
+        (byok.model if byok is not None else "")
+        or str(body.get("model") or "")
+        or (resolved.model if resolved else None)
+        or settings.llm_model
+    )
     body["model"] = model
     api_key = byok_key or (resolved.api_key if resolved else None) or settings.llm_api_key
-    base_url = (resolved.base_url if resolved else None) or settings.llm_base_url
+    base_url = (
+        (byok.base_url if byok is not None else "")
+        or (resolved.base_url if resolved else None)
+        or settings.llm_base_url
+    )
 
     if settings.model_stub:
         from ..services.model_gateway import complete

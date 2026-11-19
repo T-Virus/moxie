@@ -46,8 +46,3 @@ export function computeVirtualRange(
     paddingBottom: Math.max(0, (count - end) * rowHeight),
   }
 }
-
-/** 目标行是否已在可视区间内（含 overscan 缓冲之外判断），用于切换章节时决定是否滚动。 */
-export function isIndexVisible(index: number, range: VirtualRange): boolean {
-  return index >= range.start && index < range.end
-}

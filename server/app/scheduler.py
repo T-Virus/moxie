@@ -453,7 +453,7 @@ def run_once(settings: Settings, db: Database | None = None, now: datetime | Non
             ("uploads_cleaned", lambda: cleanup_uploads(session, settings, now)),
             ("account_deletions", lambda: rights_svc.purge_due_deletions(session, settings, now=now)),
             ("reconciled", lambda: reconcile_daily(session, settings, now)),
-            ("db_backup", lambda: backupsvc.run_scheduled(settings, db)),
+            ("db_backup", lambda: backupsvc.run_scheduled(settings, session)),
         ]
         for name, fn in phases:
             try:

@@ -1,4 +1,12 @@
-import type { PaymentProviderOption, Plan, QuotaSummary, Subscription } from '@/types'
+import type {
+  PaymentProviderOption,
+  Plan,
+  QuotaSummary,
+  RefundQuote,
+  Subscription,
+  UserOrder,
+  UserRefund,
+} from '@/types'
 import { ApiError, apiFetch } from './http'
 
 export async function fetchPlans(): Promise<Plan[]> {
@@ -42,6 +50,45 @@ export async function subscribePlan(
   return apiFetch<SubscribeResult>('/subscriptions', {
     method: 'POST',
     body: JSON.stringify({ plan_code: planCode, cycle, provider }),
+  })
+}
+
+/** 用户订单列表（最近 50 笔） */
+export async function fetchOrders(): Promise<UserOrder[]> {
+  const data = await apiFetch<{ orders: UserOrder[] }>('/orders')
+  return data.orders || []
+}
+
+/** 用户退款记录 */
+export async function fetchRefunds(): Promise<UserRefund[]> {
+  const data = await apiFetch<{ items: UserRefund[]; refunds?: UserRefund[] }>('/refunds')
+  return data.items || data.refunds || []
+}
+
+/** 订单按已用量折算的可退金额（建议值） */
+export async function fetchRefundQuote(orderId: number): Promise<RefundQuote> {
+  const data = await apiFetch<{ quote: RefundQuote }>(`/orders/${orderId}/refund-quote`)
+  return data.quote
+}
+
+export interface RefundRequestResult {
+  refund: UserRefund
+  quote: RefundQuote
+  duplicate: boolean
+}
+
+/** 用户自助申请退款：仅提交 pending 申请，管理端审核后真正退款 */
+export async function requestRefund(
+  orderId: number,
+  reason: string,
+  amountCents?: number,
+): Promise<RefundRequestResult> {
+  return apiFetch<RefundRequestResult>(`/orders/${orderId}/refund-request`, {
+    method: 'POST',
+    body: JSON.stringify({
+      reason,
+      ...(amountCents !== undefined ? { amount_cents: amountCents } : {}),
+    }),
   })
 }
 

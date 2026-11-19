@@ -11,7 +11,7 @@ import {
   type PayloadSession,
 } from './payloadCrypto'
 import type {
-  AccountDeletionListResponse, AccountDeletionRequestView, AdminDeadLettersResponse, AdminFeedEvent, AdminPerformance, AdminTaskReplayBatchResponse, AdminTaskReplayResult, AlertRow, AuditRow, BackupRestoreResult, BackupRow, FourLedgerReconcileReport, ListResult, LoginResponse, ModelUsageSummary, NotificationDetail, NotificationRow, OrderRow,
+  AccountDeletionListResponse, AccountDeletionRequestView, AdminDeadLettersResponse, AdminFeedEvent, AdminPerformance, AdminTaskReplayBatchResponse, AdminTaskReplayResult, AlertRow, AuditRow, BackupConfig, BackupConfigInput, BackupRestoreResult, BackupRow, FourLedgerReconcileReport, ListResult, LoginResponse, ModelUsageSummary, NotificationDetail, NotificationRow, OrderRow,
   NotificationBatchResult, PlanRow, PushReceiptHistory, ReconcileReport, RefundRow, RunEvent, SkillsCatalog,
   SubscriptionRow, TaskDashboard, TaskDetail, TaskRow, TelemetryCanary, TelemetryConfig,
   UserDetail, UserRow,
@@ -414,9 +414,10 @@ export async function downloadBlob(path: string, fallbackName: string): Promise<
 
 export const api = {
   login(identity: string, password: string) {
+    // source=admin：服务端硬隔离，普通用户账号即使密码正确也无法登录管理后台。
     const body = identity.includes('@')
-      ? { email: identity.trim().toLowerCase(), password }
-      : { phone: identity.trim(), password }
+      ? { email: identity.trim().toLowerCase(), password, source: 'admin' }
+      : { phone: identity.trim(), password, source: 'admin' }
     return request<LoginResponse>('/v1/auth/login', {
       method: 'POST', body, auth: false, skipRefresh: true,
     })
@@ -428,6 +429,30 @@ export const api = {
   },
   logout() {
     return request<{ ok: boolean }>('/v1/auth/logout', { method: 'POST', body: {}, skipRefresh: true })
+  },
+  forgotPassword(email: string) {
+    return request<{ status: string; email: string; message: string; reset_url?: string }>(
+      '/v1/auth/forgot-password',
+      // 管理端发起：重置链接须指向 /admin 的 hash 路由，不串到用户端。
+      { method: 'POST', body: { email, channel: 'admin' }, auth: false, skipRefresh: true },
+    )
+  },
+  resetPassword(token: string, newPassword: string) {
+    return request<{ ok: boolean; message: string; revoked_sessions?: number }>(
+      '/v1/auth/reset-password',
+      {
+        method: 'POST',
+        body: { token, new_password: newPassword },
+        auth: false,
+        skipRefresh: true,
+      },
+    )
+  },
+  changePassword(oldPassword: string, newPassword: string) {
+    return request<{ ok: boolean; message: string; revoked_sessions?: number }>(
+      '/v1/auth/change-password',
+      { method: 'POST', body: { old_password: oldPassword, new_password: newPassword } },
+    )
   },
 
   users(query: Record<string, unknown>) {
@@ -441,6 +466,12 @@ export const api = {
   },
   unbanUser(id: number, reason: string) {
     return request<any>(`/v1/admin/users/${id}/unban`, { method: 'POST', body: { reason } })
+  },
+  resetUserPassword(id: number) {
+    return request<{ ok: boolean; email: string; sent: boolean; message: string; reset_url?: string }>(
+      `/v1/admin/users/${id}/reset-password`,
+      { method: 'POST', body: {} },
+    )
   },
   deleteUser(id: number) {
     return request<any>(`/v1/admin/users/${id}`, { method: 'DELETE' })
@@ -660,6 +691,12 @@ export const api = {
     return request<any>(`/v1/admin/notifications/${id}/retry`, { method: 'POST', body: {} })
   },
 
+  backupConfig() {
+    return request<BackupConfig>('/v1/admin/backup-config')
+  },
+  updateBackupConfig(body: BackupConfigInput) {
+    return request<BackupConfig>('/v1/admin/backup-config', { method: 'PUT', body })
+  },
   backups() {
     return request<{ items: BackupRow[] }>('/v1/admin/backups')
   },

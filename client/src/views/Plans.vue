@@ -5,104 +5,7 @@
       <p class="page-sub">未登录也能查看全部套餐与权益；登录后可管理订阅与本月额度。</p>
     </div>
 
-    <section v-if="session.account" class="plans__section">
-      <div v-if="accountLoading" class="empty">正在加载订阅信息…</div>
-      <div v-else-if="accountError" class="card plans__error" role="alert">
-        <span>{{ accountError }}</span>
-        <button type="button" class="btn btn--sm" @click="loadAccount">重试</button>
-      </div>
-      <template v-else>
-        <div class="card plans__status">
-          <div class="plans__status-main">
-            <span class="plans__status-label">当前订阅</span>
-            <h2 class="plans__status-name">
-              {{ subscription ? subscription.plan.name : '未开通' }}
-              <span v-if="subscription" class="badge badge--success">{{ statusText(subscription.status) }}</span>
-              <span v-else class="badge">无生效套餐</span>
-            </h2>
-            <p v-if="subscription" class="plans__status-meta">
-              到期时间 {{ formatDate(subscription.current_end_at) }} · 剩余
-              {{ Math.max(0, Math.round(subscription.days_left)) }} 天
-              <template v-if="subscription.cancel_at_period_end"> · 到期后不续费</template>
-            </p>
-            <p v-else class="plans__status-meta">
-              订阅后可获得章节与 token 额度；当前降级为试用能力。
-            </p>
-          </div>
-          <div class="plans__status-side">
-            <p class="plans__period">
-              账期 {{ formatDate(quota?.period_start) }} — {{ formatDate(quota?.period_end) }}
-            </p>
-            <p class="muted plans__hint">额度按月重置，一次性额度包优先顺延</p>
-          </div>
-        </div>
-
-        <h2 class="plans__title plans__section-title">本月额度</h2>
-        <div v-if="quota && quota.metrics.length" class="plans__quota">
-          <div v-for="metric in quota.metrics" :key="metric.metric" class="card quota">
-            <div class="quota__head">
-              <span class="quota__name">
-                <template v-if="metric.metric === 'books_month'">
-                  本月可创作 {{ formatNumber(remaining(metric)) }} 本
-                </template>
-                <template v-else>{{ metricLabel(metric.metric) }}</template>
-              </span>
-              <span class="quota__value">
-                <template v-if="metric.limit < 0">不限量</template>
-                <template v-else-if="metric.metric === 'books_month'">
-                  共 {{ formatNumber(metric.limit) }} 本
-                </template>
-                <template v-else>
-                  {{ formatNumber(remaining(metric)) }} / {{ formatNumber(metric.limit) }}
-                  {{ unitLabel(metric.unit) }}
-                </template>
-              </span>
-            </div>
-            <div class="quota__bar" aria-hidden="true">
-              <span class="quota__used" :style="{ width: `${usedPercent(metric)}%` }" />
-            </div>
-            <p class="quota__meta">
-              已用 {{ formatNumber(metric.used) }} · 预占 {{ formatNumber(metric.reserved) }}
-              <span v-if="metric.pack_remaining"> · 额度包 {{ formatNumber(metric.pack_remaining) }}</span>
-            </p>
-          </div>
-        </div>
-        <div v-else class="empty">当前没有可用额度信息，可能是套餐未生效。</div>
-      </template>
-    </section>
-
-    <section v-if="session.account" class="plans__section">
-      <div class="card byok">
-        <div class="byok__head">
-          <div>
-            <h2 class="byok__title">自有模型 Key（BYOK）</h2>
-            <p class="muted byok__hint">
-              仅保存在当前浏览器会话，创建/续跑任务时以 X-BYOK-Key 发送；服务端仅短期内存缓存，不落库、不写日志。
-            </p>
-          </div>
-          <span class="badge" :class="byokEnabled ? 'badge--success' : ''">
-            {{ byokEnabled ? '已启用' : '未启用' }}
-          </span>
-        </div>
-        <div class="byok__row">
-          <input
-            v-model="byokInput"
-            class="byok__input"
-            type="password"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="粘贴你的模型 API Key（仅本次会话）"
-            aria-label="自有模型 API Key"
-            @keyup.enter="saveByok"
-          />
-          <button type="button" class="btn btn--sm" :disabled="!byokInput" @click="saveByok">保存</button>
-          <button type="button" class="btn btn--sm" :disabled="!byokEnabled" @click="clearByok">清除</button>
-        </div>
-        <p class="muted byok__status">{{ byokStatus }}</p>
-      </div>
-    </section>
-
-    <section v-else class="plans__section">
+    <section v-if="!session.account" class="plans__section">
       <div class="card plans__guest">
         <h2 class="plans__guest-title">登录后可查看你的订阅与额度</h2>
         <div class="plans__guest-actions">
@@ -211,18 +114,15 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { Plan, PlanEntitlement, QuotaMetric, QuotaSummary, Subscription } from '@/types'
+import type { Plan, PlanEntitlement } from '@/types'
 import {
   fetchPlans,
   fetchCurrentSubscription,
-  fetchEntitlements,
   fetchPaymentProviders,
   formatMoney,
-  formatDate,
   subscribePlan,
 } from '@/services/billingApi'
 import { ApiError } from '@/services/http'
-import { clearByokKey, hasByokKey, setByokKey } from '@/services/byok'
 import { session } from '@/stores/session'
 import type { PaymentProviderOption } from '@/types'
 
@@ -259,40 +159,11 @@ const providers = ref<PaymentProviderOption[]>([])
 const providersLoaded = ref(false)
 const provider = ref('')
 
-const accountLoading = ref(false)
-const accountError = ref('')
-const subscription = ref<Subscription | null>(null)
-const quota = ref<QuotaSummary | null>(null)
+// 仅用于标记当前套餐、防止重复购买；订阅状态与额度展示已迁至账户设置页
+const subscription = ref<{ plan: { code: string } } | null>(null)
 
 const toastText = ref('')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
-
-const byokInput = ref('')
-const byokEnabled = ref(false)
-const byokStatus = ref('未配置自有 Key，任务将使用平台额度与平台模型。')
-
-function loadByok(): void {
-  byokEnabled.value = hasByokKey()
-  byokInput.value = ''
-  byokStatus.value = byokEnabled.value
-    ? '当前会话已启用 BYOK：创建/续跑任务使用你的模型 Key，不占用平台模型账单。'
-    : '未配置自有 Key，任务将使用平台额度与平台模型。'
-}
-
-function saveByok(): void {
-  const key = byokInput.value.trim()
-  if (!key) return
-  setByokKey(key)
-  byokInput.value = ''
-  loadByok()
-  showToast('自有模型 Key 已保存到当前会话')
-}
-
-function clearByok(): void {
-  clearByokKey()
-  loadByok()
-  showToast('已清除自有模型 Key')
-}
 
 function showToast(message: string): void {
   if (!message) return
@@ -330,46 +201,6 @@ function rememberIntent(planId: string): void {
 
 function isCurrent(plan: Plan): boolean {
   return subscription.value?.plan.code === plan.code
-}
-
-function statusText(status: string): string {
-  const map: Record<string, string> = {
-    active: '生效中',
-    trialing: '试用中',
-    past_due: '已逾期',
-    canceled: '已取消',
-    expired: '已过期',
-    paused: '已暂停',
-  }
-  return map[status] || status
-}
-
-function metricLabel(key: string): string {
-  const map: Record<string, string> = {
-    books_month: '本月可创作',
-    adapt_chapters: '可改编章节',
-    managed_chars: '可托管字符',
-    review_month: '本月审查次数',
-    concurrency: '并发任务',
-    chapters: '章节额度',
-    tokens: '模型 token',
-    seats: '协作席位',
-    storage_gb: '存储空间',
-  }
-  return map[key] || key
-}
-
-function unitLabel(unit: string): string {
-  const map: Record<string, string> = {
-    call: '次',
-    gb: 'GB',
-    chapter: '章',
-    count: '个',
-    seat: '席',
-    book: '本',
-    char: '字',
-  }
-  return map[unit] || unit
 }
 
 function planDesc(plan: Plan): string {
@@ -464,16 +295,6 @@ function formatNumber(value: number): string {
   return value.toLocaleString('zh-CN')
 }
 
-function remaining(metric: QuotaMetric): number {
-  if (metric.limit < 0) return 0
-  return Math.max(0, metric.limit - metric.used - metric.reserved)
-}
-
-function usedPercent(metric: QuotaMetric): number {
-  if (metric.limit <= 0) return 0
-  return Math.min(100, Math.round(((metric.used + metric.reserved) / metric.limit) * 100))
-}
-
 function errorText(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 401) return '登录状态已失效，请重新登录'
@@ -526,26 +347,12 @@ async function loadPlans(): Promise<void> {
   }
 }
 
-async function loadAccount(): Promise<void> {
-  accountLoading.value = true
-  accountError.value = ''
+async function loadCurrentSubscription(): Promise<void> {
   try {
-    const [subResult, quotaResult] = await Promise.allSettled([
-      fetchCurrentSubscription(),
-      fetchEntitlements(),
-    ])
-    if (subResult.status === 'fulfilled') subscription.value = subResult.value
-    if (quotaResult.status === 'fulfilled') quota.value = quotaResult.value
-
-    const failures = [subResult, quotaResult].filter((item) => item.status === 'rejected')
-    if (failures.length) {
-      const reason = (failures[0] as PromiseRejectedResult).reason
-      accountError.value =
-        reason instanceof ApiError ? reason.message : '订阅数据加载失败，请稍后重试'
-      showToast(errorText(reason))
-    }
-  } finally {
-    accountLoading.value = false
+    const current = await fetchCurrentSubscription()
+    subscription.value = current ? { plan: current.plan } : null
+  } catch {
+    subscription.value = null
   }
 }
 
@@ -567,7 +374,7 @@ async function buy(plan: Plan): Promise<void> {
   buyingCode.value = plan.code
   try {
     const result = await subscribePlan(plan.code, 'month', provider.value)
-    subscription.value = result.subscription
+    subscription.value = result.subscription ? { plan: result.subscription.plan } : null
     selectedCode.value = plan.code
     sessionStorage.removeItem(PLAN_INTENT_KEY)
     showToast(
@@ -587,8 +394,7 @@ onMounted(() => {
   void loadProviders()
   void loadPlans()
   if (session.account) {
-    void loadAccount()
-    loadByok()
+    void loadCurrentSubscription()
   }
 })
 
@@ -629,10 +435,6 @@ onBeforeUnmount(() => {
 
 .plans__section {
   margin-top: var(--space-8);
-}
-
-.plans__section-title {
-  margin: var(--space-6) 0 0;
 }
 
 .plans__title {
@@ -693,95 +495,6 @@ onBeforeUnmount(() => {
   margin-bottom: var(--space-4);
   color: var(--color-text-3);
   font-size: var(--text-sm);
-}
-
-.plans__status {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-6);
-  padding: var(--space-6);
-}
-
-.plans__status-label {
-  font-size: var(--text-xs);
-  color: var(--color-text-3);
-  letter-spacing: 0.06em;
-}
-
-.plans__status-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-lg);
-  margin-top: 4px;
-}
-
-.plans__status-meta {
-  margin-top: 6px;
-  font-size: var(--text-sm);
-  color: var(--color-text-2);
-}
-
-.plans__status-side {
-  text-align: right;
-}
-
-.plans__period {
-  font-size: var(--text-sm);
-  color: var(--color-text-2);
-}
-
-.plans__hint {
-  font-size: var(--text-xs);
-  margin-top: 4px;
-}
-
-.plans__quota {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
-}
-
-.quota {
-  padding: 16px 18px;
-}
-
-.quota__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.quota__name {
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-
-.quota__value {
-  font-size: var(--text-sm);
-  color: var(--color-text-2);
-  font-family: var(--font-mono);
-}
-
-.quota__bar {
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-soft);
-  margin: 12px 0 8px;
-  overflow: hidden;
-}
-
-.quota__used {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-brand), #2dd4bf);
-}
-
-.quota__meta {
-  font-size: var(--text-xs);
-  color: var(--color-text-3);
 }
 
 .plans__grid {
@@ -943,61 +656,8 @@ onBeforeUnmount(() => {
   transform: translate(-50%, 8px);
 }
 
-.byok {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-5) var(--space-6);
-}
-
-.byok__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.byok__title {
-  margin: 0 0 var(--space-1);
-  font-size: var(--text-lg);
-}
-
-.byok__hint {
-  margin: 0;
-  max-width: 640px;
-  line-height: 1.6;
-}
-
-.byok__row {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.byok__input {
-  flex: 1 1 320px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: var(--text-sm);
-}
-
-.byok__status {
-  margin: 0;
-  font-size: var(--text-xs);
-}
-
 @media (max-width: 640px) {
-  .byok__head {
-    flex-direction: column;
-  }
-
-  .plans__guest,
-  .plans__status {
+  .plans__guest {
     flex-direction: column;
     align-items: flex-start;
   }

@@ -85,6 +85,8 @@
       <p class="auth__switch">
         <template v-if="tab === 'login'">
           还没有账号？<button type="button" class="auth__link" @click="switchTab('register')">去注册</button>
+          <span class="auth__switch-sep" aria-hidden="true">·</span>
+          <RouterLink class="auth__link" to="/forgot-password">忘记密码？</RouterLink>
         </template>
         <template v-else>
           已有账号？<button type="button" class="auth__link" @click="switchTab('login')">去登录</button>
@@ -332,6 +334,11 @@ async function resend(): Promise<void> {
   color: var(--color-brand);
   font-weight: 600;
   padding: 0 2px;
+}
+
+.auth__switch-sep {
+  margin: 0 var(--space-1);
+  opacity: 0.45;
 }
 
 .auth__back {

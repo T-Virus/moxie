@@ -85,6 +85,12 @@ export async function ensureSession(): Promise<boolean> {
   return true
 }
 
+/** 登录态修改密码：其它设备会被强制下线，当前浏览器保持登录 */
+export async function changePassword(current: string, next: string): Promise<string> {
+  const result = await api.changePassword(current, next)
+  return result.message || '密码已更新'
+}
+
 export async function logout(): Promise<void> {
   if (timer !== null) {
     window.clearTimeout(timer)

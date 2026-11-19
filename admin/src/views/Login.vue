@@ -74,11 +74,13 @@ async function submit() {
           <span v-if="submitting" class="spinner" style="width: 15px; height: 15px"></span>
           {{ submitting ? '正在登录…' : '登录' }}
         </button>
+
       </form>
 
       <div class="login-foot">
         <div>接口地址：<span class="mono">{{ apiBaseLabel() }}</span></div>
         <div>仅允许 admin / support 角色登录；无权限账号将被拒绝。</div>
+        <div><router-link to="/forgot-password">忘记密码？</router-link></div>
       </div>
     </div>
   </div>

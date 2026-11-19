@@ -90,6 +90,16 @@ def _is_postgres(url: str) -> bool:
     return url.startswith("postgresql") or url.startswith("postgres")
 
 
+def _libpq_url(url: str) -> str:
+    """把 SQLAlchemy 的 `postgresql+psycopg://` 转成 pg_dump/pg_restore 认识的标准 libpq URI。
+
+    pg_* 命令行工具不识别 SQLAlchemy 的驱动后缀 `+psycopg`，直接传会把整串当无效值、
+    回退到本地 socket 导致备份失败。这里去掉驱动后缀并显式使用 postgresql scheme。
+    """
+    parsed = make_url(url)
+    return parsed.set(drivername="postgresql").render_as_string(hide_password=False)
+
+
 def _redacted_url(url: str) -> str:
     try:
         parsed = make_url(url)
@@ -100,13 +110,37 @@ def _redacted_url(url: str) -> str:
         return f"{urlparse(url).scheme}://***"
 
 
-def _recipients(settings: Settings) -> list[str]:
-    return [item.strip() for item in settings.backup_notify_emails.split(",") if item.strip()]
+def _runtime_backup_cfg(settings: Settings, db: Any = None) -> dict | None:
+    """读取运营期热改的备份配置；db 不可用或读取失败时回退 None（沿用环境变量）。
+
+    db 可以是 SQLAlchemy Session（scheduler/admin 传入），也可以是 Database 引擎工厂
+    （部分测试和手动调用传入）——后者临时开一个 session 读取。
+    """
+    if db is None:
+        return None
+    try:
+        from .runtime_config import get_backup_config
+
+        if hasattr(db, "get"):  # Session
+            return get_backup_config(db, settings)
+        if hasattr(db, "session"):  # Database 工厂
+            with db.session() as session:
+                return get_backup_config(session, settings)
+        return None
+    except Exception:  # noqa: BLE001 - 配置读取失败不能阻断备份本体
+        logger.debug("读取运行时备份配置失败，沿用环境变量", exc_info=True)
+        return None
 
 
-def _notify_backup(settings: Settings, manifest: dict) -> dict:
-    recipients = _recipients(settings)
-    if not settings.backup_email_enabled or not recipients:
+def _recipients(settings: Settings, cfg: dict | None = None) -> list[str]:
+    raw = cfg.get("notify_emails") if cfg else settings.backup_notify_emails
+    return [item.strip() for item in (raw or "").split(",") if item.strip()]
+
+
+def _notify_backup(settings: Settings, manifest: dict, cfg: dict | None = None) -> dict:
+    recipients = _recipients(settings, cfg)
+    email_enabled = cfg.get("email_enabled") if cfg else settings.backup_email_enabled
+    if not email_enabled or not recipients:
         return {"enabled": False, "status": "skipped", "reason": "no_recipients_or_disabled"}
     if not settings.smtp_host:
         return {"enabled": True, "status": "skipped", "reason": "smtp_not_configured", "recipients": recipients}
@@ -170,7 +204,7 @@ def _postgres_dump(settings: Settings, target: Path) -> None:
         "--file",
         str(target),
         "--dbname",
-        settings.database_url,
+        _libpq_url(settings.database_url),
     ]
     try:
         subprocess.run(command, check=True, env=env, timeout=1800, capture_output=True)
@@ -198,6 +232,7 @@ def create_backup(settings: Settings, *, trigger: str = "manual", db: Any = None
     """创建一次数据库备份，返回 manifest；邮件发送状态写回 manifest。"""
     if not settings.backup_enabled:
         raise ApiError(503, "backup_disabled", "数据库备份功能已关闭")
+    cfg = _runtime_backup_cfg(settings, db)
     root = backup_root(settings)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup_id = f"backup-{stamp}-{uuid.uuid4().hex[:6]}"
@@ -232,9 +267,10 @@ def create_backup(settings: Settings, *, trigger: str = "manual", db: Any = None
     }
     # 先写一次，确保邮件失败/进程中断也能列出备份
     _write_manifest(workdir, manifest)
-    manifest["email"] = _notify_backup(settings, manifest)
+    manifest["email"] = _notify_backup(settings, manifest, cfg)
     _write_manifest(workdir, manifest)
-    _prune(root, settings.backup_retention_count)
+    keep = cfg.get("retention_count") if cfg else settings.backup_retention_count
+    _prune(root, keep)
     logger.info("数据库备份完成 backup=%s engine=%s trigger=%s", backup_id, engine, trigger)
     return manifest
 
@@ -342,7 +378,7 @@ def restore_backup(settings: Settings, backup_id: str, *, apply: bool = False, d
                     "--no-owner",
                     "--exit-on-error",
                     "--dbname",
-                    settings.database_url,
+                    _libpq_url(settings.database_url),
                     str(source),
                 ],
                 check=True,
@@ -371,8 +407,11 @@ def restore_backup(settings: Settings, backup_id: str, *, apply: bool = False, d
 
 
 def run_scheduled(settings: Settings, db: Any = None) -> dict:
-    """scheduler phase：按间隔触发；最近已有备份则跳过。"""
-    if not settings.backup_schedule_enabled:
+    """scheduler phase：按间隔触发；最近已有备份则跳过。配置可通过后台热改。"""
+    cfg = _runtime_backup_cfg(settings, db)
+    enabled = cfg.get("schedule_enabled") if cfg else settings.backup_schedule_enabled
+    interval = cfg.get("interval_minutes") if cfg else settings.backup_interval_minutes
+    if not enabled:
         return {"status": "disabled"}
     items = list_backups(settings)
     if items and items[0].get("created_at"):
@@ -380,7 +419,7 @@ def run_scheduled(settings: Settings, db: Any = None) -> dict:
             created = datetime.fromisoformat(str(items[0]["created_at"]))
             if created.tzinfo is None:
                 created = created.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) - created < timedelta(minutes=settings.backup_interval_minutes):
+            if datetime.now(timezone.utc) - created < timedelta(minutes=interval):
                 return {"status": "skipped", "reason": "recent_backup_exists"}
         except ValueError:
             pass

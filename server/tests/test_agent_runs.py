@@ -236,7 +236,8 @@ def test_create_and_resume_store_byok_only_in_redis(client, headers, app):
     )
     assert created.status_code == 201, created.text
     run_id = created.json()["run_id"]
-    assert app.state.redis.get(f"agent:byok:{run_id}") == secret
+    stored = json.loads(app.state.redis.get(f"agent:byok:{run_id}"))
+    assert stored["key"] == secret and stored["model"] == "" and stored["base_url"] == ""
     assert secret not in created.text
 
     detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers)
@@ -256,7 +257,8 @@ def test_create_and_resume_store_byok_only_in_redis(client, headers, app):
         json={"approval": True},
     )
     assert resumed.status_code == 200, resumed.text
-    assert app.state.redis.get(f"agent:byok:{run_id}") == resumed_secret
+    stored = json.loads(app.state.redis.get(f"agent:byok:{run_id}"))
+    assert stored["key"] == resumed_secret
     assert resumed_secret not in resumed.text
 
 
@@ -1886,3 +1888,69 @@ def test_skill_logs_are_visible_while_node_still_running(client, headers, app):
 
     assert _execute(app, run_id, overrides={"outline": _LiveLogOutline()}) == "succeeded"
     assert seen["live"] == 1
+
+
+def test_three_modes_auto_generate_cover_after_flow(client, headers, app, monkeypatch):
+    """热门/参考/自定义三种流程都基于 cover_plan 自动出图，前端无需再手动点生成。"""
+    import app.agents.engine as engine
+
+    _stub(app)
+    subscribe(client, headers)
+    monkeypatch.setattr(app.state.settings, "agent_cover_auto_generate", True, raising=False)
+
+    calls: list[dict] = []
+
+    def fake_generate_cover(**kwargs):
+        run = kwargs["run"]
+        calls.append(
+            {
+                "mode": run.mode,
+                "prompt": kwargs.get("prompt", ""),
+                "style": kwargs.get("style", ""),
+                "layout": kwargs.get("layout", ""),
+            }
+        )
+        key = f"covers/{run.account_id}/{run.id}.jpg"
+        run.meta = {
+            **(run.meta or {}),
+            "cover": {
+                "key": key,
+                "fmt": "jpg",
+                "source": "ai",
+                "model": "stub-image",
+                "width": kwargs.get("width") or 600,
+                "height": kwargs.get("height") or 800,
+                "updated_at": "2026-11-19T00:00:00+00:00",
+            },
+        }
+        return {"url": f"/agent-runs/{run.id}/cover?v=stub", "source": "ai"}
+
+    monkeypatch.setattr(engine, "generate_run_cover", fake_generate_cover)
+
+    source_key = _upload(client, headers, SOURCE_TEXT)
+    cases = [
+        ("hot", {}),
+        ("reference", {"source_key": source_key}),
+        ("custom", {}),
+    ]
+    for mode, extra in cases:
+        created = _create(
+            client,
+            headers,
+            mode=mode,
+            title=f"自动封面-{mode}",
+            options={"target_chapters": 3},
+            **extra,
+        )
+        assert created.status_code == 201, created.text
+        run_id = created.json()["run_id"]
+        assert _execute(app, run_id) == "succeeded"
+        detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
+        assert detail["cover_url"], f"{mode} 模式未返回封面"
+        assert detail["cover"]["source"] == "ai"
+        messages = [item["message"] for item in _event_messages(client, headers, run_id)]
+        assert any("封面已自动生成" in message for message in messages)
+
+    assert [item["mode"] for item in calls] == ["hot", "reference", "custom"]
+    assert all(item["prompt"] for item in calls)
+    assert all(item["style"] and item["layout"] for item in calls)

@@ -108,10 +108,19 @@ def create(
     db.refresh(task)
 
     # BYOK 只写 Redis（短期），不落库、不写日志；worker 从 Redis 取用
-    byok = (request.headers.get("x-byok-key") or "").strip()
-    if byok:
+    from ..services.byok import byok_from_headers
+
+    byok = byok_from_headers(request.headers)
+    if byok is not None:
+        if byok.base_url:
+            from ..services.model_gateway import validate_upstream_base_url
+
+            byok.base_url = validate_upstream_base_url(
+                byok.base_url,
+                allow_private=settings.model_gateway_allow_private_networks,
+            )
         try:
-            request.app.state.redis.setex(f"task:byok:{task.id}", 3600, byok)
+            request.app.state.redis.setex(f"task:byok:{task.id}", 3600, byok.to_json())
         except Exception:  # noqa: BLE001
             pass
 

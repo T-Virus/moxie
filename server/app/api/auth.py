@@ -21,9 +21,12 @@ from ..models import Account, EmailVerification, LegalConsent, RefreshSession
 from ..schemas import (
     AccountDeleteRequest,
     AccountDeletionRequestView,
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     ResendVerificationRequest,
     VerifyEmailRequest,
 )
@@ -34,7 +37,7 @@ from ..security import (
     token_hash,
     verify_password,
 )
-from ..services import data_rights
+from ..services import data_rights, password_reset
 from ..services.audit import write_audit
 from ..services.notifications import send_verification_email
 
@@ -262,6 +265,122 @@ def resend_verification(payload: ResendVerificationRequest, request: Request, db
     }
 
 
+@router.post("/forgot-password")
+def forgot_password(
+    payload: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)
+):
+    """申请重置密码邮件：不区分账号是否存在，一律返回同一文案，避免邮箱枚举。"""
+    settings = request.app.state.settings
+    limiter = request.app.state.limiter
+    ip = resolve_client_ip(request) or "-"
+    allowed, retry_after = limiter.check(
+        f"forgot:{ip}", settings.forgot_password_rate_limit_per_minute, 60
+    )
+    if not allowed:
+        increment("moxie_rate_limited_total", scope="forgot_password")
+        raise ApiError(
+            429, "rate_limited", "操作过于频繁，请稍后再试",
+            headers={"Retry-After": str(retry_after)},
+        )
+    email = payload.email.strip().lower()
+    result: dict = {
+        "status": "ok",
+        "email": email,
+        "message": "若该邮箱已注册，重置密码邮件已发送，请查收。",
+    }
+    account = _lookup_account(db, email, None)
+    if account is None or not account.email or account.status in ("disabled", "banned"):
+        return result
+    password_reset.check_cooldown(db, account.id, settings)
+    # 管理端发起的重置走 admin 基地址与 hash 路由，避免管理员收到用户端链接。
+    _token, reset_url, sent = password_reset.issue(
+        db, account, settings, request, channel=payload.channel
+    )
+    write_audit(
+        db, actor_id=account.id, action="account.password_reset_requested", request=request,
+        target_type="account", target_id=account.id,
+    )
+    db.commit()
+    # 未配置 SMTP 时不会真正发出，非生产环境把链接直接返回，便于本地联调。
+    if not sent and not settings.is_production:
+        result["reset_url"] = reset_url
+    return result
+
+
+@router.post("/reset-password")
+def reset_password(
+    payload: ResetPasswordRequest, request: Request, db: Session = Depends(get_db)
+):
+    """用邮件里的令牌设置新密码：令牌一次性，成功后吊销全部会话。"""
+    row = password_reset.consume(db, payload.token)
+    account = db.get(Account, row.account_id)
+    if account is None:
+        raise ApiError(400, "invalid_token", "重置链接无效，请重新申请")
+    if account.status in ("disabled", "banned"):
+        raise ApiError(403, "account_disabled", "账号已被停用，请联系客服")
+    account.password_hash = hash_password(payload.new_password)
+    row.consumed_at = utcnow()
+    # 能点开邮件链接即证明拥有该邮箱：顺带完成邮箱验证并激活待验证账号，
+    # 避免「重置成功但仍无法登录」。
+    if account.email_verified_at is None:
+        account.email_verified_at = utcnow()
+    if account.status == "pending":
+        account.status = "active"
+    password_reset.invalidate_other_tokens(db, account.id, keep_id=row.id)
+    revoked = password_reset.revoke_sessions(db, account.id)
+    write_audit(
+        db, actor_id=account.id, action="account.password_reset", request=request,
+        target_type="account", target_id=account.id, meta={"revoked_sessions": revoked},
+    )
+    db.commit()
+    return {
+        "ok": True,
+        "revoked_sessions": revoked,
+        "message": "密码已重置，请使用新密码登录。",
+    }
+
+
+@router.post("/change-password")
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+):
+    """登录态修改密码：校验原密码，吊销其它设备会话，保留当前设备。"""
+    settings = request.app.state.settings
+    limiter = request.app.state.limiter
+    allowed, retry_after = limiter.check(
+        f"change_password:{auth.account.id}",
+        settings.change_password_rate_limit_per_minute,
+        300,
+    )
+    if not allowed:
+        increment("moxie_rate_limited_total", scope="change_password")
+        raise ApiError(
+            429, "rate_limited", "尝试过于频繁，请稍后再试",
+            headers={"Retry-After": str(retry_after)},
+        )
+    if not verify_password(payload.old_password, auth.account.password_hash):
+        raise ApiError(401, "invalid_password", "原密码不正确")
+    if payload.old_password == payload.new_password:
+        raise ApiError(422, "same_password", "新密码不能与原密码相同")
+    auth.account.password_hash = hash_password(payload.new_password)
+    revoked = password_reset.revoke_sessions(
+        db, auth.account.id, keep_session_id=auth.session_id
+    )
+    write_audit(
+        db, actor_id=auth.account.id, action="account.password_changed", request=request,
+        target_type="account", target_id=auth.account.id, meta={"revoked_sessions": revoked},
+    )
+    db.commit()
+    return {
+        "ok": True,
+        "revoked_sessions": revoked,
+        "message": "密码已更新，其他设备需要重新登录。",
+    }
+
+
 @router.post("/login")
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     settings = request.app.state.settings
@@ -294,6 +413,23 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         if account.status == "pending":
             raise ApiError(403, "email_not_verified", "账号邮箱尚未验证，请先查收验证邮件完成验证后再登录")
         raise ApiError(403, "account_disabled", "账号已被停用")
+
+    # 管理端与用户端账号硬隔离：密码虽正确，角色与来源不匹配也不签发 token。
+    # 密码已验证，此处不存在账号枚举风险，可明确提示应去的入口。
+    is_staff = account.role in ("admin", "support")
+    if payload.source == "admin" and not is_staff:
+        write_audit(db, actor_id=account.id, action="account.login_portal_denied", request=request,
+                    target_type="account", target_id=account.id,
+                    meta={"source": payload.source, "role": account.role})
+        db.commit()
+        raise ApiError(403, "portal_forbidden", "该账号不是管理账号，请前往用户端登录")
+    if payload.source == "client" and is_staff:
+        write_audit(db, actor_id=account.id, action="account.login_portal_denied", request=request,
+                    target_type="account", target_id=account.id,
+                    meta={"source": payload.source, "role": account.role})
+        db.commit()
+        raise ApiError(403, "portal_forbidden", "管理账号请前往管理后台登录")
+
     limiter.reset(fail_key)
     write_audit(db, actor_id=account.id, action="account.login", request=request,
                 target_type="account", target_id=account.id)

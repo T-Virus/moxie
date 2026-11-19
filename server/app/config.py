@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     cors_allow_methods: str = "GET,POST,PATCH,DELETE,OPTIONS"
     cors_allow_headers: str = (
         "Authorization,Content-Type,Idempotency-Key,X-Request-Id,"
-        "X-Rights-Confirmed,X-BYOK-Key,"
+        "X-Rights-Confirmed,X-BYOK-Key,X-BYOK-Model,X-BYOK-Base-URL,"
         "X-Payload-Key,X-Payload-Client,X-Payload-Nonce,X-Payload-Encrypted,"
         "X-Trace-Id,Traceparent"
     )
@@ -373,20 +373,33 @@ class Settings(BaseSettings):
     cover_height: int = 2100
     cover_timeout_seconds: int = 180
     cover_upload_max_bytes: int = 10 * 1024 * 1024
+    # 三模式 Agent 流程完成后，用 cover_plan 节点产出的方案自动出图；
+    # 关闭后仍可在作品信息页手动生成/上传封面。
+    agent_cover_auto_generate: bool = True
 
     # 版权确认闸门：拆解/改编任务必须显式确认（测试环境可关闭）
     legal_gate_enabled: bool = True
     # 法律文本当前版本号：注册勾选时校验并写入留痕；升级后旧客户端需重新同意
-    legal_terms_version: str = "2026-11-01"
+    legal_terms_version: str = "2026-11-18"
 
     # 邮箱验证：注册后必须验证邮箱才能登录（测试环境可关闭）
     email_verification_required: bool = True
     # 验证令牌有效期（分钟）
     email_verify_token_ttl_minutes: int = 1440
-    # 前端基地址：用于拼接验证邮件里的链接；留空则使用请求 Origin 头
+    # 用户端前端基地址：用于拼接验证/重置邮件里的链接；留空则使用请求 Origin 头
     app_client_base_url: str = ""
+    # 管理端前端基地址：管理员重置密码邮件专用，须与用户端区分（含 /admin 前缀）；
+    # 留空则回退到请求 Origin。开发示例 http://127.0.0.1:5180/admin
+    app_admin_base_url: str = ""
     # 同一账号两次验证邮件的最小发送间隔（秒）：防止接口被无限盗刷/对第三方邮箱轰炸
     email_resend_cooldown_seconds: int = 60
+
+    # 忘记密码：重置令牌有效期（分钟）、同账号发送冷却（秒）、按 IP 的每分钟上限
+    password_reset_token_ttl_minutes: int = 30
+    password_reset_cooldown_seconds: int = 60
+    forgot_password_rate_limit_per_minute: int = 5
+    # 修改密码：按账号的尝试上限（窗口 5 分钟），防止登录态被盗后爆破旧密码
+    change_password_rate_limit_per_minute: int = 10
 
     # 多 worker 部署必须显式配置 License 私钥；禁止自动生成临时密钥
     license_allow_ephemeral_key: bool = False

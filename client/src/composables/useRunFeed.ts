@@ -73,5 +73,5 @@ export function useRunFeed(options: RunFeedOptions) {
   }
 
   onBeforeUnmount(stop)
-  return { sync, stop, usingFallback }
+  return { sync, stop }
 }

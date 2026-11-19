@@ -56,12 +56,25 @@ router = APIRouter(tags=["agent"])
 
 
 def _store_byok(request: Request, run_id: str) -> None:
-    """BYOK 只写 Redis（TTL 1h），不落库、不写日志；worker 从 Redis 取用。"""
-    key = (request.headers.get("x-byok-key") or "").strip()
-    if not key:
+    """BYOK 只写 Redis（TTL 1h），不落库、不写日志；worker 从 Redis 取用。
+
+    支持用户自选 model / base_url（X-BYOK-Model / X-BYOK-Base-URL）。
+    base_url 必须过 SSRF 校验，阻断内网 / 回环 / 云元数据。
+    """
+    from ..services.byok import byok_from_headers
+
+    cfg = byok_from_headers(request.headers)
+    if cfg is None:
         return
+    if cfg.base_url:
+        from ..services.model_gateway import validate_upstream_base_url
+
+        cfg.base_url = validate_upstream_base_url(
+            cfg.base_url,
+            allow_private=request.app.state.settings.model_gateway_allow_private_networks,
+        )
     try:
-        request.app.state.redis.setex(f"agent:byok:{run_id}", 3600, key)
+        request.app.state.redis.setex(f"agent:byok:{run_id}", 3600, cfg.to_json())
     except Exception:  # noqa: BLE001
         pass
 

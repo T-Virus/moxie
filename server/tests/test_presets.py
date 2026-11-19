@@ -91,7 +91,7 @@ def test_delete_user_cascades_custom_presets(client, app):
         acc.role = "admin"
         s.commit()
     admin_la = client.post(
-        "/v1/auth/login", json={"email": "admin_cp@example.com", "password": "password123"}
+        "/v1/auth/login", json={"email": "admin_cp@example.com", "password": "password123", "source": "admin"}
     )
     admin_h = {"Authorization": f"Bearer {admin_la.json()['access_token']}"}
 

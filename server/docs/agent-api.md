@@ -18,7 +18,6 @@
 ```
 server/app/agents/
 ├── contracts.py        # StrictModel、SkillContext、call_json
-├── genres.py           # 题材目录
 ├── graph.py            # NodeSpec / Graph / 三张 DAG / 拓扑分层
 ├── registry.py         # 技能注册表与版本号
 ├── engine.py           # 拓扑执行、同层并发、重试、checkpoint、分段执行、暂停

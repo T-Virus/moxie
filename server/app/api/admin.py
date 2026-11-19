@@ -99,6 +99,8 @@ from ..schemas import (
     AdminUserStatusRequest,
     AdminUsersResponse,
     AuditLogsResponse,
+    BackupConfigUpdate,
+    BackupConfigView,
     HealthResponse,
     PushReceiptHistoryResponse,
     TelemetryConfigUpdate,
@@ -109,6 +111,7 @@ from ..services import data_rights
 from ..services import model_config as model_config_svc
 from ..services import runtime_config
 from ..services import notifications as nsvc
+from ..services import password_reset
 from ..services import subscription as subsvc
 from ..services import usage_stats
 from ..services.audit import write_audit
@@ -474,6 +477,40 @@ def unban_user(
     _set_user_status(db, account, "active", payload.reason, request, admin)
     db.commit()
     return {"ok": True}
+
+
+@admin_router.post("/users/{account_id}/reset-password")
+def reset_user_password(
+    account_id: int,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """客服代发重置密码邮件：不下发明文密码，链接一次性且限时有效。"""
+    account = db.get(Account, account_id)
+    if account is None:
+        raise _user_not_found()
+    if not account.email:
+        raise ApiError(400, "email_missing", "该账号未绑定邮箱，无法发送重置邮件")
+    if account.status in ("disabled", "banned"):
+        raise ApiError(409, "account_disabled", "账号已停用，请先解封后再重置密码")
+    settings = request.app.state.settings
+    password_reset.check_cooldown(db, account.id, settings)
+    _token, reset_url, sent = password_reset.issue(db, account, settings, request)
+    write_audit(
+        db, actor_id=admin.id, action="user.password_reset_requested", request=request,
+        target_type="account", target_id=str(account.id), meta={"sent": sent},
+    )
+    db.commit()
+    result = {
+        "ok": True,
+        "email": account.email,
+        "sent": sent,
+        "message": "重置密码邮件已发送。" if sent else "邮件未发出（SMTP 未配置），请检查服务配置。",
+    }
+    if not sent and not settings.is_production:
+        result["reset_url"] = reset_url
+    return result
 
 
 @admin_router.post("/users/{account_id}/status")
@@ -2630,6 +2667,51 @@ def _backup_view(item: dict) -> dict:
     }
 
 
+@admin_router.get("/backup-config", response_model=BackupConfigView)
+def get_backup_config_settings(
+    request: Request,
+    _staff: Account = Depends(require_staff),
+    db: Session = Depends(get_db),
+) -> BackupConfigView:
+    """查看当前生效的定时备份策略（DB 覆盖优先于环境变量）。"""
+    cfg = runtime_config.get_backup_config(db, request.app.state.settings)
+    return BackupConfigView(**cfg)
+
+
+@admin_router.put("/backup-config", response_model=BackupConfigView)
+def update_backup_config_settings(
+    payload: BackupConfigUpdate,
+    request: Request,
+    _admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> BackupConfigView:
+    """热改定时备份开关/间隔/通知邮箱/保留份数：写库后本进程立即生效。"""
+    settings = request.app.state.settings
+    runtime_config.set_backup_config(
+        db,
+        settings,
+        _admin.id,
+        schedule_enabled=payload.schedule_enabled,
+        interval_minutes=payload.interval_minutes,
+        email_enabled=payload.email_enabled,
+        notify_emails=payload.notify_emails,
+        retention_count=payload.retention_count,
+    )
+    write_audit(
+        db, actor_id=_admin.id, action="backup_config.update", request=request,
+        target_type="operational_setting", target_id="backup",
+        meta={
+            "schedule_enabled": payload.schedule_enabled,
+            "interval_minutes": payload.interval_minutes,
+            "email_enabled": payload.email_enabled,
+            "notify_emails": payload.notify_emails,
+            "retention_count": payload.retention_count,
+        },
+    )
+    db.commit()
+    return BackupConfigView(**runtime_config.get_backup_config(db, settings))
+
+
 @admin_router.get("/backups", response_model=BackupListView)
 def admin_list_backups(request: Request, admin: Account = Depends(require_staff)):
     settings = request.app.state.settings
@@ -2643,7 +2725,7 @@ def admin_create_backup(
     db: Session = Depends(get_db),
 ):
     settings = request.app.state.settings
-    manifest = backupsvc.create_backup(settings, trigger="manual")
+    manifest = backupsvc.create_backup(settings, trigger="manual", db=db)
     view = _backup_view(manifest)
     write_audit(
         db, actor_id=admin.id, action="db.backup.created", request=request,

@@ -104,6 +104,34 @@ function openBan(row: UserRow, mode: 'ban' | 'unban') {
   banOpen.value = true
 }
 
+const resetOpen = ref(false)
+const resetTarget = ref<UserRow | null>(null)
+const resetResult = ref<{ sent: boolean; message: string; reset_url?: string } | null>(null)
+const resetError = ref('')
+const resetSubmitting = ref(false)
+
+function openReset(row: UserRow) {
+  resetTarget.value = row
+  resetResult.value = null
+  resetError.value = ''
+  resetOpen.value = true
+}
+
+async function submitReset() {
+  if (!resetTarget.value) return
+  resetSubmitting.value = true
+  resetError.value = ''
+  try {
+    const result = await api.resetUserPassword(resetTarget.value.id)
+    resetResult.value = result
+    pushToast(result.message)
+  } catch (e) {
+    resetError.value = errorMessage(e)
+  } finally {
+    resetSubmitting.value = false
+  }
+}
+
 const deleteOpen = ref(false)
 const deleteTarget = ref<UserRow | null>(null)
 const deleteError = ref('')
@@ -209,7 +237,7 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
               <th>订阅</th>
               <th style="width: 80px">设备</th>
               <th style="width: 128px">创建时间</th>
-              <th style="width: 150px">操作</th>
+              <th style="width: 205px">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -233,6 +261,7 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
               <td>
                 <div class="actions">
                   <button class="btn ghost sm" @click="openDetail(row)">详情</button>
+                  <button v-if="canWrite && row.email" class="btn ghost sm" @click="openReset(row)">重置密码</button>
                   <button v-if="canWrite && row.status === 'active'" class="btn danger-ghost sm" @click="openBan(row, 'ban')">封禁</button>
                   <button v-else-if="canWrite && row.status === 'banned'" class="btn ghost sm" @click="openBan(row, 'unban')">解封</button>
                   <button v-if="canWrite && row.role !== 'admin'" class="btn danger-ghost sm" @click="openDelete(row)">删除</button>
@@ -327,6 +356,8 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
     </template>
     <template #footer>
       <button class="btn ghost sm" @click="detailOpen = false">关闭</button>
+      <button v-if="canWrite && detailAccount && detailAccount.email" class="btn ghost sm"
+        @click="detailRow && openReset(detailRow); detailOpen = false">重置密码</button>
       <button v-if="canWrite && detailAccount && detailAccount.status === 'active'" class="btn danger-ghost sm"
         @click="detailRow && openBan(detailRow, 'ban'); detailOpen = false">封禁用户</button>
       <button v-else-if="canWrite && detailAccount && detailAccount.status === 'banned'" class="btn ghost sm"
@@ -346,6 +377,31 @@ const roleLabel: Record<string, string> = { admin: '管理员', support: '客服
       <button class="btn ghost sm" :disabled="deleteSubmitting" @click="deleteOpen = false">取消</button>
       <button class="btn danger" :disabled="deleteSubmitting" @click="submitDelete">
         {{ deleteSubmitting ? '提交中…' : '确认删除' }}
+      </button>
+    </template>
+  </Modal>
+
+  <Modal v-if="resetOpen" title="重置密码"
+    :subtitle="resetTarget ? `#${resetTarget.id} · ${accountLabel(resetTarget)}` : ''" size="narrow"
+    @close="resetOpen = false">
+    <div class="notice warn" style="margin-bottom: 14px">
+      将向该账号绑定的邮箱发送重置密码邮件。密码不会在此处显示或由人工设置，链接一次性且 30 分钟内有效。
+    </div>
+    <div class="field">
+      <label>接收邮箱</label>
+      <input class="input" :value="resetTarget?.email || '—'" disabled />
+    </div>
+    <div v-if="resetResult" class="notice" style="margin: 0">
+      {{ resetResult.message }}
+      <div v-if="resetResult.reset_url" style="margin-top: 6px; word-break: break-all">
+        本地调试链接：<a :href="resetResult.reset_url" target="_blank" rel="noopener">{{ resetResult.reset_url }}</a>
+      </div>
+    </div>
+    <div v-if="resetError" class="notice error" style="margin: 12px 0 0">{{ resetError }}</div>
+    <template #footer>
+      <button class="btn ghost sm" :disabled="resetSubmitting" @click="resetOpen = false">关闭</button>
+      <button class="btn" :disabled="resetSubmitting || !!resetResult" @click="submitReset">
+        {{ resetSubmitting ? '发送中…' : '发送重置邮件' }}
       </button>
     </template>
   </Modal>

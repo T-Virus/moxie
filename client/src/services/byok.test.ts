@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { byokHeaders, clearByokKey, getByokKey, hasByokKey, setByokKey } from './byok'
+import {
+  byokHeaders,
+  clearByokKey,
+  getByokConfig,
+  getByokKey,
+  hasByokKey,
+  setByokConfig,
+  setByokKey,
+} from './byok'
 
 class MemoryStorage {
   private data = new Map<string, string>()
@@ -51,5 +59,26 @@ describe('BYOK 会话存储', () => {
     clearByokKey()
     expect(byokHeaders()).toEqual({})
     expect(hasByokKey()).toBe(false)
+  })
+
+  it('自选模型与网关地址随请求头下发，并去掉地址尾部斜杠', () => {
+    setByokConfig({ key: 'sk-x', model: 'gpt-4o', baseUrl: 'https://api.openai.com/v1///' })
+    expect(byokHeaders()).toEqual({
+      'X-BYOK-Key': 'sk-x',
+      'X-BYOK-Model': 'gpt-4o',
+      'X-BYOK-Base-URL': 'https://api.openai.com/v1',
+    })
+    expect(getByokConfig()).toEqual({ key: 'sk-x', model: 'gpt-4o', baseUrl: 'https://api.openai.com/v1' })
+  })
+
+  it('模型/地址留空时不发对应请求头（兼容仅填 Key）', () => {
+    setByokConfig({ key: 'sk-x', model: '', baseUrl: '' })
+    expect(byokHeaders()).toEqual({ 'X-BYOK-Key': 'sk-x' })
+  })
+
+  it('兼容旧版裸 Key 存储', () => {
+    sessionStorage.setItem('mx_byok_key', 'sk-legacy')
+    expect(getByokKey()).toBe('sk-legacy')
+    expect(byokHeaders()).toEqual({ 'X-BYOK-Key': 'sk-legacy' })
   })
 })

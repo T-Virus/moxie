@@ -4,7 +4,7 @@ import { api, errorMessage } from '../api'
 import { can } from '../roles'
 import { getRole } from '../session'
 import { pushToast } from '../toast'
-import type { BackupRow } from '../types'
+import type { BackupConfig, BackupConfigInput, BackupRow } from '../types'
 import { formatNumber, formatTime } from '../ui'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
@@ -19,6 +19,73 @@ const items = ref<BackupRow[]>([])
 const restoreTarget = ref<BackupRow | null>(null)
 const restoreApply = ref(false)
 const restoreConfirm = ref('')
+
+// 定时备份策略配置
+const cfgLoading = ref(true)
+const cfgSaving = ref(false)
+const cfg = ref<BackupConfig | null>(null)
+const cfgForm = ref<BackupConfigInput>({
+  schedule_enabled: false,
+  interval_minutes: 720,
+  email_enabled: false,
+  notify_emails: '',
+  retention_count: 14,
+})
+// 间隔预设：值(分钟) → 文案；0 表示自定义
+const intervalPresets = [
+  { value: 360, label: '每 6 小时' },
+  { value: 720, label: '每 12 小时' },
+  { value: 1440, label: '每天' },
+  { value: 10080, label: '每周' },
+]
+const intervalChoice = computed(() => {
+  const m = cfgForm.value.interval_minutes
+  return intervalPresets.some((p) => p.value === m) ? m : 0
+})
+function onIntervalChoice(value: number): void {
+  if (value > 0) cfgForm.value.interval_minutes = value
+}
+
+async function loadConfig(): Promise<void> {
+  cfgLoading.value = true
+  try {
+    const data = await api.backupConfig()
+    cfg.value = data
+    cfgForm.value = {
+      schedule_enabled: data.schedule_enabled,
+      interval_minutes: data.interval_minutes,
+      email_enabled: data.email_enabled,
+      notify_emails: data.notify_emails,
+      retention_count: data.retention_count,
+    }
+  } catch (e) {
+    pushToast(errorMessage(e), 'error')
+  } finally {
+    cfgLoading.value = false
+  }
+}
+
+async function saveConfig(): Promise<void> {
+  cfgSaving.value = true
+  try {
+    const saved = await api.updateBackupConfig({ ...cfgForm.value })
+    cfg.value = saved
+    cfgForm.value.notify_emails = saved.notify_emails
+    pushToast('定时备份配置已保存并生效')
+  } catch (e) {
+    pushToast(errorMessage(e), 'error')
+  } finally {
+    cfgSaving.value = false
+  }
+}
+
+function configSummary(): string {
+  if (!cfg.value) return ''
+  const interval =
+    intervalPresets.find((p) => p.value === cfg.value!.interval_minutes)?.label ||
+    `每 ${cfg.value.interval_minutes} 分钟`
+  return `${cfg.value.schedule_enabled ? '已开启' : '已关闭'} · ${interval} · 保留 ${cfg.value.retention_count} 份`
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -117,20 +184,93 @@ function emailText(row: BackupRow): string {
   return { sent: '邮件已发送', fake: '模拟发送', skipped: '未发送', failed: '发送失败', pending: '发送中' }[status] || status
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadConfig()
+})
 </script>
 
 <template>
   <div>
     <PageHeader
       title="备份管理"
-      desc="数据库全量备份、下载与恢复。定时备份由服务端 SCHEDULER + BACKUP_* 环境变量控制；备份完成后自动发送通知邮件。"
+      desc="数据库全量备份、下载与恢复。定时备份策略可在此配置，由独立 scheduler 服务按间隔自动执行，完成后发送通知邮件。"
     >
       <button class="btn" :disabled="!canWrite || busy === 'create'" @click="createBackup">
         <Icon name="refresh" :size="14" />{{ busy === 'create' ? '备份中…' : '立即备份' }}
       </button>
-      <button class="btn ghost" :disabled="loading" @click="load">刷新</button>
+      <button class="btn ghost" :disabled="loading || cfgLoading" @click="load(); loadConfig()">刷新</button>
     </PageHeader>
+
+    <div class="card config-card">
+      <div class="config-head">
+        <div>
+          <h3>定时备份策略</h3>
+          <p class="muted small">
+            {{ cfgLoading ? '加载中…' : configSummary() }}
+            <span v-if="cfg && cfg.source === 'database'" class="badge info">后台配置</span>
+            <span v-else class="badge muted">环境变量默认</span>
+          </p>
+        </div>
+        <button
+          class="btn sm"
+          :disabled="!canWrite || cfgSaving || cfgLoading"
+          @click="saveConfig"
+        >
+          {{ cfgSaving ? '保存中…' : '保存配置' }}
+        </button>
+      </div>
+      <div v-if="cfgLoading" class="muted small">正在读取配置…</div>
+      <div v-else class="config-grid">
+        <label class="field">
+          <span>启用定时备份</span>
+          <select v-model="cfgForm.schedule_enabled" :disabled="!canWrite">
+            <option :value="true">开启（scheduler 自动执行）</option>
+            <option :value="false">关闭</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>备份间隔</span>
+          <select
+            :value="intervalChoice"
+            :disabled="!canWrite || !cfgForm.schedule_enabled"
+            @change="onIntervalChoice(+($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="p in intervalPresets" :key="p.value" :value="p.value">{{ p.label }}</option>
+            <option :value="0">自定义（分钟）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>自定义间隔（分钟，5–10080）</span>
+          <input
+            v-model.number="cfgForm.interval_minutes"
+            type="number"
+            min="5"
+            max="10080"
+            :disabled="!canWrite || !cfgForm.schedule_enabled || intervalChoice > 0"
+          />
+          <small>留用预设时此项只读；选择「自定义」后可填 5–10080 分钟。</small>
+        </label>
+        <label class="field">
+          <span>保留份数（1–90）</span>
+          <input v-model.number="cfgForm.retention_count" type="number" min="1" max="90" :disabled="!canWrite" />
+        </label>
+        <label class="field config-span">
+          <span>通知邮箱（逗号分隔，最多 20 个）</span>
+          <input
+            v-model="cfgForm.notify_emails"
+            type="text"
+            placeholder="ops@example.com, admin@example.com"
+            :disabled="!canWrite"
+          />
+          <small>复用服务端 SMTP 配置发送；留空则只落盘不发邮件。</small>
+        </label>
+        <label class="field config-span inline">
+          <input v-model="cfgForm.email_enabled" type="checkbox" :disabled="!canWrite" />
+          <span>备份完成后发送通知邮件</span>
+        </label>
+      </div>
+    </div>
 
     <div class="card notice">
       <strong>恢复边界</strong>
@@ -213,6 +353,16 @@ onMounted(load)
 </template>
 
 <style scoped>
+.config-card { margin-bottom: 16px; }
+.config-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.config-head h3 { margin: 0 0 4px; font-size: 15px; }
+.config-head .badge { margin-left: 8px; }
+.config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.config-span { grid-column: 1 / -1; }
+.config-grid .field { display: flex; flex-direction: column; gap: 6px; }
+.config-grid .field.inline { flex-direction: row; align-items: center; gap: 8px; }
+.config-grid input[type='checkbox'] { width: auto; }
+@media (max-width: 720px) { .config-grid { grid-template-columns: 1fr; } }
 .notice p { margin: 6px 0 0; line-height: 1.6; }
 .notice code { color: var(--c-primary, #4f8ef7); }
 .table-card { overflow-x: auto; }

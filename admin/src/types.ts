@@ -329,6 +329,22 @@ export interface BackupRow {
   email: BackupEmailStatus
 }
 
+export interface BackupConfig {
+  schedule_enabled: boolean
+  interval_minutes: number
+  email_enabled: boolean
+  notify_emails: string
+  retention_count: number
+  source: string
+  updated_at?: string | null
+  updated_by?: number | null
+}
+
+export type BackupConfigInput = Pick<
+  BackupConfig,
+  'schedule_enabled' | 'interval_minutes' | 'email_enabled' | 'notify_emails' | 'retention_count'
+>
+
 export interface BackupRestoreResult {
   id: string
   mode: 'staged' | 'applied'

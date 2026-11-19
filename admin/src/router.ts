@@ -13,6 +13,18 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '登录', public: true },
   },
   {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: () => import('./views/ForgotPassword.vue'),
+    meta: { title: '找回密码', public: true },
+  },
+  {
+    path: '/reset-password',
+    name: 'reset-password',
+    component: () => import('./views/ResetPassword.vue'),
+    meta: { title: '设置新密码', public: true },
+  },
+  {
     path: '/',
     component: () => import('./components/AppShell.vue'),
     children: [

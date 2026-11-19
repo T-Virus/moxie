@@ -161,8 +161,13 @@
             class="run-card"
             :aria-label="`进入《${item.title}》工作台`"
           >
-            <span class="run-card__cover" :class="`is-${item.mode}`" aria-hidden="true">
-              {{ titleInitial(item.title) }}
+            <span class="run-card__cover" :class="`is-${item.mode}`">
+              <img
+                v-if="coverUrls[item.run_id]"
+                :src="coverUrls[item.run_id]"
+                :alt="`《${item.title}》封面`"
+              />
+              <span v-else aria-hidden="true">{{ titleInitial(item.title) }}</span>
             </span>
 
             <div class="run-card__body">
@@ -215,7 +220,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Audience, RunDetail, RunLength } from '@/types'
-import { listRuns } from '@/services/agentApi'
+import { fetchRunCover, listRuns } from '@/services/agentApi'
 import { useRunFeed } from '@/composables/useRunFeed'
 import { ApiError } from '@/services/http'
 import { resetSession, session } from '@/stores/session'
@@ -309,6 +314,48 @@ const pagedRuns = computed(() =>
 function goPage(next: number): void {
   page.value = Math.min(Math.max(1, next), pageCount.value)
 }
+
+/* ---- 封面缩略图：封面接口需鉴权，拉取后转 blob URL 展示 ---- */
+const coverUrls = reactive<Record<string, string>>({})
+const coverPaths = reactive<Record<string, string>>({})
+let coverLoadSeq = 0
+
+function releaseCover(runId: string): void {
+  const url = coverUrls[runId]
+  if (url) URL.revokeObjectURL(url)
+  delete coverUrls[runId]
+  delete coverPaths[runId]
+}
+
+function syncCoverImages(): void {
+  const seq = ++coverLoadSeq
+  const wanted = new Set(pagedRuns.value.map((item) => item.run_id))
+  for (const runId of Object.keys(coverUrls)) {
+    if (!wanted.has(runId)) releaseCover(runId)
+  }
+  for (const item of pagedRuns.value) {
+    const path = item.cover_url || ''
+    if (!path) {
+      releaseCover(item.run_id)
+      continue
+    }
+    if (coverPaths[item.run_id] === path && coverUrls[item.run_id]) continue
+    releaseCover(item.run_id)
+    coverPaths[item.run_id] = path
+    void fetchRunCover(path)
+      .then((file) => {
+        if (seq !== coverLoadSeq || coverPaths[item.run_id] !== path) return
+        coverUrls[item.run_id] = URL.createObjectURL(file)
+      })
+      .catch(() => {
+        if (coverPaths[item.run_id] === path) delete coverPaths[item.run_id]
+      })
+  }
+}
+
+watch(pagedRuns, () => {
+  void syncCoverImages()
+})
 
 function readFiltersFromQuery(): void {
   const query = route.query
@@ -516,6 +563,7 @@ onUnmounted(() => {
   window.clearTimeout(searchTimer)
   runFeed.stop()
   document.removeEventListener('pointerdown', onDocPointerDown)
+  for (const runId of Object.keys(coverUrls)) releaseCover(runId)
 })
 </script>
 
@@ -836,7 +884,7 @@ onUnmounted(() => {
   outline-offset: 2px;
 }
 
-/* 无封面数据时，用书名首字 + 模式色生成封面块 */
+/* 有封面时直接展示封面图；无封面时用书名首字 + 模式色生成封面块 */
 .run-card__cover {
   flex: none;
   width: 52px;
@@ -844,6 +892,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   border-radius: 8px;
   background: linear-gradient(140deg, #0f766e, #2dd4bf);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
@@ -852,6 +901,13 @@ onUnmounted(() => {
   font-weight: 700;
   line-height: 1;
   user-select: none;
+}
+
+.run-card__cover img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .run-card__cover.is-hot {

@@ -21,6 +21,7 @@ from ..errors import ApiError
 from ..metrics import increment
 from ..models import AgentRun, AgentRunStep, AuditLog, UsageEvent
 from ..services.model_config import StepModel, resolve_step_model
+from ..services.cover import generate_cover as generate_run_cover
 from ..services.model_gateway import ModelResult
 from ..services.quota import QuotaService
 from .artifacts import prefix_of, write_artifacts
@@ -1159,6 +1160,10 @@ def execute_agent_run(
             level="warning",
         )
 
+    # 封面方案节点只产出 prompt/版式；三种模式都在成功后统一自动出图，
+    # 工作台的作品信息页与作品列表才能直接看到封面，而不是只有一段方案文本。
+    _auto_generate_cover(session, run, state, settings=settings, storage=storage)
+
     try:
         write_artifacts(storage, view, state)
     except Exception as exc:  # noqa: BLE001
@@ -1278,6 +1283,77 @@ def _flush_node_logs(
     for level, message in logs:
         append_event(session, run_id, node_id, message, level=level)
     logs.clear()
+
+
+def _auto_generate_cover(
+    session: Session,
+    run: AgentRun,
+    state: dict,
+    *,
+    settings: Settings,
+    storage,
+) -> None:
+    """三模式共用：把 cover_plan 节点的方案真正出图并写入 run.meta。
+
+    cover_plan 是纯函数技能，只产出 prompt/风格/版式；真正的图片生成有网络与
+    存储副作用，放在所有 LLM 节点成功后执行。失败不阻断正文等产物交付。
+    """
+    if not getattr(settings, "agent_cover_auto_generate", True):
+        return
+    if storage is None:
+        return
+
+    existing = ((run.meta or {}).get("cover") or {})
+    if existing.get("key"):
+        try:
+            if storage.exists(str(existing["key"])):
+                return
+        except Exception:  # noqa: BLE001 - 存储探测失败时按无封面处理，继续生成
+            pass
+
+    plan = ((state.get("cover_plan") or {}).get("plan") or {})
+    if not isinstance(plan, dict) or not plan:
+        append_event(session, run.id, "cover_plan", "封面方案缺失，跳过自动出图", level="warning")
+        return
+
+    outline = dict(state.get("outline") or {})
+    outline.update(dict(outline.get("book_meta") or {}))
+    author = str(plan.get("author") or "").strip()
+    if author:
+        outline["author"] = author
+
+    append_event(session, run.id, "cover_plan", "封面方案已就绪，正在自动生成封面图")
+    run.updated_at = utcnow()
+    session.flush()
+    try:
+        cover = generate_run_cover(
+            run=run,
+            outline=outline,
+            settings=settings,
+            storage=storage,
+            prompt=str(plan.get("prompt") or ""),
+            style=str(plan.get("style") or "gold"),
+            layout=str(plan.get("layout") or "top"),
+            width=plan.get("width"),
+            height=plan.get("height"),
+            session=session,
+        )
+    except Exception as exc:  # noqa: BLE001 - 封面失败不影响整本交付
+        append_event(
+            session,
+            run.id,
+            "cover_plan",
+            f"封面自动出图失败，已跳过：{type(exc).__name__}: {exc}"[:240],
+            level="warning",
+        )
+        return
+    append_event(
+        session,
+        run.id,
+        "cover_plan",
+        f"封面已自动生成（来源：{cover.get('source') or 'unknown'}）",
+    )
+    session.flush()
 
 
 def _record_usage_item(
