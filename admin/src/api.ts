@@ -11,6 +11,8 @@ import {
   type PayloadSession,
 } from './payloadCrypto'
 import type {
+  AdminPlanRow,
+  PlanUpdatePayload,
   AccountDeletionListResponse, AccountDeletionRequestView, AdminDeadLettersResponse, AdminFeedEvent, AdminPerformance, AdminTaskReplayBatchResponse, AdminTaskReplayResult, AlertRow, AuditRow, BackupConfig, BackupConfigInput, BackupRestoreResult, BackupRow, FourLedgerReconcileReport, ListResult, LoginResponse, ModelUsageSummary, NotificationDetail, NotificationRow, OrderRow,
   NotificationBatchResult, PlanRow, PushReceiptHistory, ReconcileReport, RefundRow, RunEvent, SkillsCatalog,
   SubscriptionRow, TaskDashboard, TaskDetail, TaskRow, TelemetryCanary, TelemetryConfig,
@@ -729,6 +731,15 @@ export const api = {
   },
   plans() {
     return request<{ plans: PlanRow[] }>('/v1/plans', { auth: false })
+  },
+  adminPlans() {
+    return request<{ plans: AdminPlanRow[] }>('/v1/admin/plans')
+  },
+  updatePlan(code: string, body: PlanUpdatePayload) {
+    return request<AdminPlanRow>(`/v1/admin/plans/${encodeURIComponent(code)}`, {
+      method: 'PATCH',
+      body,
+    })
   },
   renewalReminders() {
     return request<any>('/v1/admin/renewal-reminders')

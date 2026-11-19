@@ -154,7 +154,9 @@ services:
       S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change-me-minio-secret}
       S3_SECURE: "false"
-    command: ["rq", "worker", "moxie", "--url", "redis://redis:6379/0"]
+    command: ["python", "-m", "app.worker.rq_worker"]
+    expose:
+      - "9101"
     volumes:
       - ../src:/src:ro
       - ../input:/data/input:ro

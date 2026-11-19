@@ -507,6 +507,27 @@ export interface PlanRow {
   entitlements?: { key: string; limit: number; unit: string; reset_period?: string }[]
 }
 
+/** 后台套餐：比公开列表多 active/status，供套餐管理页展示与编辑。 */
+export interface AdminPlanRow {
+  code: string
+  name: string
+  price_month_cents: number
+  price_year_cents: number
+  currency: string
+  features?: Record<string, unknown>
+  active: boolean
+  status: string
+  entitlements: { key: string; limit: number; unit: string; reset_period?: string }[]
+}
+
+export interface PlanUpdatePayload {
+  name?: string
+  price_month_cents?: number
+  price_year_cents?: number
+  active?: boolean
+  entitlements?: Record<string, number>
+}
+
 /** 可观测配置：前端错误上报的采样率、去重窗口与 zset 容量（后台可热改）。 */
 export interface TelemetryCanary {
   sample_rate?: number | null

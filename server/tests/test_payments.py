@@ -306,7 +306,7 @@ def test_upgrade_proration_and_activation(client, headers, app, settings):
     order = upgraded.json()["order"]
     assert order["kind"] == "upgrade"
     assert order["status"] == "pending"
-    assert 3800 <= order["amount_cents"] <= 4000
+    assert 480 <= order["amount_cents"] <= 500
     assert order["meta"]["previous_plan_code"] == "creator"
 
     params = upgraded.json()["payment"]["params"]

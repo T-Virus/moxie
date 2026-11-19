@@ -73,6 +73,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: '/users', label: '用户管理', permission: 'users:read', group: '业务管理' },
   { path: '/account-deletions', label: '注销申请', permission: 'users:read', group: '业务管理' },
   { path: '/subscriptions', label: '订阅与权益', permission: 'subscriptions:read', group: '业务管理' },
+  { path: '/plans', label: '套餐管理', permission: 'subscriptions:read', group: '业务管理' },
   { path: '/orders', label: '订单与退款', permission: 'orders:read', group: '业务管理' },
   { path: '/invoices', label: '发票', permission: 'invoices:read', group: '业务管理' },
   { path: '/reconcile', label: '对账', permission: 'reconcile:read', group: '业务管理' },

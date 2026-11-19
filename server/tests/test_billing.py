@@ -56,8 +56,8 @@ def test_plans_are_public(client):
     assert response.status_code == 200
     plans = response.json()["plans"]
     assert [plan["code"] for plan in plans] == ["experience", "creator", "professional"]
-    assert [plan["price_month_cents"] for plan in plans] == [990, 2990, 6990]
-    assert [plan["price_year_cents"] for plan in plans] == [9900, 29900, 69900]
+    assert [plan["price_month_cents"] for plan in plans] == [0, 100, 600]
+    assert [plan["price_year_cents"] for plan in plans] == [0, 1000, 6000]
     assert all(plan["currency"] == "CNY" for plan in plans)
     matrix = {
         plan["code"]: {item["key"]: item["limit"] for item in plan["entitlements"]}
@@ -73,6 +73,50 @@ def test_plans_are_public(client):
     assert matrix["professional"]["adapt_chapters"] == 400
     assert matrix["professional"]["managed_chars"] == 2000000
     assert [matrix[code]["concurrency"] for code in ("experience", "creator", "professional")] == [1, 2, 4]
+
+
+def test_free_plan_activates_without_payment_provider(client, headers):
+    """体验版免费：不传渠道也能直接开通，订单落 paid 便于审计。"""
+    created = client.post(
+        "/v1/subscriptions",
+        headers={**headers, "Idempotency-Key": "free-plan"},
+        json={"plan_code": "experience", "cycle": "month"},
+    )
+    assert created.status_code == 201, created.text
+    data = created.json()
+    assert data["payment"]["amount_cents"] == 0
+    assert data["payment"]["params"] == {}
+    assert data["order"]["status"] == "paid"
+
+    current = client.get("/v1/subscriptions/current", headers=headers).json()
+    assert current["plan"]["code"] == "experience"
+    assert current["status"] == "active"
+
+
+def test_paid_plan_still_requires_provider(client, headers):
+    response = client.post(
+        "/v1/subscriptions",
+        headers={**headers, "Idempotency-Key": "paid-no-provider"},
+        json={"plan_code": "creator", "cycle": "month"},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
+def test_paid_purchase_replaces_free_subscription(client, headers):
+    """免费套餐用户购买付费套餐：自动结束免费订阅，不报 already_subscribed。"""
+    free = client.post(
+        "/v1/subscriptions",
+        headers={**headers, "Idempotency-Key": "free-then-paid"},
+        json={"plan_code": "experience", "cycle": "month"},
+    )
+    assert free.status_code == 201, free.text
+
+    paid = subscribe(client, headers)
+    assert paid["subscription"]["plan"]["code"] == "creator"
+    current = client.get("/v1/subscriptions/current", headers=headers).json()
+    assert current["plan"]["code"] == "creator"
+    assert current["status"] == "active"
 
 
 def test_inactive_plan_cannot_be_ordered(app, client, headers):
@@ -118,25 +162,25 @@ def test_ensure_plans_is_idempotent(app, client):
             ).all()
         }
         assert len({plan.code for plan in plans}) == len(plans)
-        assert by_code["creator"].price_month_cents == 2990
-        assert by_code["creator"].price_year_cents == 29900
+        assert by_code["creator"].price_month_cents == 100
+        assert by_code["creator"].price_year_cents == 1000
         assert by_code["creator"].active is True
         assert {key: row.limit_value for key, row in rows.items()}["books_month"] == 5
         assert len(rows) == 7
 
 
 def test_legacy_subscription_survives_plan_delisting(app, client, headers):
-    from app.seed import ensure_plans
-
     with db_session(app) as session:
         _seed_legacy_plan(session, active=True)
     result = subscribe(client, headers, plan_code="studio_managed")
     subscription_id = result["subscription"]["id"]
 
     with db_session(app) as session:
-        ensure_plans(session)
+        # 管理端下架套餐（启动种子不再自动改上下架，见 test_admin_plans）
         old = session.scalar(select(Plan).where(Plan.code == "studio_managed"))
-        assert old.active is False
+        assert old is not None
+        old.active = False
+        session.commit()
         assert session.get(Subscription, subscription_id).status == "active"
 
     current = client.get("/v1/subscriptions/current", headers=headers).json()

@@ -17,7 +17,8 @@ def subscribe(
     )
     assert response.status_code == 201, response.text
     data = response.json()
-    if pay:
+    # 免费套餐没有支付参数：服务端已直接激活，无需再模拟回调
+    if pay and data["payment"]["amount_cents"] > 0:
         params = data["payment"]["params"]
         callback = client.post(
             params["webhook_path"],

@@ -44,6 +44,12 @@ export interface CreateRunOptions {
   adaptation_style?: string
   /** 参考改编的额外要求 */
   adaptation_extra?: string
+  /** 云端正文分段：从第 N 章开始写（与 body_segment 二选一） */
+  body_start?: number
+  /** 本次窗口写多少章；留空按服务端默认（黄金三章） */
+  body_chapters?: number
+  /** 按窗口大小取第 K 段（与 body_start 二选一） */
+  body_segment?: number
 }
 
 /** 参考改编的权利声明，随加密 body 提交，与服务端 RightsDeclaration 对齐 */

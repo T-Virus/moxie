@@ -83,7 +83,7 @@
             <div class="account__order-main">
               <span class="account__order-title">
                 订单 #{{ order.id }}
-                <span class="account__order-status" :class="`is-${order.status}`">{{ orderStatusLabel(order.status) }}</span>
+                <span class="account__order-status" :class="`is-${order.status}`">{{ orderStatusText(order) }}</span>
               </span>
               <span class="account__order-meta">
                 {{ orderKindLabel(order.kind) }} · {{ formatMoney(order.amount_cents, order.currency) }} ·
@@ -290,14 +290,29 @@ const refundReason = ref('')
 const refundSubmitting = ref(false)
 const refundError = ref('')
 
+// 免费订单（金额 0）没有可退金额，不参与退款流程
+function isFreeOrder(o: UserOrder): boolean {
+  return o.amount_cents <= 0
+}
+
 // 可申请退款：已支付/部分退款且未全额退
 function isRefundable(o: UserOrder): boolean {
-  return ['paid', 'partially_refunded', 'refunded'].includes(o.status) && o.refunded_cents < o.amount_cents
+  return (
+    !isFreeOrder(o) &&
+    ['paid', 'partially_refunded', 'refunded'].includes(o.status) &&
+    o.refunded_cents < o.amount_cents
+  )
 }
 const refundableOrders = computed(() => orders.value.filter(isRefundable))
 
+// 免费订单不显示「已支付」，避免看起来像一笔已付款交易
+function orderStatusText(o: UserOrder): string {
+  return isFreeOrder(o) ? '免费开通' : orderStatusLabel(o.status)
+}
+
 // 不可退订单的说明文案，让用户明白为什么没有「申请退款」按钮
 function orderUnavailableText(o: UserOrder): string {
+  if (isFreeOrder(o)) return '免费订单，无需退款'
   if (o.status === 'pending') return '待支付，付款成功后可申请退款'
   if (o.status === 'canceled') return '已取消，无法退款'
   if (o.refunded_cents >= o.amount_cents) return '已全额退款'

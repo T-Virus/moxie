@@ -22,9 +22,50 @@ async function load(): Promise<void> {
   }
 }
 
-function list(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map((item) => String(item))
-  return []
+/* ---- 四维连续性核查 ------------------------------------------------------
+ * continuity_check.json 的 checks 是结构化对象
+ * （dimension/item/status/evidence/source）；旧数据可能是纯字符串，
+ * 这里统一归一化后渲染，避免把对象直接 String() 成 [object Object]。
+ */
+interface ContinuityCheck {
+  dimension: string
+  item: string
+  status: string
+  evidence: string
+}
+
+const DIMENSION_LABELS: Record<string, string> = {
+  character: '人物',
+  foreshadow: '伏笔',
+  timeline: '时间线',
+  setting: '设定',
+}
+
+function dimensionLabel(value: string): string {
+  return DIMENSION_LABELS[value] || value || '综合'
+}
+
+function statusMeta(status: string): { label: string; cls: string } {
+  const key = String(status || '').toLowerCase()
+  if (key === 'conflict') return { label: '冲突', cls: 'badge--danger' }
+  if (key === 'pass') return { label: '通过', cls: 'badge--success' }
+  if (key === 'unknown') return { label: '待确认', cls: 'badge--warn' }
+  return { label: key || '待确认', cls: '' }
+}
+
+function normalizeCheck(raw: unknown): ContinuityCheck {
+  if (typeof raw === 'string') {
+    return { dimension: '', item: raw, status: '', evidence: '' }
+  }
+  const row = (raw || {}) as Record<string, unknown>
+  const pick = (key: string): string =>
+    typeof row[key] === 'string' ? (row[key] as string) : row[key] == null ? '' : String(row[key])
+  return {
+    dimension: pick('dimension'),
+    item: pick('item') || pick('subject') || pick('message'),
+    status: pick('status'),
+    evidence: pick('evidence') || pick('detail'),
+  }
 }
 
 const coverPlanText = computed<string>(() => {
@@ -79,8 +120,13 @@ const riskCounts = computed(() => {
   }
 })
 
-const continuityChecks = computed(() =>
-  list((report.value?.continuity || {}).checks),
+const continuityChecks = computed<ContinuityCheck[]>(() => {
+  const raw = (report.value?.continuity || {}).checks
+  if (!Array.isArray(raw)) return []
+  return raw.map(normalizeCheck).filter((item) => item.item || item.evidence)
+})
+const continuityConflicts = computed(
+  () => continuityChecks.value.filter((item) => item.status.toLowerCase() === 'conflict').length,
 )
 
 onMounted(() => void load())
@@ -214,11 +260,26 @@ watch(() => props.run?.run_id, () => void load())
           <span class="hr-card__bar hr-card__bar--violet" aria-hidden="true" />
           <h3>四维连续性核查</h3>
           <span class="hr-card__count">{{ continuityChecks.length }}</span>
+          <span v-if="continuityConflicts" class="badge badge--danger">冲突 {{ continuityConflicts }}</span>
         </header>
-        <ul class="hr-numbered hr-numbered--plain">
-          <li v-for="(item, index) in continuityChecks" :key="index">
+        <ul class="hr-checks">
+          <li
+            v-for="(item, index) in continuityChecks"
+            :key="index"
+            class="hr-check"
+            :class="{ 'is-conflict': item.status.toLowerCase() === 'conflict' }"
+          >
             <span class="hr-numbered__no hr-numbered__no--violet">{{ index + 1 }}</span>
-            <span class="hr-numbered__text">{{ item }}</span>
+            <div class="hr-check__body">
+              <div class="hr-check__top">
+                <span class="hr-check__dim">{{ dimensionLabel(item.dimension) }}</span>
+                <span class="hr-check__item">{{ item.item || '未命名检查项' }}</span>
+                <span class="badge hr-check__status" :class="statusMeta(item.status).cls">
+                  {{ statusMeta(item.status).label }}
+                </span>
+              </div>
+              <p v-if="item.evidence" class="hr-check__evidence">{{ item.evidence }}</p>
+            </div>
           </li>
         </ul>
       </section>
@@ -567,6 +628,63 @@ watch(() => props.run?.run_id, () => void load())
   line-height: 1.75;
   color: var(--color-text-2);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 连续性核查 ---------- */
+.hr-checks {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  display: flex;
+  flex-direction: column;
+}
+.hr-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px dashed var(--color-line);
+}
+.hr-check:last-child {
+  border-bottom: none;
+}
+.hr-check__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.hr-check__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hr-check__dim {
+  flex: none;
+  font-size: 12px;
+  color: var(--color-accent);
+  background: #f2ebff;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+.hr-check__item {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.hr-check__status {
+  flex: none;
+}
+.hr-check__evidence {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text-3);
   overflow-wrap: anywhere;
 }
 

@@ -142,6 +142,16 @@ class AgentRunOptions(AppModel):
     sequel_chapters: int | None = Field(default=None, ge=0, le=200)
     adaptation_style: str | None = Field(default=None, max_length=300)
     adaptation_extra: str | None = Field(default=None, max_length=1000)
+    # 云端正文分段调度：从第 N 章起写 M 章，或按窗口大小取第 K 段（二选一）
+    body_start: int | None = Field(default=None, ge=1, le=5000)
+    body_chapters: int | None = Field(default=None, ge=1, le=2000)
+    body_segment: int | None = Field(default=None, ge=1, le=5000)
+
+    @model_validator(mode="after")
+    def _body_window_exclusive(self):
+        if self.body_start is not None and self.body_segment is not None:
+            raise ValueError("body_start 与 body_segment 只能二选一")
+        return self
 
 
 class RightsDeclaration(AppModel):
@@ -266,7 +276,8 @@ class AgentCoverRequest(AppModel):
 class SubscribeRequest(AppModel):
     plan_code: str = Field(min_length=2, max_length=64)
     cycle: Literal["month", "year"] = "month"
-    provider: Literal["mock", "fake", "wechat", "alipay", "stripe"]
+    # 付费套餐必须显式传渠道（API 层校验）；免费套餐可不传
+    provider: Literal["mock", "fake", "wechat", "alipay", "stripe"] | None = None
     idempotency_key: str | None = Field(default=None, max_length=200)
     # 渠道上下文：微信 JSAPI 需要 openid；scene 覆盖默认支付场景
     openid: str | None = Field(default=None, max_length=128)
@@ -279,7 +290,8 @@ class CancelSubscriptionRequest(AppModel):
 
 class RenewRequest(AppModel):
     cycle: Literal["month", "year"] = "month"
-    provider: Literal["mock", "fake", "wechat", "alipay", "stripe"]
+    # 免费套餐续期不需要渠道；付费套餐由 API 层强制校验
+    provider: Literal["mock", "fake", "wechat", "alipay", "stripe"] | None = None
     idempotency_key: str | None = Field(default=None, max_length=200)
     openid: str | None = Field(default=None, max_length=128)
     scene: str | None = Field(default=None, max_length=16)
@@ -684,6 +696,17 @@ class AdminPlanView(PlanView):
 
 class AdminPlansResponse(_Base):
     plans: list[AdminPlanView]
+
+
+class AdminPlanUpdate(AppModel):
+    """后台编辑套餐：只允许改既有字段，新增/删除套餐仍走代码与迁移。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    price_month_cents: int | None = Field(default=None, ge=0, le=10_000_000)
+    price_year_cents: int | None = Field(default=None, ge=0, le=100_000_000)
+    active: bool | None = None
+    # key 必须已存在；-1 表示不限量（与额度校验口径一致）
+    entitlements: dict[str, int] | None = Field(default=None, max_length=32)
 
 
 class QuotaPlanView(_Base):

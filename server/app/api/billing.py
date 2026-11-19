@@ -127,32 +127,56 @@ def create_subscription(
     settings = request.app.state.settings
     idempotency_key = request.headers.get("idempotency-key") or payload.idempotency_key or f"sub:{uuid.uuid4()}"
     plan = subsvc.find_plan_by_code(db, payload.plan_code)
+    amount = subsvc.plan_price(plan, payload.cycle)
+    # 付费套餐必须显式选择渠道（生产环境不能默认落到 mock）；免费套餐无需渠道
+    if amount > 0 and not payload.provider:
+        raise ApiError(422, "invalid_request", "付费套餐必须选择支付渠道")
+    # 免费套餐升付费：先结束免费订阅，否则会被 already_subscribed 拦截。
+    # 异常时事务会回滚，不会丢免费订阅。
+    active = subsvc.get_active_subscription(db, auth.account.id)
+    if active is not None:
+        current_plan = subsvc.get_plan(db, active.plan_id)
+        if current_plan is not None and current_plan.price_month_cents == 0 and amount > 0:
+            subsvc.cancel_subscription(db, active, immediate=True)
+            db.flush()
+    provider = payload.provider or "free"
     subscription, order = subsvc.create_subscription_order(
         db,
         account_id=auth.account.id,
         plan=plan,
         cycle=payload.cycle,
-        provider=payload.provider,
+        provider=provider,
         idempotency_key=idempotency_key,
     )
-    intent = get_provider(payload.provider, settings).create_payment(
-        order, {"openid": payload.openid, "scene": payload.scene}
-    )
+    if order.amount_cents == 0:
+        # 免费套餐：跳过支付渠道，直接生效（订单落 paid 便于审计）
+        subsvc.activate_paid_order(db, order, provider_txn_id="free")
+        payment = {
+            "provider": provider,
+            "amount_cents": 0,
+            "currency": order.currency,
+            "params": {},
+        }
+    else:
+        intent = get_provider(provider, settings).create_payment(
+            order, {"openid": payload.openid, "scene": payload.scene}
+        )
+        payment = {
+            "provider": intent.provider,
+            "amount_cents": intent.amount_cents,
+            "currency": intent.currency,
+            "params": intent.params,
+        }
     write_audit(db, actor_id=auth.account.id, action="subscription.create", request=request,
                 target_type="subscription", target_id=subscription.id,
-                meta={"plan": plan.code, "cycle": payload.cycle, "provider": payload.provider})
+                meta={"plan": plan.code, "cycle": payload.cycle, "provider": provider})
     db.commit()
     db.refresh(subscription)
     db.refresh(order)
     return {
         "subscription": _subscription_view(db, subscription),
         "order": _order_view(order),
-        "payment": {
-            "provider": intent.provider,
-            "amount_cents": intent.amount_cents,
-            "currency": intent.currency,
-            "params": intent.params,
-        },
+        "payment": payment,
     }
 
 
@@ -229,25 +253,39 @@ def renew(
     if sub is None:
         raise ApiError(404, "subscription_not_found", "订阅不存在")
     idempotency_key = request.headers.get("idempotency-key") or payload.idempotency_key or f"renew:{uuid.uuid4()}"
+    plan = subsvc.get_plan(db, sub.plan_id)
+    if subsvc.plan_price(plan, payload.cycle) > 0 and not payload.provider:
+        raise ApiError(422, "invalid_request", "付费套餐续期必须选择支付渠道")
+    provider = payload.provider or "free"
     order = subsvc.create_renewal_order(
-        db, sub=sub, cycle=payload.cycle, provider=payload.provider,
+        db, sub=sub, cycle=payload.cycle, provider=provider,
         idempotency_key=idempotency_key,
     )
-    intent = get_provider(payload.provider, settings).create_payment(
-        order, {"openid": payload.openid, "scene": payload.scene}
-    )
+    if order.amount_cents == 0:
+        subsvc.activate_paid_order(db, order, provider_txn_id="free")
+        payment = {
+            "provider": provider,
+            "amount_cents": 0,
+            "currency": order.currency,
+            "params": {},
+        }
+    else:
+        intent = get_provider(provider, settings).create_payment(
+            order, {"openid": payload.openid, "scene": payload.scene}
+        )
+        payment = {
+            "provider": intent.provider,
+            "amount_cents": intent.amount_cents,
+            "currency": intent.currency,
+            "params": intent.params,
+        }
     write_audit(db, actor_id=auth.account.id, action="subscription.renew", request=request,
                 target_type="subscription", target_id=sub.id,
                 meta={"order_id": order.id, "cycle": payload.cycle})
     db.commit()
     return {
         "order": _order_view(order),
-        "payment": {
-            "provider": intent.provider,
-            "amount_cents": intent.amount_cents,
-            "currency": intent.currency,
-            "params": intent.params,
-        },
+        "payment": payment,
     }
 
 

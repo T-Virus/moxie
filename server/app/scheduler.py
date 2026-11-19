@@ -497,6 +497,11 @@ def main() -> None:
     if args.once:
         print(run_once(settings))
         return
+    # 多进程/多容器下把调度侧指标并入 Redis 汇总（与 api/worker 同一口径）
+    from . import metrics
+
+    if settings.metrics_enabled:
+        metrics.configure(settings.redis_url)
     loop_forever(settings, interval=args.interval or None)
 
 

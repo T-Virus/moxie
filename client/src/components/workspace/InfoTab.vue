@@ -1164,6 +1164,28 @@ const reviewItems = computed<InfoItem[]>(() => {
   return items
 })
 
+/** 云端正文分段：本次窗口范围与已写章数；未自定义窗口时不展示，避免干扰默认黄金三章 */
+const bodyWindowText = computed(() => {
+  const options = props.run.options
+  if (!options) return ''
+  const size =
+    typeof options.body_chapters === 'number' && options.body_chapters > 0
+      ? options.body_chapters
+      : 3
+  let start = 0
+  if (typeof options.body_segment === 'number' && options.body_segment > 0) {
+    start = (options.body_segment - 1) * size + 1
+  } else if (typeof options.body_start === 'number' && options.body_start > 0) {
+    start = options.body_start
+  } else if (typeof options.body_chapters === 'number' && options.body_chapters > 0) {
+    start = 1
+  }
+  if (!start) return ''
+  const written = props.run.chapters?.length ?? props.run.summary?.chapters_count ?? 0
+  const range = size === 1 ? `第 ${start} 章` : `第 ${start}–${start + size - 1} 章`
+  return written > 0 ? `${range}（已写 ${written} 章）` : range
+})
+
 /** 核心统计条：只保留数量类指标 */
 const statItems = computed<InfoItem[]>(() => {
   const items: InfoItem[] = [
@@ -1173,6 +1195,9 @@ const statItems = computed<InfoItem[]>(() => {
     { label: '势力', value: factionCount.value },
     { label: '道具', value: itemCount.value },
   ]
+  if (bodyWindowText.value) {
+    items.push({ label: '正文范围', value: bodyWindowText.value })
+  }
   if (props.run.mode === 'reference') {
     items.push({ label: '参考分段', value: segmentsCount.value })
   }

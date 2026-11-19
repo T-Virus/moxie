@@ -79,3 +79,48 @@ def account(client):
 @pytest.fixture
 def headers(account):
     return {"Authorization": f"Bearer {account['access_token']}"}
+
+
+@pytest.fixture
+def pg_settings(settings):
+    """真实 Postgres 集成测试配置：未提供 MOXIE_TEST_POSTGRES_URL 时自动跳过。
+
+    每次测试前 drop_all，保证测试间互不影响；CI 用独立库 moxie_test。
+    """
+    url = os.getenv("MOXIE_TEST_POSTGRES_URL", "").strip()
+    if not url:
+        pytest.skip("未配置 MOXIE_TEST_POSTGRES_URL，跳过 Postgres 集成测试")
+    from app.db import Database
+    from app.models import Base
+
+    pg = settings.model_copy(update={"database_url": url, "auto_create_tables": True})
+    db = Database(pg)
+    Base.metadata.drop_all(db.engine)
+    db.dispose()
+    return pg
+
+
+@pytest.fixture
+def pg_app(pg_settings):
+    return create_app(pg_settings)
+
+
+@pytest.fixture
+def pg_client(pg_app):
+    with TestClient(pg_app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def pg_account(pg_client):
+    response = pg_client.post(
+        "/v1/auth/register",
+        json={"email": "pg-tester@example.com", "password": "password123"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.fixture
+def pg_headers(pg_account):
+    return {"Authorization": f"Bearer {pg_account['access_token']}"}

@@ -50,6 +50,11 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '订阅与权益', permission: 'subscriptions:read' },
       },
       {
+        path: 'plans',
+        component: () => import('./views/Plans.vue'),
+        meta: { title: '套餐管理', permission: 'subscriptions:read' },
+      },
+      {
         path: 'orders',
         component: () => import('./views/Orders.vue'),
         meta: { title: '订单与退款', permission: 'orders:read' },

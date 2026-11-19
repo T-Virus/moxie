@@ -320,5 +320,5 @@ $env:CORS_ALLOW_ORIGINS="http://127.0.0.1:5191,http://localhost:5191"
 ### 套餐显示
 
 - 公开列表三档：`experience / creator / professional`，客户端 `ALLOWED_PLAN_CODES` 只保留这三档，避免服务端新增/下架项导致整页空白；
-- 价格单位是分：`990 → ¥9.9`、`2990 → ¥29.9`、`6990 → ¥69.9`；
+- 价格单位是分：`0 → 免费`、`100 → ¥1`、`600 → ¥6`；
 - `books_month` 从 `entitlements` 读取，与订阅/额度接口一致（专业版 15 本）。

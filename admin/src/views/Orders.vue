@@ -190,7 +190,8 @@ async function submitDecision() {
 
 function orderActions(row: OrderRow): RowAction[] {
   const actions: RowAction[] = [{ label: '详情', run: () => openOrder(row) }]
-  if (canRefund.value && row.status === 'paid') {
+  // 免费订单（金额 0）没有可退金额，不提供退款入口
+  if (canRefund.value && row.status === 'paid' && row.amount_cents > 0) {
     actions.push({ label: '退款', tone: 'danger', run: () => openDecision('direct', { order: row }) })
   }
   return actions
@@ -416,7 +417,7 @@ function refundActions(item: RefundRow): RowAction[] {
     </template>
     <template #footer>
       <button class="btn ghost sm" @click="orderOpen = false">关闭</button>
-      <button v-if="canRefund && currentOrder && currentOrder.status === 'paid'" class="btn danger-ghost sm"
+      <button v-if="canRefund && currentOrder && currentOrder.status === 'paid' && currentOrder.amount_cents > 0" class="btn danger-ghost sm"
         @click="openDecision('direct', { order: currentOrder }); orderOpen = false">直接退款</button>
     </template>
   </Modal>

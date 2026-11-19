@@ -1281,6 +1281,41 @@ def test_options_validation_rejects_invalid_chapters(client, headers):
     assert response.status_code == 422
 
 
+def test_body_window_options_are_persisted(client, headers):
+    """云端分段调度：起始章与窗口章数必须被 schema 接受并原样落到 run.meta.options。"""
+    subscribe(client, headers)
+    created = _create(
+        client,
+        headers,
+        length="long",
+        options={"body_start": 4, "body_chapters": 2},
+    )
+    assert created.status_code == 201, created.text
+    run_id = created.json()["run_id"]
+    detail = client.get(f"/v1/agent-runs/{run_id}", headers=headers).json()
+    assert detail["options"]["body_start"] == 4
+    assert detail["options"]["body_chapters"] == 2
+
+
+def test_body_window_options_reject_conflicting_and_invalid(client, headers):
+    subscribe(client, headers)
+    conflicting = _create(
+        client,
+        headers,
+        length="long",
+        options={"body_start": 2, "body_segment": 1},
+    )
+    assert conflicting.status_code == 422
+
+    invalid_size = _create(
+        client,
+        headers,
+        length="long",
+        options={"body_chapters": 0},
+    )
+    assert invalid_size.status_code == 422
+
+
 def test_adaptation_options_reach_skill_payload():
     from types import SimpleNamespace
 

@@ -67,8 +67,8 @@
           </div>
           <p class="plan__desc">{{ planDesc(plan) }}</p>
           <p class="plan__price">
-            <strong>{{ formatMoney(plan.price_month_cents, plan.currency) }}</strong>
-            <span>/ 月</span>
+            <strong>{{ isFree(plan) ? '免费' : formatMoney(plan.price_month_cents, plan.currency) }}</strong>
+            <span v-if="!isFree(plan)">/ 月</span>
           </p>
           <p v-if="plan.price_year_cents > 0" class="plan__year">
             {{ formatMoney(plan.price_year_cents, plan.currency) }}/年（≈{{
@@ -87,10 +87,18 @@
             type="button"
             class="btn plan__buy"
             :class="{ 'btn--brand': !isCurrent(plan) }"
-            :disabled="isCurrent(plan) || buyingCode === plan.code || !provider"
+            :disabled="isCurrent(plan) || buyingCode === plan.code || (!provider && !isFree(plan))"
             @click="buy(plan)"
           >
-            {{ isCurrent(plan) ? '使用中' : buyingCode === plan.code ? '处理中…' : '立即购买' }}
+            {{
+              isCurrent(plan)
+                ? '使用中'
+                : buyingCode === plan.code
+                  ? '处理中…'
+                  : isFree(plan)
+                    ? '立即开通'
+                    : '立即购买'
+            }}
           </button>
         </article>
       </div>
@@ -203,12 +211,17 @@ function isCurrent(plan: Plan): boolean {
   return subscription.value?.plan.code === plan.code
 }
 
+/** 免费套餐：无需支付渠道，下单后服务端直接激活 */
+function isFree(plan: Plan): boolean {
+  return plan.price_month_cents <= 0
+}
+
 function planDesc(plan: Plan): string {
   if (plan.description) return plan.description
   const map: Record<string, string> = {
     experience: '先跑通一本书的完整流程，适合初次尝试',
-    creator: '适合稳定日更的个人创作者，兼顾产量与成本',
-    professional: '适合多书并行的全职作者，重视设定一致性与质量校验',
+    creator: '适合个人创作者，兼顾产量与成本',
+    professional: '适合多书全职创作者，重视设定一致性',
   }
   return map[plan.code] || '按需选择的创作方案'
 }
@@ -366,7 +379,7 @@ async function buy(plan: Plan): Promise<void> {
     return
   }
 
-  if (!provider.value) {
+  if (!provider.value && !isFree(plan)) {
     showToast('当前没有可用的支付渠道，请稍后再试')
     return
   }
@@ -377,10 +390,12 @@ async function buy(plan: Plan): Promise<void> {
     subscription.value = result.subscription ? { plan: result.subscription.plan } : null
     selectedCode.value = plan.code
     sessionStorage.removeItem(PLAN_INTENT_KEY)
+    const free = isFree(plan) || result.payment?.amount_cents === 0
+    await loadCurrentSubscription()
     showToast(
-      result.payment
-        ? `已创建「${plan.name}」订单，请完成支付`
-        : `已开通「${plan.name}」月付，额度将在下次刷新后更新`,
+      free
+        ? `已开通「${plan.name}」`
+        : `已创建「${plan.name}」订单，请完成支付`,
     )
   } catch (err) {
     showToast(errorText(err))

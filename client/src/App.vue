@@ -22,6 +22,18 @@
         <div class="topbar__spacer" />
 
         <div v-if="session.account" class="topbar__user">
+          <RouterLink
+            to="/notifications"
+            class="bell"
+            :aria-label="unreadCount > 0 ? `消息中心，${unreadCount} 条未读` : '消息中心'"
+            :title="unreadCount > 0 ? `消息中心（${unreadCount} 条未读）` : '消息中心'"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
+              <path d="M10.5 19a1.7 1.7 0 0 0 3 0" />
+            </svg>
+            <span v-if="unreadCount > 0" class="bell__badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+          </RouterLink>
           <PushToggle />
           <div ref="userMenu" class="user-menu">
             <button
@@ -68,6 +80,13 @@ import { useRoute, useRouter } from 'vue-router'
 import PushToggle from '@/components/PushToggle.vue'
 import { logout } from '@/services/authApi'
 import { refreshSession, resetSession, session } from '@/stores/session'
+import {
+  refreshUnreadCount,
+  setUnreadCount,
+  startUnreadPolling,
+  stopUnreadPolling,
+  unreadCount,
+} from '@/stores/notifications'
 import brandIcon from '@/assets/brand-icon.png'
 
 const navItems = computed(() =>
@@ -104,22 +123,61 @@ function onDocumentClick(event: MouseEvent): void {
 
 async function onLogout(): Promise<void> {
   userMenuOpen.value = false
+  stopUnreadPolling()
+  setUnreadCount(0)
   await logout()
   resetSession()
   router.push('/')
 }
 
 onMounted(() => {
-  void refreshSession()
+  void refreshSession().then(() => {
+    if (session.account) {
+      void refreshUnreadCount()
+      startUnreadPolling()
+    }
+  })
   document.addEventListener('click', onDocumentClick)
 })
 
 onUnmounted(() => {
+  stopUnreadPolling()
   document.removeEventListener('click', onDocumentClick)
 })
 </script>
 
 <style scoped>
+.bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--color-text-2);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.bell:hover {
+  background: var(--color-bg-soft);
+  color: var(--color-text);
+}
+.bell__badge {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
 .user-menu {
   position: relative;
 }

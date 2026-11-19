@@ -148,6 +148,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redis_client, backend = build_redis(settings)
         if backend != "redis":
             logger.warning("Redis 使用 fakeredis（队列不可用，限流仅进程内有效）")
+        # 多 uvicorn worker / 多 worker 容器下，指标经 Redis 汇总后再暴露，
+        # 避免 Prometheus 每次抓取命中不同进程导致计数回退
+        if settings.metrics_enabled:
+            from . import metrics as metrics_mod
+
+            metrics_mod.configure(settings.redis_url if backend == "redis" else None)
 
         app.state.db = db
         app.state.redis = redis_client
@@ -183,6 +189,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if scheduler_task is not None:
                 scheduler_task.cancel()
             await app.state.http_client.aclose()
+            try:
+                from . import metrics as metrics_mod
+
+                metrics_mod.disable()
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 redis_client.close()
             except Exception:  # noqa: BLE001

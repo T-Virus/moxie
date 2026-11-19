@@ -35,6 +35,9 @@ scrape_configs:
         labels:
           instance_role: api
 
+  # worker 侧指标已通过 Redis 汇总并入 api /metrics（moxie-worker 不再单独抓取：
+  # compose 多副本共享同一服务名，静态 target 会解析出多个副本、重复累加同一份
+  # 全局口径）。worker 容器仍保留 http://worker:9101/metrics 供排障直连查看。
   - job_name: moxie-local
     metrics_path: /metrics
     static_configs:

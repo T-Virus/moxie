@@ -16,6 +16,7 @@
 | --- | --- | --- |
 | `server-tests` | Python 3.12，SQLite + fakeredis，`pytest -m "not live"`，JUnit XML + coverage XML，覆盖率低于 70% 失败（本地实测 79.44%） | 失败输出 + `server-pytest-report` / `server-coverage` |
 | `migration-check` | 临时 SQLite `alembic upgrade head` + `alembic check`（迁移与模型零漂移） | 步骤日志 |
+| `postgres-integration` | Postgres 16 service：`alembic upgrade head` + `alembic check` 在真实 PG 上执行，并跑 `pytest -m postgres`（SKIP LOCKED 租约回收、额度并发预占） | 步骤日志 |
 | `web-apps` | Node 22，matrix=`client,admin`：`npm ci` → typecheck → lint → test → build，归档 `dist` | 按 app 区分步骤 + `<app>-dist` 制品 |
 | `online-e2e` | Playwright 在线主链：注册→订阅→创作运行→顶栏用户下拉菜单→账户设置六 tab（订阅额度/BYOK/数据导出/退款申请/注销申请）→admin 立即清除；client/server/admin 三端联跑 | `online-e2e-report` 制品 |
 | `dependency-audit` | `pip-audit -r server/requirements.txt --strict` + 三端 `npm audit --omit=dev --audit-level=high` | 步骤日志 |
@@ -145,6 +146,11 @@ python ops/backup/sqlite_drill.py
 - `SLO.md`：试点期 SLI/目标、错误预算、端到端 trace-id 串联与告警响应级别。
 - 浏览器请求带 `X-Trace-Id` / W3C `Traceparent`，服务端回写并写入结构化日志；前端错误上报带 `trace_id`，以 `source_trace_id` 落日志，便于跨端串联。
 - 指标名已与 `server/app/metrics.py` 和实际 `/metrics` 输出核对（详见 `ops/monitoring/README.md`）。
+- 多进程聚合：api（多 uvicorn worker）、worker（多副本容器）与 scheduler 的计数按 10s 增量写入 Redis
+  （`moxie:metrics:counters` / `moxie:metrics:histograms`），`/metrics` 渲染「Redis 汇总 + 本进程未刷新增量」，
+  避免反代/负载均衡下抓取命中不同实例导致曲线回退。worker 入口改为 `python -m app.worker.rq_worker`，
+  容器内额外提供 `:9101/metrics` 供排障直连；Prometheus 默认只抓 api（worker 指标已并入全局口径，
+  避免多副本同服务名被重复累加）。
 
 ## 6. 安全与依赖报告
 

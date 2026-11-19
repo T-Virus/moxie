@@ -82,6 +82,8 @@ from ..schemas import (
     AdminNotificationRequest,
     AdminNotificationsResponse,
     AdminOrdersResponse,
+    AdminPlanUpdate,
+    AdminPlanView,
     AdminPlansResponse,
     AdminPresetDeleteResponse,
     AdminPresetListResponse,
@@ -243,6 +245,29 @@ def expire_due(
 
 
 # ---- 套餐管理 ---------------------------------------------------------------
+def _admin_plan_view(db: Session, plan: Plan) -> dict:
+    entitlements = subsvc.get_entitlements(db, plan.id)
+    return {
+        "code": plan.code,
+        "name": plan.name,
+        "price_month_cents": plan.price_month_cents,
+        "price_year_cents": plan.price_year_cents,
+        "currency": plan.currency,
+        "features": plan.features,
+        "active": plan.active,
+        "status": "上架" if plan.active else "已下架",
+        "entitlements": [
+            {
+                "key": e.key,
+                "limit": e.limit_value,
+                "unit": e.unit,
+                "reset_period": e.reset_period,
+            }
+            for e in entitlements.values()
+        ],
+    }
+
+
 @admin_router.get("/plans", response_model=AdminPlansResponse)
 def admin_list_plans(
     _staff: Account = Depends(require_staff),
@@ -252,31 +277,59 @@ def admin_list_plans(
     plans = db.scalars(
         select(Plan).order_by(Plan.active.desc(), Plan.price_month_cents.asc(), Plan.id.asc())
     ).all()
-    items = []
-    for plan in plans:
-        entitlements = subsvc.get_entitlements(db, plan.id)
-        items.append(
-            {
-                "code": plan.code,
-                "name": plan.name,
-                "price_month_cents": plan.price_month_cents,
-                "price_year_cents": plan.price_year_cents,
-                "currency": plan.currency,
-                "features": plan.features,
-                "active": plan.active,
-                "status": "上架" if plan.active else "已下架",
-                "entitlements": [
-                    {
-                        "key": e.key,
-                        "limit": e.limit_value,
-                        "unit": e.unit,
-                        "reset_period": e.reset_period,
-                    }
-                    for e in entitlements.values()
-                ],
-            }
-        )
-    return {"plans": items}
+    return {"plans": [_admin_plan_view(db, plan) for plan in plans]}
+
+
+@admin_router.patch("/plans/{plan_code}", response_model=AdminPlanView)
+def admin_update_plan(
+    plan_code: str,
+    payload: AdminPlanUpdate,
+    request: Request,
+    admin: Account = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """后台调整套餐价格 / 名称 / 上下架与权益上限；改动即时对公开套餐页生效。"""
+    plan = db.scalar(select(Plan).where(Plan.code == plan_code))
+    if plan is None:
+        raise ApiError(404, "plan_not_found", f"套餐不存在：{plan_code}")
+
+    changes: dict[str, object] = {}
+    if payload.name is not None:
+        plan.name = payload.name.strip()
+        changes["name"] = plan.name
+    if payload.price_month_cents is not None:
+        plan.price_month_cents = int(payload.price_month_cents)
+        changes["price_month_cents"] = plan.price_month_cents
+    if payload.price_year_cents is not None:
+        plan.price_year_cents = int(payload.price_year_cents)
+        changes["price_year_cents"] = plan.price_year_cents
+    if payload.active is not None:
+        plan.active = bool(payload.active)
+        changes["active"] = plan.active
+    if payload.entitlements:
+        current = subsvc.get_entitlements(db, plan.id)
+        unknown = sorted(set(payload.entitlements) - set(current))
+        if unknown:
+            raise ApiError(422, "unknown_entitlement", f"未知权益项：{', '.join(unknown)}")
+        for key, value in payload.entitlements.items():
+            limit = int(value)
+            if limit < -1 or limit > 1_000_000_000:
+                raise ApiError(422, "invalid_entitlement_limit", f"{key} 的上限必须是 -1 或非负整数")
+            current[key].limit_value = limit
+            changes[f"entitlements.{key}"] = limit
+
+    write_audit(
+        db,
+        actor_id=admin.id,
+        action="plan.update",
+        request=request,
+        target_type="plan",
+        target_id=plan.code,
+        meta=changes,
+    )
+    db.commit()
+    db.refresh(plan)
+    return _admin_plan_view(db, plan)
 
 
 # ---- 用户管理 ---------------------------------------------------------------

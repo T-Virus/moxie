@@ -22,8 +22,9 @@ PLAN_SEEDS: list[dict] = [
     {
         "code": "experience",
         "name": "体验版",
-        "price_month_cents": 990,
-        "price_year_cents": 9900,
+        # 免费套餐：价格 0，下单时跳过支付渠道直接激活
+        "price_month_cents": 0,
+        "price_year_cents": 0,
         "features": {"byok": True, "managed": True, "support": "community"},
         "entitlements": {
             "books_month": (1, "book"),
@@ -38,8 +39,8 @@ PLAN_SEEDS: list[dict] = [
     {
         "code": "creator",
         "name": "创作版",
-        "price_month_cents": 2990,
-        "price_year_cents": 29900,
+        "price_month_cents": 100,
+        "price_year_cents": 1000,
         "features": {"byok": True, "managed": True, "support": "community"},
         "entitlements": {
             "books_month": (5, "book"),
@@ -54,8 +55,8 @@ PLAN_SEEDS: list[dict] = [
     {
         "code": "professional",
         "name": "专业版",
-        "price_month_cents": 6990,
-        "price_year_cents": 69900,
+        "price_month_cents": 600,
+        "price_year_cents": 6000,
         "features": {"byok": True, "managed": True, "support": "priority"},
         "entitlements": {
             "books_month": (15, "book"),
@@ -116,60 +117,38 @@ def ensure_credit_packs(session: Session, validity_days: int = 365) -> None:
 
 
 def ensure_plans(session: Session) -> None:
-    """幂等同步套餐：按 code 更新，旧套餐下架但不删除。"""
+    """幂等初始化套餐：只补缺失项，不覆盖后台已修改的价格 / 权益 / 上下架状态。
+
+    套餐的后续维护入口是管理端「套餐管理」（PATCH /v1/admin/plans/{code}）；
+    若启动时仍按种子覆盖，运营改价会在下次重启被回滚。
+    """
     _acquire_seed_lock(session)
     for spec in PLAN_SEEDS:
         existing = session.scalar(select(Plan).where(Plan.code == spec["code"]))
-        if existing is None:
-            plan = Plan(
-                code=spec["code"],
-                name=spec["name"],
-                price_month_cents=spec["price_month_cents"],
-                price_year_cents=spec["price_year_cents"],
-                currency="CNY",
-                features=spec["features"],
-                active=True,
-            )
-            session.add(plan)
-            session.flush()
-        else:
-            plan = existing
-            plan.name = spec["name"]
-            plan.price_month_cents = spec["price_month_cents"]
-            plan.price_year_cents = spec["price_year_cents"]
-            plan.currency = "CNY"
-            plan.features = spec["features"]
-            plan.active = True
-
-        current = {
-            row.key: row
-            for row in session.scalars(
-                select(Entitlement).where(Entitlement.plan_id == plan.id)
-            ).all()
-        }
+        if existing is not None:
+            continue
+        plan = Plan(
+            code=spec["code"],
+            name=spec["name"],
+            price_month_cents=spec["price_month_cents"],
+            price_year_cents=spec["price_year_cents"],
+            currency="CNY",
+            features=spec["features"],
+            active=True,
+        )
+        session.add(plan)
+        session.flush()
         for key, (limit_value, unit) in spec["entitlements"].items():
-            ent = current.pop(key, None)
-            if ent is None:
-                session.add(
-                    Entitlement(
-                        plan_id=plan.id,
-                        key=key,
-                        limit_value=limit_value,
-                        unit=unit,
-                        reset_period="month",
-                    )
+            session.add(
+                Entitlement(
+                    plan_id=plan.id,
+                    key=key,
+                    limit_value=limit_value,
+                    unit=unit,
+                    reset_period="month",
                 )
-            else:
-                ent.limit_value = limit_value
-                ent.unit = unit
-                ent.reset_period = "month"
-        for stale in current.values():
-            session.delete(stale)
-
-        seeded_codes = {spec["code"] for spec in PLAN_SEEDS}
-        for plan in session.scalars(select(Plan).where(Plan.code.notin_(seeded_codes))).all():
-            plan.active = False
-        session.commit()
+            )
+    session.commit()
 
 
 def seed_presets(session: Session, *, only_if_empty: bool = False) -> dict:

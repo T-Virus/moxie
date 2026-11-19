@@ -47,9 +47,12 @@ export async function subscribePlan(
   cycle: 'month' | 'year' = 'month',
   provider = '',
 ): Promise<SubscribeResult> {
+  const body: Record<string, string> = { plan_code: planCode, cycle }
+  // 免费套餐不传渠道：服务端跳过支付直接激活；付费套餐必须显式传
+  if (provider) body.provider = provider
   return apiFetch<SubscribeResult>('/subscriptions', {
     method: 'POST',
-    body: JSON.stringify({ plan_code: planCode, cycle, provider }),
+    body: JSON.stringify(body),
   })
 }
 
