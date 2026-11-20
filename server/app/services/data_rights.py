@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, inspect, or_, select, update
+from sqlalchemy import inspect, or_, select, update
 
 from ..config import Settings
 from ..db import utcnow
@@ -43,9 +43,6 @@ _MASK_FIELDS: dict[str, set[str]] = {
     "web_push_subscriptions": {"p256dh", "auth"},
     "licenses": {"signature"},
 }
-_TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".json", ".csv", ".log"}
-
-
 def _jsonable(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
@@ -443,9 +440,3 @@ def purge_due_deletions(
             session.rollback()
             logger.exception("注销到期清除失败 account=%s", row.account_id)
     return done
-
-
-def pending_deletion_count(session) -> int:
-    return int(session.scalar(select(func.count()).select_from(AccountDeletionRequest).where(
-        AccountDeletionRequest.status == "pending"
-    )) or 0)

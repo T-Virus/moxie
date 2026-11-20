@@ -12,7 +12,7 @@
 - [x] BYOK 密钥只允许通过 `X-BYOK-Key` 请求头传入；任务参数中出现 `secret` 字段直接 422 拒绝（`server/app/runners/decompose.py`）。
 - [x] 在线端 BYOK Key 仅存 `sessionStorage`（`mx_byok_key`），只在 `withByok` 请求注入请求头；不写 `localStorage`、不入 Vue store、不随业务参数落库（`client/src/services/byok.ts`）。
 - [x] 支付回调日志与订单 payload 字段做脱敏（`key/secret/token/sign/password/cert/authorization` → `[redacted]`，`server/app/services/orders.py`）。
-- [x] 桌面端云端 token 使用系统 DPAPI（Windows）/ AES-GCM（非 Windows）加密存储，不写明文配置（`src/cloud.py`）。
+- [ ] 桌面端云端 token 加密存储尚未落地（此前记录的 `src/cloud.py` 不存在）；接入云端模式时需补 DPAPI（Windows）/ AES-GCM（非 Windows）存储，不写明文配置。
 - [x] 生产启动 fail-fast：默认占位符/弱口令由 `app/main.py` 的 `Settings.is_production` 闸门拦截，
       `mock`/`fake` 渠道生产禁注册（`payments/__init__.py`），License 私钥、载荷签名密钥生产必填。
 - [x] **已处理（2026-11-17）**：`server/requirements.txt` 每个依赖钉主版本上界（如 `>=2.0,<3`），
@@ -68,8 +68,8 @@
 
 ## 7. 依赖与供应链
 
-- [x] `pip-audit -r server/requirements.txt`：**无已知漏洞**（42 个依赖，报告 `ops/reports/pip-audit-report.json`）。
-- [x] `npm audit --omit=dev`（`web/`）：**0 漏洞**（prod 95 个依赖，报告 `ops/reports/npm-audit-report.json`）。
+- [x] `pip-audit -r server/requirements.txt`：**无已知漏洞**（42 个依赖；报告本地生成，不入库）。
+- [x] `npm audit --omit=dev`（`web/`）：**0 漏洞**（prod 95 个依赖；报告本地生成，不入库）。
 - [ ] 未接入自动化定时审计；建议增加每周 `pip-audit` / `npm audit` 的 scheduled workflow，并在高危时失败。
 - [ ] 未启用 Dependabot/Renovate；建议开启以跟进安全更新。
 

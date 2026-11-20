@@ -31,10 +31,6 @@ def cents_from(amount: Any) -> int:
         raise ApiError(400, "invalid_amount", "回调金额格式错误")
 
 
-def sha256_hex(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
-
-
 def hmac_hex(secret: str, message: bytes) -> str:
     return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 

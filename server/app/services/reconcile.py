@@ -14,9 +14,6 @@ from ..models import Order, ReconcileReport
 from .audit import write_audit
 
 
-DEFAULT_ITEM_TYPES = ("amount_mismatch", "channel_only", "local_only", "duplicate_payment")
-
-
 def reconcile(
     session: Session,
     *,

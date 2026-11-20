@@ -1076,13 +1076,6 @@ export async function deleteRunCover(runId: string): Promise<{ deleted: boolean 
   })
 }
 
-export async function downloadArtifact(runId: string, name: string): Promise<File> {
-  return apiDownload(
-    `/agent-runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(name)}`,
-    name,
-  )
-}
-
 /** 整本交付包：正文/章纲/设定/体检/AIGC 声明打包 zip */
 export async function downloadExportBundle(runId: string, title?: string): Promise<File> {
   const fallback = `${(title || runId).trim() || runId}-交付包.zip`

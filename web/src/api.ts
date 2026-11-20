@@ -216,18 +216,6 @@ export const api = {
       { method: 'PUT', body: JSON.stringify({ key, text }) }),
 
   /* ---------------- 敏感词 ---------------- */
-  getSentinelWords: () => request<{ words: SentinelWord[] }>('/api/sentinel/words'),
-  /* words 接受字符串数组，或一行一个（可带「|级别|类别」）的文本 */
-  putSentinelWords: (words: string[] | string) =>
-    request<{ ok: boolean; count: number }>('/api/sentinel/words', {
-      method: 'PUT',
-      body: JSON.stringify({
-        words: Array.isArray(words)
-          ? words
-          : words.split('\n').map(s => s.trim()).filter(Boolean)
-            .map(line => { const p = line.split('|'); return { word: p[0], level: p[1] || '中', category: p[2] || '通用' } }),
-      }),
-    }),
   /* text=直接扫文本；book+no=扫单章；只给 book=扫全书 */
   sentinelScan: (body: { text?: string; book?: string; no?: number }) =>
     post<SentinelResult>('/api/sentinel/scan', body),
@@ -245,15 +233,6 @@ export const api = {
       '&no=' + no + '&file=' + encodeURIComponent(file)),
   rollbackHistory: (book: string, no: number, file: string) =>
     post<{ ok: boolean }>('/api/history/rollback', { book, no, file }),
-
-  /* ---------------- 跨章记忆 ---------------- */
-  getMemoryStatus: (book: string) =>
-    request<MemoryStatus>('/api/memory/status?book=' + encodeURIComponent(book)),
-  /* q 留空 + chapter_no 时后端自动用该章大纲当检索词（预览「生成这章会拿到哪些前文」） */
-  memorySearch: (book: string, q = '', chapterNo = 0) =>
-    request<{ hits: MemoryHit[] }>(
-      '/api/memory/search?book=' + encodeURIComponent(book) +
-      '&q=' + encodeURIComponent(q) + (chapterNo ? '&chapter_no=' + chapterNo : '')),
 
   /* ---------------- 全书体检 ---------------- */
   reviewBatchRun: (body: { book: string; incremental?: boolean; checks?: string[];
@@ -323,7 +302,6 @@ export interface PromptItem {
   key: string; label: string; stage: string; default: string; override: string
   effective: string; overridden: boolean; editable: boolean; note: string
 }
-export interface SentinelWord { word: string; level: string; category: string }
 export interface SentinelHit {
   word: string; level: string; category: string; count: number
   /* 命中样例：span=[起,止] 下标；context=带【】标注的上下文片段 */
@@ -341,11 +319,6 @@ export interface HistoryVersion {
 export interface HistoryList {
   versions: HistoryVersion[]
   current: { chars: number; preview: string } | null
-}
-export interface MemoryStatus { chapters: number; with_text: number; nouns: number; built_at: number }
-export interface MemoryHit {
-  no: number; title: string; score: number; matched_nouns: string[]
-  summary: string; head: string; tail: string; chars: number
 }
 export interface BatchChapter {
   no: number; chars?: number; n_issues?: number; n_high?: number; theme?: string

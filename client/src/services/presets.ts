@@ -42,8 +42,3 @@ export async function createPreset(
     body: JSON.stringify(payload),
   })
 }
-
-/** 删除当前用户自己的自定义预设。 */
-export async function deletePreset(id: number): Promise<{ deleted: boolean; id: number }> {
-  return apiFetch<{ deleted: boolean; id: number }>(`/presets/${id}`, { method: 'DELETE' })
-}

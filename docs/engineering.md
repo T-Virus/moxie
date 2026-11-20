@@ -155,6 +155,7 @@ python ops/backup/sqlite_drill.py
 ## 6. 安全与依赖报告
 
 ```bash
+# 报告为本地生成物，不入库
 python -m pip_audit -r server/requirements.txt --format json --output ops/reports/pip-audit-report.json
 cd web && npm audit --omit=dev --json > ../ops/reports/npm-audit-report.json
 ```
@@ -186,11 +187,10 @@ e2e/                            Playwright 配置、临时服务启动器、6 �
 ops/loadtest/                   Locust / k6 / 本地一键压测 / 实测结果
 ops/backup/                     Postgres / MinIO / SQLite 演练与恢复文档
 ops/monitoring/                 Prometheus 抓取 + 告警规则 + SLO + Grafana 看板
-ops/reports/                    依赖审计报告、压测 CSV
+ops/reports/                    压测报告（本地生成，原始 CSV 不入库）
 docs/security-checklist.md      安全核对项与待办
 docs/环境配置治理.md            dev/staging/prod 配置基线、密钥清单与回滚约定
 docs/法务与SLA交付包-2026-11.md 用户协议 / 隐私 / AIGC / 授权链 / 退款发票 / 子处理者 / DPA / 试点 SLA
-docs/演进记录-2026-11-19-第十七批.md 本批八项能力与 UI 反馈调整的完整落地记录
 docs/engineering.md             本文档
 ```
 

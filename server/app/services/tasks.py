@@ -286,10 +286,6 @@ _RUNNERS: dict[str, TaskRunner] = {
 }
 
 
-def register_runner(task_type: str, runner: TaskRunner) -> None:
-    _RUNNERS[task_type] = runner
-
-
 def get_runner(task_type: str) -> TaskRunner:
     runner = _RUNNERS.get(task_type)
     if runner is None:

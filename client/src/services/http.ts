@@ -50,10 +50,6 @@ export function friendlyMessage(status: number): string {
   return FRIENDLY_BY_STATUS[status] || '请求失败，请稍后重试'
 }
 
-export function isNetworkError(err: unknown): boolean {
-  return err instanceof TypeError
-}
-
 export function getAccessToken(): string {
   return sessionStorage.getItem(ACCESS_KEY) || ''
 }

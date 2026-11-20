@@ -62,7 +62,7 @@
         {"k":"language","l":"语言与地区","t":"str","p":"N:meta.language","s":"new","r":"选填","n":"简体中文 / 繁体 / 英文"},
         {"k":"tags","l":"全局标签","t":"str[]","p":"N:meta.tags","s":"new","r":"选填","n":"跨模块检索标签"},
         {"k":"revision_note","l":"修订说明","t":"str","p":"N:meta.revision_note","s":"new","r":"选填","n":"本版改了什么、为什么改"},
-        {"k":"rights_status","l":"版权与合规状态","t":"enum:自有|已授权|待确认|不可商用","p":"N:meta.rights_status","s":"new","r":"必填","n":"与商业计划书的合规闸门对齐"}
+        {"k":"rights_status","l":"版权与合规状态","t":"enum:自有|已授权|待确认|不可商用","p":"N:meta.rights_status","s":"new","r":"必填","n":"与合规闸门对齐"}
       ]
     },
     {
@@ -400,14 +400,14 @@
         {"k":"outline_export.sections","l":"导出章节清单","t":"str[]","p":"N:delivery.outline_export.sections","s":"new","r":"选填","n":"可选要导出的模块，默认全部"},
         {"k":"pitch_pack","l":"投稿包","t":"obj","p":"N:delivery.pitch_pack","s":"new","r":"选填","n":"大纲＋人物小传＋前三章＋卖点一页纸"},
         {"k":"relationship_graph_image","l":"人物关系图图片","t":"str","p":"N:delivery.relationship_graph_image","s":"new","r":"选填","n":"SVG / PNG，随投稿附上"},
-        {"k":"short_drama_breakdown","l":"短剧分集大纲","t":"obj[]","p":"N:delivery.short_drama_breakdown","s":"new","r":"选填","n":"商业计划书列为待补：episode / beat / chapters / cliffhanger"},
+        {"k":"short_drama_breakdown","l":"短剧分集大纲","t":"obj[]","p":"N:delivery.short_drama_breakdown","s":"new","r":"选填","n":"规划待补：episode / beat / chapters / cliffhanger"},
         {"k":"completeness_check.missing_fields","l":"缺失字段清单","t":"obj[]","p":"N:qa.missing_fields","s":"new","r":"自动","n":"必填空值，如 payoff、chapter_function"},
         {"k":"completeness_check.unfilled_payoff","l":"未填兑现章节","t":"int[]","p":"N:qa.unfilled_payoff","s":"new","r":"自动","n":"当前 124 章"},
         {"k":"completeness_check.unrecovered","l":"未回收伏笔","t":"str[]","p":"N:qa.unrecovered","s":"new","r":"自动","n":"与 unresolved_list 同源"},
         {"k":"completeness_check.arc_missing","l":"缺弧光的主要角色","t":"str[]","p":"N:qa.arc_missing","s":"new","r":"自动","n":"主角 / 女主 / 主反派"},
         {"k":"completeness_check.no_hook","l":"无钩子章节","t":"int[]","p":"N:qa.no_hook","s":"new","r":"自动","n":""},
         {"k":"qa_score","l":"大纲完整度评分","t":"int","p":"N:qa.qa_score","s":"new","r":"自动","n":"按 7 模块加权，0~100"},
-        {"k":"export_watermark","l":"导出水印","t":"str","p":"N:delivery.export_watermark","s":"new","r":"选填","n":"用户 ID / 时间，商业计划书已规划"},
+        {"k":"export_watermark","l":"导出水印","t":"str","p":"N:delivery.export_watermark","s":"new","r":"选填","n":"用户 ID / 时间，产品规划项"},
         {"k":"version_diff","l":"版本差异","t":"obj[]","p":"N:qa.version_diff","s":"new","r":"自动","n":"两版大纲之间改了哪些字段"},
         {"k":"backup_path","l":"备份位置","t":"str","p":"N:delivery.backup_path","s":"new","r":"自动","n":"本地/云端备份路径"}
       ]

@@ -453,13 +453,6 @@ class AdminSubscriptionPatchRequest(AppModel):
     note: str = Field(min_length=2, max_length=200)
 
 
-class AdminSubscriptionAdjustRequest(AppModel):
-    plan_code: str | None = Field(default=None, max_length=64)
-    status: Literal["trialing", "active", "past_due", "paused", "canceled", "expired"] | None = None
-    extend_days: int = Field(default=0, ge=0, le=3650)
-    reason: str = Field(min_length=2, max_length=200)
-
-
 class AdminQuotaAdjustRequest(AppModel):
     metric: str = Field(min_length=2, max_length=64)
     quantity: int = Field(ge=-1000000, le=1000000)

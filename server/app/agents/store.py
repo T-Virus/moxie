@@ -43,7 +43,6 @@ ARTIFACT_NAMES = (
     "publish_pack.json",
 )
 TERMINAL_STATUSES = {"succeeded", "failed", "canceled"}
-RUN_STATUSES = {"queued", "running", "paused", "succeeded", "failed", "canceled"}
 
 
 def append_event(
@@ -174,10 +173,6 @@ def _node_rows(steps: dict[str, AgentRunStep], node_id: str) -> list[AgentRunSte
         for key, row in steps.items()
         if key == node_id or key.startswith(f"{node_id}:")
     ]
-
-
-def resume_view(run: AgentRun) -> dict:
-    return dict(run.meta or {})
 
 
 def cancel_run(

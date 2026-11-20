@@ -54,13 +54,3 @@ export async function enablePush(vapidPublicKey: string): Promise<PushSubscripti
     return null
   }
 }
-
-export async function disablePush(): Promise<boolean> {
-  const subscription = await currentPushSubscription()
-  if (!subscription) return false
-  try {
-    return await subscription.unsubscribe()
-  } catch {
-    return false
-  }
-}

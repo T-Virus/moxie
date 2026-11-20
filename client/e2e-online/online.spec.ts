@@ -165,10 +165,16 @@ test('online main chain: register → subscribe → run → export → delete �
   await expect(page).toHaveURL(/#\/overview/, { timeout: 15_000 })
 
   await page.goto(`${ADMIN}/#/account-deletions`)
-  await expect(
-    page.locator('tbody tr td:nth-child(2)', { hasText: `#${me.id}` }).first(),
-  ).toBeVisible({ timeout: 15_000 })
-  page.once('dialog', (dialog) => dialog.accept())
-  await page.getByRole('button', { name: '立即清除' }).first().click()
+  const deletionRow = page.locator('tbody tr').filter({
+    has: page.locator('td:nth-child(2)', { hasText: `#${me.id}` }),
+  })
+  await expect(deletionRow.first()).toBeVisible({ timeout: 15_000 })
+  // 操作列是「更多」下拉：先展开菜单，再点菜单项「立即清除」
+  await deletionRow.first().getByRole('button', { name: '更多' }).click()
+  await page.getByRole('button', { name: '立即清除' }).click()
+  // 应用内自定义确认框（role=alertdialog），确认按钮文本同为「立即清除」
+  const confirmDialog = page.getByRole('alertdialog')
+  await expect(confirmDialog).toBeVisible({ timeout: 15_000 })
+  await confirmDialog.getByRole('button', { name: '立即清除' }).click()
   await expect(page.getByText('账号数据已清除')).toBeVisible({ timeout: 15_000 })
 })

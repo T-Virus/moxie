@@ -38,8 +38,6 @@ TRACE_RULES: list[tuple[str, str, re.Pattern]] = [
     ("summary_tail", "段末总结式收束", re.compile(r"(?:总之|就这样|这一切)[^。]{0,20}。?$")),
     ("explain_dialogue", "解释式对话", re.compile(r"说道[：:][^。\n]{0,40}因为")),
 ]
-TRACE_KINDS = {item[0] for item in TRACE_RULES}
-
 MAX_CHAPTERS = 200
 MAX_CONTENT = 24000
 

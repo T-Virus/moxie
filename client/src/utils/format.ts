@@ -1,4 +1,4 @@
-import type { RunMode, RunStatus, StageState } from '@/types'
+import type { RunMode, RunStatus } from '@/types'
 
 export const MODE_LABEL: Record<RunMode, string> = {
   hot: '热门写作',
@@ -29,14 +29,6 @@ export const STATUS_TONE: Record<RunStatus, string> = {
   canceled: '',
 }
 
-export const STAGE_LABEL: Record<StageState, string> = {
-  pending: '待开始',
-  running: '进行中',
-  succeeded: '已完成',
-  failed: '失败',
-  skipped: '已跳过',
-}
-
 export function formatBytes(size: number): string {
   if (!size) return '0 KB'
   if (size < 1024) return `${size} B`
@@ -56,12 +48,6 @@ export function formatDateTime(iso: string | null | undefined): string {
   })
 }
 
-export function formatClock(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return '--:--:--'
-  return date.toLocaleTimeString('zh-CN', { hour12: false })
-}
-
 export function relativeTime(iso: string): string {
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return ''
@@ -70,9 +56,4 @@ export function relativeTime(iso: string): string {
   if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
   return `${Math.floor(diff / 86400000)} 天前`
-}
-
-export function clampProgress(value: number): number {
-  if (!Number.isFinite(value)) return 0
-  return Math.max(0, Math.min(100, Math.round(value)))
 }

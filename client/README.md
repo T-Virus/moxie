@@ -127,7 +127,6 @@ client/
 | `GET /v1/agent-runs/{id}/events?since=` | `streamRunEvents(...)` | `fetch` + `ReadableStream` 手写 SSE（`EventSource` 无法带 Bearer）；解析 `data:` JSON，忽略心跳；缺失时工作台降级轮询 |
 | `POST /v1/agent-runs/{id}/cancel` | `cancelRun(id)` | 工作台取消确认后调用 |
 | `POST /v1/agent-runs/{id}/resume` | `resumeRun(id, payload)` | 两种形态：`{approval:true}` 或 `{input:{chapter_no,content}}` |
-| `GET /v1/agent-runs/{id}/artifacts/{name}` | `downloadArtifact(id, name)` | 带 Authorization 拉取 Blob 后保存 |
 | `GET /v1/plans` | `fetchPlans()`（`billingApi.ts`） | 套餐卡片 |
 | `GET /v1/subscriptions/current` | `fetchCurrentSubscription()` | 404 `no_subscription` 归一化为「未订阅」 |
 | `GET /v1/entitlements` | `fetchEntitlements()` | 额度余额与进度 |

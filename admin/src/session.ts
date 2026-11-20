@@ -57,8 +57,3 @@ export function getRole(): Role | null {
   const role = getAccount()?.role
   return role === 'admin' || role === 'support' ? role : null
 }
-
-export function isExpired(now = Date.now()): boolean {
-  const session = loadSession()
-  return !session || session.expires_at <= now
-}

@@ -18,7 +18,6 @@ SYSTEM = "你是网文写手，只输出 JSON；正文要具体、有动作与�
 
 # 热门创作黄金三章篇幅：每章 2800–3200 字，服务端兜底绝不低于下限。
 GOLDEN_MIN_WORDS = 2800
-GOLDEN_MAX_WORDS = 3200
 
 PROMPT = """【技能 chapter_write】
 书名：{title}　题材：{genre}

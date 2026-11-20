@@ -13,7 +13,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-from dataclasses import dataclass
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -33,14 +32,6 @@ def b64url_decode(text: str) -> bytes:
     value = str(text or "").strip()
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode(value + padding)
-
-
-@dataclass(frozen=True)
-class StreamKey:
-    """SSE 场景下只保留派生后的密钥与 key_id。"""
-
-    key: bytes
-    key_id: str
 
 
 class PayloadCrypto:

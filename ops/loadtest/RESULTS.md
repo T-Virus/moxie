@@ -14,7 +14,7 @@
 python ops/loadtest/run_local.py --vus 10 --rate 2 --duration 30s
 ```
 
-## 结果（`ops/reports/loadtest/local_stats.csv`）
+## 结果（原始 CSV 由 `run_local.py` 本地生成，不入库）
 
 | 接口 | 请求数 | 失败 | 中位数 | 平均 | p95 | p99 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -26,7 +26,7 @@ python ops/loadtest/run_local.py --vus 10 --rate 2 --duration 30s
 | **合计** | **888** | **0** | 28 ms | 45 ms | 110 ms | 580 ms |
 
 - 吞吐：约 **31.6 req/s**（10 VU、本机回环，含 SQLite 写入）
-- 失败率：**0%**（`local_failures.csv` 为空）
+- 失败率：**0%**（失败明细为空）
 - 账号准备：10 个账号（注册 + 模拟支付订阅 + 预置任务）全部成功
 
 说明：p99 偶发 600ms 来自 SQLite 单写锁与 Python GC；SQLite 模式只用于本地/小规模验证，
